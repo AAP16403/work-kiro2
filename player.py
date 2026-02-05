@@ -15,8 +15,10 @@ class Player:
     """Player entity."""
     pos: Vec2
     hp: int = PLAYER_HP
+    shield: int = 0
     speed: float = PLAYER_SPEED
     damage: int = PLAYER_DAMAGE
     fire_rate: float = PLAYER_FIRE_RATE
     last_shot: float = 0.0
+    laser_until: float = 0.0
     current_weapon: "Weapon" = field(default=None)  # Will be set in Game.__init__

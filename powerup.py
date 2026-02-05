@@ -14,10 +14,10 @@ if TYPE_CHECKING:
 class PowerUp:
     """PowerUp entity."""
     pos: Vec2
-    kind: str  # "heal", "damage", "speed", "firerate"
+    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser"
 
 
-def apply_powerup(player: "Player", p: PowerUp):
+def apply_powerup(player: "Player", p: PowerUp, now: float):
     """Apply a powerup effect to the player."""
     if p.kind == "heal":
         player.hp = min(PLAYER_HP, player.hp + 25)
@@ -27,3 +27,7 @@ def apply_powerup(player: "Player", p: PowerUp):
         player.speed += 18
     elif p.kind == "firerate":
         player.fire_rate = max(0.12, player.fire_rate - 0.04)
+    elif p.kind == "shield":
+        player.shield = min(120, player.shield + 45)
+    elif p.kind == "laser":
+        player.laser_until = max(player.laser_until, now + 8.0)

@@ -4,8 +4,9 @@ import random
 from dataclasses import dataclass, field
 from typing import List
 
-from config import ROOM_RADIUS
+import config
 from enemy import Enemy
+from hazards import Trap, LaserBeam
 from projectile import Projectile
 from powerup import PowerUp
 from utils import Vec2, random_spawn_edge
@@ -19,6 +20,8 @@ class GameState:
     enemies: List[Enemy] = field(default_factory=list)
     projectiles: List[Projectile] = field(default_factory=list)
     powerups: List[PowerUp] = field(default_factory=list)
+    traps: List[Trap] = field(default_factory=list)
+    lasers: List[LaserBeam] = field(default_factory=list)
     wave_active: bool = False
     last_wave_clear: float = 0.0
     shake: float = 0.0
@@ -38,9 +41,12 @@ def spawn_wave(state: GameState, center: Vec2):
     for _ in range(count):
         behavior = _get_weighted_behavior(state.wave)
         hp, speed, attack_mult = _get_enemy_stats(behavior, state.wave)
-        pos = random_spawn_edge(center, ROOM_RADIUS)
+        pos = random_spawn_edge(center, config.ROOM_RADIUS)
         e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior)
-        e.attack_cd = random.uniform(0.2, 1.0)
+        if behavior == "engineer":
+            e.attack_cd = random.uniform(0.6, 1.4)
+        else:
+            e.attack_cd = random.uniform(0.2, 1.0)
         state.enemies.append(e)
 
 
@@ -57,6 +63,8 @@ def _get_weighted_behavior(wave: int) -> str:
         behaviors.append("spitter")
     if wave >= 9:
         behaviors.append("flyer")
+    if wave >= 4:
+        behaviors.append("engineer")
     
     return random.choice(behaviors)
 
@@ -68,25 +76,28 @@ def _get_enemy_stats(behavior: str, wave: int) -> tuple:
     """
     base_hp = 22 + wave * 5
     base_speed = 55 + wave * 2
-    
+
     if behavior == "chaser":
-        return (base_hp, base_speed, 1.0)
+        return (base_hp, base_speed * 1.35, 1.0)
     elif behavior == "ranged":
-        return (base_hp - 5, base_speed - 5, 1.2)
+        return (base_hp - 5, base_speed * 0.85, 1.2)
     elif behavior == "charger":
-        return (base_hp + 10, base_speed - 10, 0.8)
+        return (base_hp + 10, base_speed * 1.05, 0.8)
     elif behavior == "swarm":
         # Many weak, fast enemies
-        return (base_hp // 2, base_speed + 15, 0.5)
+        return (max(8, base_hp // 2), base_speed * 1.55, 0.5)
     elif behavior == "tank":
         # Slow but tanky
-        return (base_hp * 2, base_speed // 2, 0.9)
+        return (base_hp * 2, base_speed * 0.55, 0.9)
     elif behavior == "spitter":
         # Medium stats, spreads fire
-        return (base_hp - 3, base_speed - 8, 1.5)
+        return (base_hp - 3, base_speed * 0.9, 1.5)
     elif behavior == "flyer":
         # Erratic movement
-        return (base_hp - 7, base_speed + 20, 0.7)
+        return (base_hp - 7, base_speed * 1.7, 0.7)
+    elif behavior == "engineer":
+        # Builds traps; slower, higher HP
+        return (base_hp + 6, base_speed * 0.75, 1.1)
     else:
         return (base_hp, base_speed, 1.0)
 
@@ -94,15 +105,15 @@ def _get_enemy_stats(behavior: str, wave: int) -> tuple:
 def maybe_spawn_powerup(state: GameState, center: Vec2):
     """Randomly spawn a powerup."""
     if random.random() < 0.33:
-        kind = random.choice(["heal", "damage", "speed", "firerate"])
-        pos = random_spawn_edge(center, ROOM_RADIUS * 0.6)
+        kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
+        pos = random_spawn_edge(center, config.ROOM_RADIUS * 0.6)
         state.powerups.append(PowerUp(pos, kind))
 
 
 def spawn_powerup_on_kill(state: GameState, center: Vec2):
     """Spawn a powerup when an enemy dies."""
     if random.random() < 0.15:  # 15% chance per kill
-        kind = random.choice(["heal", "damage", "speed", "firerate"])
+        kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
         # Spawn near center
         pos = center + Vec2(random.uniform(-50, 50), random.uniform(-50, 50))
         state.powerups.append(PowerUp(pos, kind))

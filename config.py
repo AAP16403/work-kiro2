@@ -37,6 +37,8 @@ POWERUP_COLORS = {
     "damage": (255, 100, 100),
     "speed": (100, 200, 255),
     "firerate": (255, 220, 100),
+    "shield": (120, 220, 255),
+    "laser": (255, 120, 255),
 }
 
 # Enemy Colors
@@ -48,4 +50,5 @@ ENEMY_COLORS = {
     "tank": (100, 200, 100),        # Green
     "spitter": (240, 200, 80),      # Yellow
     "flyer": (150, 150, 240),       # Light blue
+    "engineer": (80, 220, 170),     # Teal
 }

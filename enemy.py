@@ -133,3 +133,30 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float):
         if int(enemy.t * 2) % 4 == 0:
             enemy.pos = enemy.pos + dir_to * enemy.speed * dt * 1.5
         return
+
+    if enemy.behavior == "engineer":
+        # Maintains distance and deploys traps.
+        dvec = player_pos - enemy.pos
+        d = dvec.length()
+        dir_to = dvec.normalized() if d > 1e-6 else Vec2(0, 0)
+
+        if d > 260:
+            enemy.pos = enemy.pos + dir_to * enemy.speed * dt * 0.85
+        elif d < 180:
+            enemy.pos = enemy.pos - dir_to * enemy.speed * dt * 0.95
+        else:
+            strafe = Vec2(-dir_to.y, dir_to.x)
+            enemy.pos = enemy.pos + strafe * enemy.speed * dt * 0.75
+
+        enemy.attack_cd -= dt
+        if enemy.attack_cd <= 0.0 and d < 420:
+            try:
+                from hazards import Trap
+
+                if not hasattr(state, "traps"):
+                    state.traps = []
+                state.traps.append(Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=28.0, damage=16, ttl=10.0))
+            except Exception:
+                pass
+            enemy.attack_cd = 2.4
+        return

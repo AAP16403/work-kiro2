@@ -5,6 +5,9 @@ SCREEN_W = 980
 SCREEN_H = 620
 FPS = 60
 
+# Feature flags
+ENABLE_OBSTACLES = False
+
 # Room settings
 ROOM_RADIUS = 400.0  # Larger play area for more movement
 

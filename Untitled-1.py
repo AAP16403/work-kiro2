@@ -16,12 +16,22 @@ from level import GameState, spawn_wave, maybe_spawn_powerup
 from enemy import update_enemy
 from powerup import apply_powerup
 from projectile import Projectile
-from utils import Vec2, clamp_to_room, iso_to_world, dist, set_view_size, compute_room_radius, point_segment_distance
+from utils import (
+    Vec2,
+    clamp_to_room,
+    iso_to_world,
+    dist,
+    set_view_size,
+    compute_room_radius,
+    point_segment_distance,
+    resolve_circle_obstacles,
+)
 from visuals import Visuals, GroupCache
 from weapons import get_weapon_for_wave, spawn_weapon_projectiles, get_weapon_color
 from particles import ParticleSystem
 from menu import Menu, SettingsMenu, PauseMenu, GameOverMenu
 from hazards import LaserBeam
+from layout import generate_obstacles
 
 
 # ============================
@@ -47,6 +57,7 @@ class Game(pyglet.window.Window):
         self.settings = {
             "difficulty": "normal",
             "window_size": (self.width, self.height),
+            "fullscreen": False,
         }
         
         # Menu system
@@ -122,7 +133,25 @@ class Game(pyglet.window.Window):
         self.groups = GroupCache()
         self.room = Room(self.batch, self.width, self.height)
 
-        self.state = GameState()
+        difficulty = str(self.settings.get("difficulty", "normal")).lower()
+        self.state = GameState(difficulty=difficulty)
+        if difficulty == "easy":
+            self.state.max_enemies = 10
+            self._incoming_damage_mult = 0.85
+        elif difficulty == "hard":
+            self.state.max_enemies = 14
+            self._incoming_damage_mult = 1.15
+        else:
+            self.state.max_enemies = 12
+            self._incoming_damage_mult = 1.0
+        if config.ENABLE_OBSTACLES:
+            self.state.layout_seed = random.randint(0, 1_000_000_000)
+            self.state.layout_segment = 0
+            self.state.obstacles = generate_obstacles(
+                self.state.layout_seed, self.state.layout_segment, config.ROOM_RADIUS, difficulty=self.state.difficulty
+            )
+        else:
+            self.state.obstacles = []
         self.player = Player(pos=Vec2(0.0, 0.0))
         self.player.current_weapon = get_weapon_for_wave(1)
 
@@ -142,9 +171,33 @@ class Game(pyglet.window.Window):
             color=(HUD_TEXT[0], HUD_TEXT[1], HUD_TEXT[2], 255),
         )
 
+    def _regen_layout(self, segment: int | None = None):
+        if not config.ENABLE_OBSTACLES:
+            if self.state:
+                self.state.obstacles = []
+            return
+        if not self.state:
+            return
+        if segment is None:
+            segment = int(getattr(self.state, "layout_segment", 0))
+        # Drop visuals for old obstacles.
+        if self.visuals:
+            for ob in list(getattr(self.state, "obstacles", [])):
+                self.visuals.drop_obstacle(ob)
+        self.state.layout_segment = int(segment)
+        self.state.obstacles = generate_obstacles(
+            int(getattr(self.state, "layout_seed", 0)),
+            self.state.layout_segment,
+            config.ROOM_RADIUS,
+            difficulty=getattr(self.state, "difficulty", "normal"),
+        )
+
     def _damage_player(self, amount: int):
         if amount <= 0:
             return
+        mult = getattr(self, "_incoming_damage_mult", 1.0)
+        if mult != 1.0:
+            amount = max(1, int(round(amount * mult)))
         if self.player.shield > 0:
             absorbed = min(self.player.shield, amount)
             self.player.shield -= absorbed
@@ -153,6 +206,21 @@ class Game(pyglet.window.Window):
                 self.particle_system.add_shield_hit(self.player.pos, absorbed)
         if amount > 0:
             self.player.hp -= amount
+
+    def _enemy_radius(self, enemy) -> float:
+        b = getattr(enemy, "behavior", "")
+        if b.startswith("boss_"):
+            return 24.0
+        return {
+            "tank": 16.0,
+            "swarm": 9.0,
+            "flyer": 11.0,
+            "engineer": 13.0,
+            "charger": 13.0,
+            "spitter": 12.0,
+            "ranged": 12.0,
+            "chaser": 12.0,
+        }.get(b, 12.0)
     
     def _start_game(self):
         """Start the game."""
@@ -175,6 +243,17 @@ class Game(pyglet.window.Window):
         if not isinstance(value, dict):
             return
         self.settings.update(value)
+        fullscreen = value.get("fullscreen")
+
+        if fullscreen is True:
+            if not self.fullscreen:
+                self._windowed_size = (self.width, self.height)
+            self.set_fullscreen(True)
+            return
+
+        if fullscreen is False and self.fullscreen:
+            self.set_fullscreen(False)
+
         size = value.get("window_size")
         if size and isinstance(size, (tuple, list)) and len(size) == 2:
             w, h = int(size[0]), int(size[1])
@@ -188,6 +267,7 @@ class Game(pyglet.window.Window):
     def on_resize(self, width, height):
         super().on_resize(width, height)
         self.settings["window_size"] = (width, height)
+        self.settings["fullscreen"] = bool(getattr(self, "fullscreen", False))
         if self.game_state != "playing":
             self.mouse_xy = (width / 2, height / 2)
         set_view_size(width, height)
@@ -203,6 +283,9 @@ class Game(pyglet.window.Window):
 
         if self.room:
             self.room.resize(width, height)
+        if self.state:
+            if config.ENABLE_OBSTACLES:
+                self._regen_layout(getattr(self.state, "layout_segment", 0))
     
     def _return_to_menu(self):
         """Return to main menu."""
@@ -314,6 +397,11 @@ class Game(pyglet.window.Window):
 
     def update(self, dt: float):
         """Update game logic."""
+        if self.game_state == "menu":
+            self.main_menu.update(dt)
+        elif self.game_state == "settings":
+            self.settings_menu.update(dt)
+
         if self.game_state != "playing":
             return
         
@@ -373,12 +461,20 @@ class Game(pyglet.window.Window):
                 self.visuals.drop_thunder(th)
 
         # Player movement
+        old_pos = Vec2(self.player.pos.x, self.player.pos.y)
         idir = self._input_dir()
         if idir.length() > 0:
             nd = idir.normalized()
             self.player.pos = self.player.pos + nd * self.player.speed * dt
             self.particle_system.add_step_dust(self.player.pos, nd)
         self.player.pos = clamp_to_room(self.player.pos, config.ROOM_RADIUS * 0.9)
+        if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
+            self.player.pos = resolve_circle_obstacles(self.player.pos, 14.0, s.obstacles)
+            self.player.pos = clamp_to_room(self.player.pos, config.ROOM_RADIUS * 0.9)
+        if dt > 1e-6:
+            player_vel = (self.player.pos - old_pos) * (1.0 / dt)
+        else:
+            player_vel = Vec2(0.0, 0.0)
 
         # Player shooting
         if self.mouse_down and (s.time - self.player.last_shot) >= self.player.fire_rate:
@@ -415,7 +511,11 @@ class Game(pyglet.window.Window):
 
         # Enemies
         for e in list(s.enemies):
-            update_enemy(e, self.player.pos, s, dt)
+            update_enemy(e, self.player.pos, s, dt, player_vel=player_vel)
+            e.pos = clamp_to_room(e.pos, config.ROOM_RADIUS * 0.96)
+            if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
+                e.pos = resolve_circle_obstacles(e.pos, self._enemy_radius(e), s.obstacles)
+                e.pos = clamp_to_room(e.pos, config.ROOM_RADIUS * 0.96)
             if dist(e.pos, self.player.pos) < 12:
                 self._damage_player(10)
                 s.enemies.remove(e)
@@ -429,6 +529,17 @@ class Game(pyglet.window.Window):
         for p in list(s.projectiles):
             p.pos = p.pos + p.vel * dt
             p.ttl -= dt
+            if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
+                blocked = False
+                for ob in s.obstacles:
+                    if dist(p.pos, ob.pos) <= ob.radius:
+                        blocked = True
+                        break
+                if blocked:
+                    s.projectiles.remove(p)
+                    self.visuals.drop_projectile(p)
+                    self.particle_system.add_hit_particles(p.pos, (160, 160, 170))
+                    continue
             if p.ttl <= 0:
                 s.projectiles.remove(p)
                 self.visuals.drop_projectile(p)
@@ -490,6 +601,9 @@ class Game(pyglet.window.Window):
             s.wave_active = False
             s.last_wave_clear = s.time
             s.wave += 1
+            new_segment = (s.wave - 1) // 5
+            if config.ENABLE_OBSTACLES and new_segment != getattr(s, "layout_segment", 0):
+                self._regen_layout(new_segment)
             self.player.current_weapon = get_weapon_for_wave(s.wave)  # Update weapon for new wave
             maybe_spawn_powerup(s, Vec2(0.0, 0.0))
 
@@ -539,6 +653,11 @@ class Game(pyglet.window.Window):
                 shake = Vec2(random.uniform(-1, 1), random.uniform(-1, 1)) * s.shake
 
             # Ensure visuals exist and update their positions.
+            if config.ENABLE_OBSTACLES:
+                for ob in getattr(self.state, "obstacles", []):
+                    self.visuals.ensure_obstacle(ob)
+                    self.visuals.sync_obstacle(ob, shake)
+
             aim_dir = (iso_to_world(self.mouse_xy) - self.player.pos).normalized()
             self.visuals.sync_player(self.player, shake, t=s.time, aim_dir=aim_dir)
 

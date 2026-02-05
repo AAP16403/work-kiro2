@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 from typing import Callable, List, Optional
+import math
+import random
 import pyglet
 from pyglet import shapes
 from utils import Vec2
@@ -132,6 +134,26 @@ class Menu:
         self.screen_width = width
         self.screen_height = height
         self.batch = pyglet.graphics.Batch()
+        self._t = 0.0
+        self._orbs: List[tuple[shapes.Circle, float, float, float]] = []
+
+        self._bg_a = shapes.Rectangle(0, 0, width, height, color=(12, 14, 22), batch=self.batch)
+        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(7, 9, 16), batch=self.batch)
+        self._bg_b.opacity = 120
+
+        count = max(10, min(22, int((width * height) / 90_000)))
+        for _ in range(count):
+            r = random.uniform(18, 55)
+            x = random.uniform(0, width)
+            y = random.uniform(0, height)
+            col = random.choice([(45, 90, 150), (110, 70, 170), (60, 120, 170)])
+            orb = shapes.Circle(x, y, r, color=col, batch=self.batch)
+            orb.opacity = random.randint(14, 36)
+            vx = random.uniform(-14, 14)
+            vy = random.uniform(-10, 10)
+            phase = random.uniform(0, math.tau)
+            self._orbs.append((orb, vx, vy, phase))
+
         self.buttons: List[MenuButton] = []
         self.buttons.append(MenuButton(0, 0, 160, 50, "Start Game", lambda: None, color=(50, 150, 50)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Settings", lambda: None, color=(100, 100, 150)))
@@ -161,6 +183,23 @@ class Menu:
 
         self.resize(width, height)
 
+    def update(self, dt: float):
+        self._t += dt
+        w = self.screen_width
+        h = self.screen_height
+        for orb, vx, vy, phase in self._orbs:
+            orb.x += vx * dt
+            orb.y += vy * dt
+            if orb.x < -60:
+                orb.x = w + 60
+            elif orb.x > w + 60:
+                orb.x = -60
+            if orb.y < -60:
+                orb.y = h + 60
+            elif orb.y > h + 60:
+                orb.y = -60
+            orb.opacity = int(14 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.7 + phase)))
+
     def resize(self, width: int, height: int):
         self.screen_width = width
         self.screen_height = height
@@ -176,6 +215,11 @@ class Menu:
         self.title.y = height - 80
         self.subtitle.x = cx
         self.subtitle.y = height - 120
+
+        self._bg_a.width = width
+        self._bg_a.height = height
+        self._bg_b.width = width
+        self._bg_b.height = height
     
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
@@ -200,6 +244,7 @@ class Menu:
     
     def draw(self):
         """Draw the menu."""
+        self.batch.draw()
         self.title.draw()
         self.subtitle.draw()
         for btn in self.buttons:
@@ -216,11 +261,30 @@ class SettingsMenu:
         self.screen_height = height
         self.on_save = on_save
         self.batch = pyglet.graphics.Batch()
+        self._t = 0.0
+        self._orbs: List[tuple[shapes.Circle, float, float, float]] = []
+
+        self._bg_a = shapes.Rectangle(0, 0, width, height, color=(10, 12, 20), batch=self.batch)
+        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 7, 14), batch=self.batch)
+        self._bg_b.opacity = 130
+
+        count = max(8, min(18, int((width * height) / 120_000)))
+        for _ in range(count):
+            r = random.uniform(16, 44)
+            x = random.uniform(0, width)
+            y = random.uniform(0, height)
+            col = random.choice([(35, 70, 120), (90, 60, 140), (55, 105, 150)])
+            orb = shapes.Circle(x, y, r, color=col, batch=self.batch)
+            orb.opacity = random.randint(10, 26)
+            vx = random.uniform(-10, 10)
+            vy = random.uniform(-8, 8)
+            phase = random.uniform(0, math.tau)
+            self._orbs.append((orb, vx, vy, phase))
         
         # Settings
         self.difficulty = 1  # 0=easy, 1=normal, 2=hard
         self.volume = 80.0
-        self.window_size_idx = 0  # 0=800x600, 1=1024x768, 2=1280x720, 3=fullscreen
+        self.window_size_idx = 0
         self.window_sizes = [(800, 600), (1024, 768), (1280, 720), (1920, 1080)]
         self.window_size_names = ["800x600", "1024x768", "1280x720", "1920x1080"]
         if display_size:
@@ -228,6 +292,12 @@ class SettingsMenu:
             if dw > 0 and dh > 0 and (dw, dh) not in self.window_sizes:
                 self.window_sizes.append((dw, dh))
                 self.window_size_names.append(f"Native ({dw}x{dh})")
+        self.window_sizes.append(None)
+        self.window_size_names.append("Fullscreen")
+        try:
+            self.window_size_idx = self.window_sizes.index((width, height))
+        except ValueError:
+            self.window_size_idx = 0
         
         # Difficulty buttons
         self.difficulty_buttons = []
@@ -307,6 +377,23 @@ class SettingsMenu:
 
         self.resize(width, height)
 
+    def update(self, dt: float):
+        self._t += dt
+        w = self.screen_width
+        h = self.screen_height
+        for orb, vx, vy, phase in self._orbs:
+            orb.x += vx * dt
+            orb.y += vy * dt
+            if orb.x < -60:
+                orb.x = w + 60
+            elif orb.x > w + 60:
+                orb.x = -60
+            if orb.y < -60:
+                orb.y = h + 60
+            elif orb.y > h + 60:
+                orb.y = -60
+            orb.opacity = int(10 + 16 * (0.5 + 0.5 * math.sin(self._t * 0.7 + phase)))
+
     def resize(self, width: int, height: int):
         self.screen_width = width
         self.screen_height = height
@@ -349,6 +436,11 @@ class SettingsMenu:
 
         self.title.x = cx
         self.title.y = height - 40
+
+        self._bg_a.width = width
+        self._bg_a.height = height
+        self._bg_b.width = width
+        self._bg_b.height = height
     
     def _set_difficulty(self, level: int):
         """Set difficulty level."""
@@ -402,9 +494,11 @@ class SettingsMenu:
     def get_settings(self) -> dict:
         """Get current settings."""
         difficulty_names = ["easy", "normal", "hard"]
+        fullscreen = self.window_sizes[self.window_size_idx] is None
         return {
             "difficulty": difficulty_names[self.difficulty],
             "window_size": self.window_sizes[self.window_size_idx],
+            "fullscreen": fullscreen,
             "volume": self.volume
         }
     

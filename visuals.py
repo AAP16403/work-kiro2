@@ -55,6 +55,7 @@ class Visuals:
         self._enemy_handles: Dict[int, RenderHandle] = {}
         self._proj_handles: Dict[int, RenderHandle] = {}
         self._power_handles: Dict[int, RenderHandle] = {}
+        self._obstacle_handles: Dict[int, RenderHandle] = {}
         self._trap_handles: Dict[int, RenderHandle] = {}
         self._laser_handles: Dict[int, RenderHandle] = {}
         self._thunder_handles: Dict[int, RenderHandle] = {}
@@ -597,6 +598,92 @@ class Visuals:
     def drop_powerup(self, p):
         """Remove powerup visual."""
         h = self._power_handles.pop(id(p), None)
+        if h:
+            h.delete()
+
+    def ensure_obstacle(self, ob):
+        if id(ob) in self._obstacle_handles:
+            return
+        r = float(getattr(ob, "radius", 28.0))
+        kind = getattr(ob, "kind", "pillar")
+
+        shadow = shapes.Ellipse(0, 0, r * 2.2, max(6.0, r * 0.75), color=(0, 0, 0), batch=self.batch)
+        shadow.opacity = 110
+
+        if kind == "crystal":
+            base = shapes.Circle(0, 0, r * 0.9, color=(120, 90, 180), batch=self.batch)
+            base.opacity = 200
+            shard1 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(210, 190, 255), batch=self.batch)
+            shard1.opacity = 200
+            shard2 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(170, 140, 230), batch=self.batch)
+            shard2.opacity = 180
+            glow = shapes.Circle(0, 0, r * 1.25, color=(180, 140, 255), batch=self.batch)
+            glow.opacity = 40
+            self._obstacle_handles[id(ob)] = RenderHandle(shadow, glow, base, shard1, shard2)
+            return
+
+        if kind == "crate":
+            base = shapes.Rectangle(0, 0, r * 1.9, r * 1.35, color=(95, 75, 55), batch=self.batch)
+            base.anchor_x = base.width / 2
+            base.anchor_y = base.height / 2
+            base.opacity = 220
+            border = shapes.Rectangle(0, 0, r * 1.9, r * 1.35, color=(160, 140, 120), batch=self.batch)
+            border.anchor_x = border.width / 2
+            border.anchor_y = border.height / 2
+            border.opacity = 60
+            strap = shapes.Line(0, 0, 0, 0, thickness=3, color=(50, 40, 30), batch=self.batch)
+            strap.opacity = 170
+            self._obstacle_handles[id(ob)] = RenderHandle(shadow, base, border, strap)
+            return
+
+        # pillar
+        base = shapes.Circle(0, 0, r, color=(80, 90, 110), batch=self.batch)
+        base.opacity = 230
+        top = shapes.Circle(0, 0, max(6.0, r * 0.65), color=(140, 155, 180), batch=self.batch)
+        top.opacity = 200
+        ring = shapes.Arc(0, 0, r * 1.05, segments=40, thickness=3, color=(255, 255, 255), batch=self.batch)
+        ring.opacity = 35
+        self._obstacle_handles[id(ob)] = RenderHandle(shadow, base, top, ring)
+
+    def sync_obstacle(self, ob, shake: Vec2):
+        h = self._obstacle_handles[id(ob)]
+        r = float(getattr(ob, "radius", 28.0))
+        kind = getattr(ob, "kind", "pillar")
+        sx, sy = to_iso(ob.pos, shake)
+
+        if kind == "crystal":
+            shadow, glow, base, shard1, shard2 = h.objs
+            shadow.x, shadow.y = sx, sy - 18
+            glow.x, glow.y = sx, sy + 6
+            base.x, base.y = sx, sy + 2
+            shard1.x, shard1.y = sx - r * 0.6, sy + 6
+            shard1.x2, shard1.y2 = sx, sy + r * 1.55
+            shard1.x3, shard1.y3 = sx + r * 0.35, sy + 6
+            shard2.x, shard2.y = sx + r * 0.25, sy + 2
+            shard2.x2, shard2.y2 = sx + r * 0.9, sy + r * 1.25
+            shard2.x3, shard2.y3 = sx + r * 0.55, sy + 2
+            h.set_group(self.groups.get(int(sy)))
+            return
+
+        if kind == "crate":
+            shadow, base, border, strap = h.objs
+            shadow.x, shadow.y = sx, sy - 18
+            base.x, base.y = sx, sy + 4
+            border.x, border.y = sx, sy + 4
+            strap.x, strap.y, strap.x2, strap.y2 = sx - r * 0.9, sy + 4, sx + r * 0.9, sy + 4
+            h.set_group(self.groups.get(int(sy)))
+            return
+
+        shadow, base, top, ring = h.objs
+        shadow.x, shadow.y = sx, sy - 18
+        base.x, base.y = sx, sy + 2
+        top.x, top.y = sx, sy + 12
+        ring.x, ring.y = sx, sy + 2
+        ring.radius = r * (1.02 + 0.03 * math.sin(sy * 0.02))
+        h.set_group(self.groups.get(int(sy)))
+
+    def drop_obstacle(self, ob):
+        h = self._obstacle_handles.pop(id(ob), None)
         if h:
             h.delete()
 

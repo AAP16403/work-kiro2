@@ -105,3 +105,30 @@ def point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> float:
     t = max(0.0, min(1.0, t))
     closest = Vec2(a.x + ab.x * t, a.y + ab.y * t)
     return (p - closest).length()
+
+
+def resolve_circle_obstacles(pos: Vec2, radius: float, obstacles, iterations: int = 4) -> Vec2:
+    """Push a circle out of overlapping circular obstacles.
+
+    `obstacles` is expected to have `pos` and `radius` attributes.
+    """
+    p = Vec2(pos.x, pos.y)
+    for _ in range(max(1, iterations)):
+        moved = False
+        for o in obstacles:
+            op = o.pos
+            r = radius + float(o.radius)
+            d = p - op
+            l = d.length()
+            if l >= r:
+                continue
+            if l <= 1e-6:
+                # Nudge in a stable direction.
+                d = Vec2(1.0, 0.0)
+                l = 1.0
+            push = (r - l) / l
+            p = Vec2(p.x + d.x * push, p.y + d.y * push)
+            moved = True
+        if not moved:
+            break
+    return p

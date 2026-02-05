@@ -84,7 +84,7 @@ d:\work kiro2\
 ├── powerup.py
 ├── level.py
 ├── map.py
-├── test_imports.py (NEW - validation script)
+├── (tests removed)
 └── .venv/ (virtual environment with pyglet)
 ```
 

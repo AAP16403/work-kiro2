@@ -6,6 +6,7 @@ import pyglet
 from pyglet import shapes
 from pyglet.graphics import Group
 
+from config import ENEMY_COLORS
 from utils import to_iso, Vec2
 
 
@@ -81,15 +82,7 @@ class Visuals:
         """Ensure enemy visual exists."""
         if id(enemy) in self._enemy_handles:
             return
-        base = {
-            "chaser": (210, 80, 80),        # Red
-            "ranged": (90, 170, 240),       # Blue
-            "charger": (235, 150, 70),      # Orange
-            "swarm": (200, 100, 200),       # Purple - weak but numerous
-            "tank": (100, 200, 100),        # Green - tanky
-            "spitter": (240, 200, 80),      # Yellow - spread fire
-            "flyer": (150, 150, 240),       # Light blue - erratic
-        }.get(enemy.behavior, (200, 120, 120))
+        base = ENEMY_COLORS.get(enemy.behavior, (200, 120, 120))
 
         sh = shapes.Ellipse(0, 0, 20, 7, color=(0, 0, 0), batch=self.batch)
         sh.opacity = 110

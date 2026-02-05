@@ -6,7 +6,7 @@ import random
 
 import pyglet
 
-from config import SCREEN_W, SCREEN_H, FPS, ROOM_RADIUS, PLAYER_SPEED, PROJECTILE_SPEED, WAVE_COOLDOWN, HUD_TEXT
+from config import SCREEN_W, SCREEN_H, FPS, ROOM_RADIUS, PLAYER_SPEED, PROJECTILE_SPEED, WAVE_COOLDOWN, HUD_TEXT, ENEMY_COLORS
 from player import Player
 from map import Room
 from level import GameState, spawn_wave, maybe_spawn_powerup
@@ -15,7 +15,7 @@ from powerup import apply_powerup
 from projectile import Projectile
 from utils import Vec2, clamp_to_room, iso_to_world, dist
 from visuals import Visuals, GroupCache
-from weapons import get_weapon_for_wave, spawn_weapon_projectiles
+from weapons import get_weapon_for_wave, spawn_weapon_projectiles, get_weapon_color
 from particles import ParticleSystem
 
 
@@ -127,7 +127,8 @@ class Game(pyglet.window.Window):
             s.projectiles.extend(projectiles)
             
             # Muzzle flash particle effect
-            self.particle_system.add_muzzle_flash(muzzle, aim)
+            weapon_color = get_weapon_color(weapon.projectile_type)
+            self.particle_system.add_muzzle_flash(muzzle, aim, weapon_color)
             
             self.player.last_shot = s.time
 
@@ -161,7 +162,7 @@ class Game(pyglet.window.Window):
                         s.shake = max(s.shake, 4.0)
                         
                         # Hit particles
-                        enemy_color = (255, 100, 100) if hasattr(e, 'color') else (200, 50, 50)
+                        enemy_color = ENEMY_COLORS.get(e.behavior, (200, 200, 200))
                         self.particle_system.add_hit_particles(e.pos, enemy_color)
                         
                         if e.hp <= 0:
@@ -169,7 +170,13 @@ class Game(pyglet.window.Window):
                             self.visuals.drop_enemy(e)
                             
                             # Death explosion
-                            self.particle_system.add_death_explosion(e.pos, enemy_color)
+                            self.particle_system.add_death_explosion(e.pos, enemy_color, e.behavior)
+                            
+                            # Explosion damage (Tank enemies explode violently)
+                            if e.behavior == "tank":
+                                if dist(e.pos, self.player.pos) < 70:
+                                    self.player.hp -= 15
+                                    s.shake = 15.0
                             
                             # Chance to spawn powerup on kill
                             from level import spawn_powerup_on_kill
@@ -191,7 +198,7 @@ class Game(pyglet.window.Window):
             if dist(pu.pos, self.player.pos) < 16:
                 # Particle effect for powerup collection
                 from config import POWERUP_COLORS
-                color = POWERUP_COLORS.get(pu.ptype, (200, 200, 200))
+                color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
                 self.particle_system.add_powerup_collection(pu.pos, color)
                 
                 apply_powerup(self.player, pu)

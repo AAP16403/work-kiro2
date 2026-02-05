@@ -58,6 +58,7 @@ class Game(pyglet.window.Window):
             "difficulty": "normal",
             "window_size": (self.width, self.height),
             "fullscreen": False,
+            "arena_margin": float(getattr(config, "ARENA_MARGIN", 0.97)),
         }
         
         # Menu system
@@ -93,7 +94,8 @@ class Game(pyglet.window.Window):
             return None
 
     def _update_room_radius_from_view(self):
-        config.ROOM_RADIUS = compute_room_radius(self.width, self.height)
+        margin = float(getattr(config, "ARENA_MARGIN", 0.92))
+        config.ROOM_RADIUS = compute_room_radius(self.width, self.height, margin=margin)
 
     def _prune_dead_weak_handlers(self) -> None:
         """Remove collected WeakMethod handlers to prevent pyglet assertions on dispatch."""
@@ -244,6 +246,17 @@ class Game(pyglet.window.Window):
             return
         self.settings.update(value)
         fullscreen = value.get("fullscreen")
+        arena_margin = value.get("arena_margin")
+        if arena_margin is not None:
+            try:
+                config.ARENA_MARGIN = float(arena_margin)
+            except Exception:
+                pass
+            self._update_room_radius_from_view()
+            if self.room:
+                self.room.rebuild()
+            if self.player:
+                self.player.pos = clamp_to_room(self.player.pos, config.ROOM_RADIUS)
 
         if fullscreen is True:
             if not self.fullscreen:

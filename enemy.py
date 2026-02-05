@@ -180,6 +180,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             move = (dir_to * 0.7 + sep * 0.6).normalized()
             enemy.vel = move * (enemy.speed * 0.65)
             enemy.pos = enemy.pos + enemy.vel * dt
+        else:
+            enemy.vel = Vec2(0.0, 0.0)
         # Stop and attack when close
         enemy.attack_cd -= dt
         if enemy.attack_cd <= 0.0 and d < 150:
@@ -237,9 +239,12 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
         move_dir = (swoop + strafe + wander + sep * 0.6).normalized()
         enemy.vel = move_dir * enemy.speed
         enemy.pos = enemy.pos + enemy.vel * dt
-        # Occasional rapid dashes
-        if int(enemy.t * 2) % 4 == 0:
-            enemy.pos = enemy.pos + dir_to * enemy.speed * dt * 1.2
+
+        # Occasional rapid dash (cooldown-based to avoid "every frame" bursts).
+        enemy.attack_cd -= dt
+        if enemy.attack_cd <= 0.0 and d < config.ROOM_RADIUS * 1.6:
+            enemy.pos = enemy.pos + dir_to * enemy.speed * dt * 18.0
+            enemy.attack_cd = 1.2 + random.uniform(0.0, 0.9)
         return
 
     if enemy.behavior == "engineer":

@@ -10,6 +10,7 @@ ENABLE_OBSTACLES = False
 
 # Room settings
 ROOM_RADIUS = 400.0  # Larger play area for more movement
+ARENA_MARGIN = 0.97  # Portion of the window used to fit the arena (higher = bigger arena)
 
 # Player stats
 PLAYER_SPEED = 175.0

@@ -77,8 +77,8 @@ def spawn_wave(state: GameState, center: Vec2):
         state.enemies.append(e)
         return
     
-    # Scale difficulty: fewer strong enemies at first, more variety later
-    base_count = 3 + state.wave * 2
+    # Scale difficulty: ramp enemy count a bit more gradually (caps at max_enemies).
+    base_count = 4 + int(state.wave * 1.4)
     base_count = max(1, int(base_count * mods["spawn"]))
     cap = state.max_enemies
     count = min(base_count, cap)
@@ -98,21 +98,29 @@ def spawn_wave(state: GameState, center: Vec2):
 
 def _get_weighted_behavior(wave: int) -> str:
     """Get enemy behavior weighted by wave difficulty."""
-    behaviors = ["chaser", "ranged", "charger"]
-    
-    # Add new enemy types on later waves
+    # Base trio stay common.
+    pool: list[tuple[str, float]] = [
+        ("chaser", max(3.0, 6.0 - wave * 0.12)),
+        ("ranged", 3.0),
+        ("charger", 2.8),
+    ]
+
+    # Add new enemy types on later waves; keep their weights modest so waves don't
+    # randomly become "all flyers" or "all engineers".
     if wave >= 3:
-        behaviors.append("swarm")
-    if wave >= 5:
-        behaviors.append("tank")
-    if wave >= 7:
-        behaviors.append("spitter")
-    if wave >= 9:
-        behaviors.append("flyer")
+        pool.append(("swarm", 2.0))
     if wave >= 4:
-        behaviors.append("engineer")
-    
-    return random.choice(behaviors)
+        pool.append(("engineer", 1.4))
+    if wave >= 5:
+        pool.append(("tank", 1.2))
+    if wave >= 7:
+        pool.append(("spitter", 1.6))
+    if wave >= 9:
+        pool.append(("flyer", 1.1))
+
+    names = [n for n, _w in pool]
+    weights = [max(0.1, float(w)) for _n, w in pool]
+    return random.choices(names, weights=weights, k=1)[0]
 
 
 def get_boss_for_wave(wave: int) -> str:
@@ -131,14 +139,14 @@ def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tu
     base_speed = 55 + wave * 2
 
     if behavior == "chaser":
-        hp, speed, atk = (base_hp, base_speed * 1.35, 1.0)
+        hp, speed, atk = (base_hp, base_speed * 1.32, 1.0)
     elif behavior == "ranged":
         hp, speed, atk = (base_hp - 5, base_speed * 0.85, 1.2)
     elif behavior == "charger":
         hp, speed, atk = (base_hp + 10, base_speed * 1.05, 0.8)
     elif behavior == "swarm":
         # Many weak, fast enemies
-        hp, speed, atk = (max(8, base_hp // 2), base_speed * 1.55, 0.5)
+        hp, speed, atk = (max(8, base_hp // 2), base_speed * 1.45, 0.5)
     elif behavior == "tank":
         # Slow but tanky
         hp, speed, atk = (base_hp * 2, base_speed * 0.55, 0.9)
@@ -147,7 +155,7 @@ def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tu
         hp, speed, atk = (base_hp - 3, base_speed * 0.9, 1.5)
     elif behavior == "flyer":
         # Erratic movement
-        hp, speed, atk = (base_hp - 7, base_speed * 1.7, 0.7)
+        hp, speed, atk = (base_hp - 7, base_speed * 1.55, 0.7)
     elif behavior == "engineer":
         # Builds traps; slower, higher HP
         hp, speed, atk = (base_hp + 6, base_speed * 0.75, 1.1)

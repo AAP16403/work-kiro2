@@ -71,6 +71,38 @@ The game code is now organized into separate, modular files for better maintaina
 python Untitled-1.py
 ```
 
+## Build a Windows executable (.exe)
+
+Use PyInstaller to bundle the game into a distributable Windows build.
+
+1) Create a venv (once):
+
+```powershell
+py -m venv .venv
+```
+
+2) Install dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -U pip pyglet pyinstaller
+```
+
+3) Build:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
+```
+
+Or run the one-step script:
+
+```bat
+build_all.bat
+```
+
+Output:
+- Folder: `.\dist\Kiro2Game\`
+- Executable: `.\dist\Kiro2Game\Kiro2Game.exe`
+
 ## Controls
 
 - **WASD** or **Arrow Keys** - Move around the room

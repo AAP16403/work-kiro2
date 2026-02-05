@@ -21,4 +21,7 @@ class Player:
     fire_rate: float = PLAYER_FIRE_RATE
     last_shot: float = 0.0
     laser_until: float = 0.0
+    vortex_until: float = 0.0
+    vortex_radius: float = 70.0
+    vortex_dps: float = 38.0
     current_weapon: "Weapon" = field(default=None)  # Will be set in Game.__init__

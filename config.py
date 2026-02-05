@@ -39,6 +39,7 @@ POWERUP_COLORS = {
     "firerate": (255, 220, 100),
     "shield": (120, 220, 255),
     "laser": (255, 120, 255),
+    "vortex": (180, 140, 255),
 }
 
 # Enemy Colors
@@ -51,4 +52,9 @@ ENEMY_COLORS = {
     "spitter": (240, 200, 80),      # Yellow
     "flyer": (150, 150, 240),       # Light blue
     "engineer": (80, 220, 170),     # Teal
+    "boss_thunder": (170, 200, 255),
+    "boss_laser": (255, 120, 255),
+    "boss_trapmaster": (255, 170, 80),
+    "boss_swarmqueen": (220, 120, 255),
+    "boss_brute": (255, 80, 80),
 }

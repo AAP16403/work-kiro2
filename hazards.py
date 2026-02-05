@@ -27,3 +27,24 @@ class LaserBeam:
     damage: int
     thickness: float = 10.0
     ttl: float = 0.08
+    warn: float = 0.0
+    t: float = 0.0
+    color: tuple[int, int, int] = (255, 120, 255)
+    owner: str = "player"  # "player" or "enemy"
+    hit_done: bool = False
+
+
+@dataclass
+class ThunderLine:
+    """A lightning strike line across the room."""
+
+    start: Vec2
+    end: Vec2
+    damage: int = 18
+    thickness: float = 16.0
+    ttl: float = 0.18
+    warn: float = 0.45
+    t: float = 0.0
+    color: tuple[int, int, int] = (170, 200, 255)
+    owner: str = "enemy"
+    hit_done: bool = False

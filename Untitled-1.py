@@ -149,6 +149,8 @@ class Game(pyglet.window.Window):
             absorbed = min(self.player.shield, amount)
             self.player.shield -= absorbed
             amount -= absorbed
+            if absorbed > 0 and self.particle_system:
+                self.particle_system.add_shield_hit(self.player.pos, absorbed)
         if amount > 0:
             self.player.hp -= amount
     
@@ -325,6 +327,24 @@ class Game(pyglet.window.Window):
         if not s.wave_active and (s.time - s.last_wave_clear) >= WAVE_COOLDOWN:
             spawn_wave(s, Vec2(0.0, 0.0))
 
+        # Vortex aura (rare powerup): damages nearby enemies and emits swirl particles.
+        if s.time < self.player.vortex_until:
+            self.particle_system.add_vortex_swirl(self.player.pos, s.time, self.player.vortex_radius)
+            dps = self.player.vortex_dps
+            for e in list(s.enemies):
+                if dist(e.pos, self.player.pos) <= self.player.vortex_radius:
+                    acc = getattr(e, "_vortex_acc", 0.0) + dps * dt
+                    dmg = int(acc)
+                    e._vortex_acc = acc - dmg
+                    if dmg > 0:
+                        e.hp -= dmg
+                        s.shake = max(s.shake, 2.5)
+                        if e.hp <= 0:
+                            s.enemies.remove(e)
+                            self.visuals.drop_enemy(e)
+                            from level import spawn_powerup_on_kill
+                            spawn_powerup_on_kill(s, e.pos)
+
         # Traps
         for tr in list(getattr(s, "traps", [])):
             tr.t += dt
@@ -333,16 +353,31 @@ class Game(pyglet.window.Window):
                 s.traps.remove(tr)
                 self.visuals.drop_trap(tr)
                 continue
-            if tr.t >= tr.armed_delay and dist(tr.pos, self.player.pos) <= tr.radius:
+            if tr.damage > 0 and tr.t >= tr.armed_delay and dist(tr.pos, self.player.pos) <= tr.radius:
                 self._damage_player(tr.damage)
                 s.shake = max(s.shake, 10.0)
                 s.traps.remove(tr)
                 self.visuals.drop_trap(tr)
 
+        # Thunder lines (boss hazard)
+        for th in list(getattr(s, "thunders", [])):
+            th.t += dt
+            if th.t >= th.warn and not th.hit_done:
+                if point_segment_distance(self.player.pos, th.start, th.end) <= th.thickness * 0.6:
+                    th.hit_done = True
+                    self._damage_player(th.damage)
+                    s.shake = max(s.shake, 14.0)
+                    self.particle_system.add_laser_beam(th.start, th.end, color=th.color)
+            if th.t >= th.warn + th.ttl:
+                s.thunders.remove(th)
+                self.visuals.drop_thunder(th)
+
         # Player movement
         idir = self._input_dir()
         if idir.length() > 0:
-            self.player.pos = self.player.pos + idir.normalized() * self.player.speed * dt
+            nd = idir.normalized()
+            self.player.pos = self.player.pos + nd * self.player.speed * dt
+            self.particle_system.add_step_dust(self.player.pos, nd)
         self.player.pos = clamp_to_room(self.player.pos, config.ROOM_RADIUS * 0.9)
 
         # Player shooting
@@ -355,8 +390,9 @@ class Game(pyglet.window.Window):
                 beam_len = config.ROOM_RADIUS * 1.6
                 end = muzzle + aim * beam_len
                 dmg = int(self.player.damage * 0.9) + 14
-                beam = LaserBeam(start=muzzle, end=end, damage=dmg, thickness=12.0, ttl=0.08)
+                beam = LaserBeam(start=muzzle, end=end, damage=dmg, thickness=12.0, ttl=0.08, owner="player")
                 s.lasers.append(beam)
+                self.particle_system.add_laser_beam(muzzle, end, color=beam.color)
                 for e in list(s.enemies):
                     if point_segment_distance(e.pos, muzzle, end) <= 14:
                         e.hp -= dmg
@@ -468,8 +504,14 @@ class Game(pyglet.window.Window):
 
         # Laser beams
         for lb in list(getattr(s, "lasers", [])):
-            lb.ttl -= dt
-            if lb.ttl <= 0:
+            lb.t += dt
+            if lb.owner == "enemy" and lb.t >= lb.warn and not lb.hit_done:
+                if point_segment_distance(self.player.pos, lb.start, lb.end) <= lb.thickness * 0.55:
+                    lb.hit_done = True
+                    self._damage_player(lb.damage)
+                    s.shake = max(s.shake, 10.0)
+                    self.particle_system.add_laser_beam(lb.start, lb.end, color=lb.color)
+            if lb.t >= lb.warn + lb.ttl:
                 s.lasers.remove(lb)
                 self.visuals.drop_laser(lb)
 
@@ -497,7 +539,8 @@ class Game(pyglet.window.Window):
                 shake = Vec2(random.uniform(-1, 1), random.uniform(-1, 1)) * s.shake
 
             # Ensure visuals exist and update their positions.
-            self.visuals.sync_player(self.player, shake)
+            aim_dir = (iso_to_world(self.mouse_xy) - self.player.pos).normalized()
+            self.visuals.sync_player(self.player, shake, t=s.time, aim_dir=aim_dir)
 
             for e in self.state.enemies:
                 self.visuals.ensure_enemy(e)
@@ -519,6 +562,10 @@ class Game(pyglet.window.Window):
                 self.visuals.ensure_laser(lb)
                 self.visuals.sync_laser(lb, shake)
 
+            for th in getattr(self.state, "thunders", []):
+                self.visuals.ensure_thunder(th)
+                self.visuals.sync_thunder(th, shake)
+
             self.batch.draw()
             
             # Render particles on top of batch
@@ -526,7 +573,11 @@ class Game(pyglet.window.Window):
 
             laser_left = max(0.0, self.player.laser_until - self.state.time)
             laser_txt = f"   Laser: {laser_left:.0f}s" if laser_left > 0 else ""
-            self.hud.text = f"HP: {self.player.hp}   Shield: {self.player.shield}   Wave: {self.state.wave}   Enemies: {len(self.state.enemies)}   Weapon: {self.player.current_weapon.name.capitalize()}{laser_txt}"
+            vortex_left = max(0.0, self.player.vortex_until - self.state.time)
+            vortex_txt = f"   Vortex: {vortex_left:.0f}s" if vortex_left > 0 else ""
+            boss = next((e for e in self.state.enemies if getattr(e, "behavior", "").startswith("boss_")), None)
+            boss_txt = f"   BOSS: {boss.behavior[5:].replace('_',' ').title()} HP:{boss.hp}" if boss else ""
+            self.hud.text = f"HP: {self.player.hp}   Shield: {self.player.shield}   Wave: {self.state.wave}   Enemies: {len(self.state.enemies)}   Weapon: {self.player.current_weapon.name.capitalize()}{laser_txt}{vortex_txt}{boss_txt}"
             self.hud.draw()
             
             if self.game_state == "paused":

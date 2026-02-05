@@ -1,268 +1,287 @@
-"""Particle system for visual effects and animations."""
+"""Particle system for visual effects and animations.
 
-from dataclasses import dataclass
+This module is intentionally self-contained and uses a persistent Batch to avoid
+allocating new Shapes every frame.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from typing import List, Tuple
-import random
 import math
+import random
+
 import pyglet
 from pyglet import shapes
+
 from utils import Vec2, to_iso
+
+
+Color = Tuple[int, int, int]
 
 
 @dataclass
 class Particle:
-    """Individual particle with physics."""
+    """Particle with simple physics and pre-created render objects."""
+
     pos: Vec2
     vel: Vec2
     ttl: float
     max_ttl: float
     size: float
-    color: Tuple[int, int, int]
-    particle_type: str  # "spark", "smoke", "debris", "shockwave", "flash"
+    color: Color
+    particle_type: str
     drag: float = 0.0
+
+    # Optional orientation for streak-like particles.
+    angle: float = 0.0
+
+    # Render objects created once and then updated/reused.
+    objs: List[object] = field(default_factory=list)
 
 
 class ParticleSystem:
-    """Manages all particles in the game."""
-    
-    def __init__(self, batch):
-        self.batch = batch
+    """Manages particles and renders them with a dedicated Batch."""
+
+    def __init__(self, _unused_batch=None):
         self.particles: List[Particle] = []
-    
-    def add_muzzle_flash(self, pos: Vec2, direction: Vec2, color: Tuple[int, int, int] = (255, 200, 100)):
-        """Create enhanced muzzle flash particles."""
-        # 1. Bright core flash
-        self.particles.append(Particle(
-            pos=pos, vel=direction * 20, ttl=0.06, max_ttl=0.06,
-            size=14, color=(255, 255, 255), particle_type="flash", drag=0
-        ))
-        
-        # 2. Directional sparks (cone)
+        self.batch = pyglet.graphics.Batch()
+
+    # ----------------------------
+    # Particle creation helpers
+    # ----------------------------
+    def _add_flash(self, pos: Vec2, radius: float, color: Color, ttl: float):
+        p = Particle(pos=pos, vel=Vec2(0, 0), ttl=ttl, max_ttl=ttl, size=radius, color=color, particle_type="flash")
+        outer = shapes.Circle(0, 0, radius * 1.3, color=color, batch=self.batch)
+        outer.opacity = 120
+        core = shapes.Circle(0, 0, max(1, radius * 0.55), color=(255, 255, 255), batch=self.batch)
+        core.opacity = 220
+        p.objs.extend([outer, core])
+        self.particles.append(p)
+
+    def _add_smoke(self, pos: Vec2, vel: Vec2, radius: float, color: Color, ttl: float, drag: float = 1.0):
+        p = Particle(pos=pos, vel=vel, ttl=ttl, max_ttl=ttl, size=radius, color=color, particle_type="smoke", drag=drag)
+        blob = shapes.Circle(0, 0, radius, color=color, batch=self.batch)
+        blob.opacity = 60
+        p.objs.append(blob)
+        self.particles.append(p)
+
+    def _add_spark(self, pos: Vec2, vel: Vec2, length: float, color: Color, ttl: float, drag: float = 2.5):
+        angle = math.atan2(vel.y, vel.x) if abs(vel.x) + abs(vel.y) > 1e-6 else 0.0
+        p = Particle(
+            pos=pos,
+            vel=vel,
+            ttl=ttl,
+            max_ttl=ttl,
+            size=length,
+            color=color,
+            particle_type="spark",
+            drag=drag,
+            angle=angle,
+        )
+        outer = shapes.Line(0, 0, 0, 0, thickness=3, color=color, batch=self.batch)
+        outer.opacity = 180
+        core = shapes.Line(0, 0, 0, 0, thickness=1, color=(255, 255, 255), batch=self.batch)
+        core.opacity = 200
+        p.objs.extend([outer, core])
+        self.particles.append(p)
+
+    def _add_ring(self, pos: Vec2, radius: float, color: Color, ttl: float, thickness: float = 3.0):
+        p = Particle(pos=pos, vel=Vec2(0, 0), ttl=ttl, max_ttl=ttl, size=radius, color=color, particle_type="ring")
+        arc = shapes.Arc(0, 0, radius, segments=48, thickness=thickness, color=color, batch=self.batch)
+        arc.opacity = 160
+        p.objs.append(arc)
+        self.particles.append(p)
+
+    def _add_debris(self, pos: Vec2, vel: Vec2, size: float, color: Color, ttl: float):
+        p = Particle(pos=pos, vel=vel, ttl=ttl, max_ttl=ttl, size=size, color=color, particle_type="debris", drag=1.2)
+        rect = shapes.Rectangle(0, 0, size * 2, size * 2, color=color, batch=self.batch)
+        rect.anchor_x = size
+        rect.anchor_y = size
+        rect.opacity = 180
+        p.objs.append(rect)
+        self.particles.append(p)
+
+    # ----------------------------
+    # Public VFX entrypoints
+    # ----------------------------
+    def add_muzzle_flash(self, pos: Vec2, direction: Vec2, color: Color = (255, 200, 100)):
+        self._add_flash(pos, radius=14, color=(255, 255, 255), ttl=0.06)
+
         base_angle = math.atan2(direction.y, direction.x)
+        for _ in range(10):
+            angle = base_angle + random.uniform(-0.45, 0.45)
+            speed = random.uniform(180, 520)
+            vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
+            self._add_spark(pos, vel, length=random.uniform(10, 18), color=color, ttl=random.uniform(0.10, 0.22), drag=3.5)
+
+        for _ in range(5):
+            angle = base_angle + random.uniform(-0.7, 0.7)
+            speed = random.uniform(25, 110)
+            vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
+            self._add_smoke(pos, vel, radius=random.uniform(5, 10), color=(190, 190, 200), ttl=random.uniform(0.35, 0.65), drag=1.2)
+
+    def add_hit_particles(self, pos: Vec2, color: Color = (255, 100, 100)):
+        self._add_flash(pos, radius=11, color=(255, 255, 255), ttl=0.08)
         for _ in range(8):
-            angle = base_angle + random.uniform(-0.4, 0.4)
-            speed = random.uniform(150, 450)
-            vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
-            
-            self.particles.append(Particle(
-                pos=pos, vel=vel, ttl=random.uniform(0.1, 0.25), max_ttl=0.25,
-                size=random.uniform(2, 4), color=color, particle_type="spark", drag=3.0
-            ))
-            
-        # 3. Smoke puffs (drifting)
-        for _ in range(4):
-            angle = base_angle + random.uniform(-0.6, 0.6)
-            speed = random.uniform(30, 100)
-            vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
-            
-            self.particles.append(Particle(
-                pos=pos, vel=vel, ttl=random.uniform(0.3, 0.6), max_ttl=0.6,
-                size=random.uniform(4, 8), color=(200, 200, 200), particle_type="smoke", drag=1.0
-            ))
-    
-    def add_hit_particles(self, pos: Vec2, color: Tuple[int, int, int] = (255, 100, 100)):
-        """Create hit/impact particles."""
-        # Flash
-        self.particles.append(Particle(
-            pos=pos, vel=Vec2(0,0), ttl=0.08, max_ttl=0.08,
-            size=10, color=(255, 255, 255), particle_type="flash"
-        ))
-        
-        # Sparks
-        for _ in range(6):
             angle = random.uniform(0, math.tau)
-            speed = random.uniform(80, 200)
+            speed = random.uniform(90, 260)
             vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
-            
-            self.particles.append(Particle(
-                pos=pos, vel=vel, ttl=0.2, max_ttl=0.2,
-                size=random.uniform(1.5, 3.5), color=color, particle_type="spark", drag=2.0
-            ))
-    
-    def add_death_explosion(self, pos: Vec2, color: Tuple[int, int, int], enemy_type: str = "chaser"):
-        """Create explosion particles when enemy dies."""
-        # Scale based on enemy type
+            self._add_spark(pos, vel, length=random.uniform(8, 14), color=color, ttl=random.uniform(0.14, 0.26), drag=2.8)
+
+    def add_death_explosion(self, pos: Vec2, color: Color, enemy_type: str = "chaser"):
         scale = 1.0
-        count_mult = 1.0
-        
+        mult = 1.0
         if enemy_type == "tank":
             scale = 1.8
-            count_mult = 2.0
-            # Tank explosions are fiery and dangerous looking
-            self.particles.append(Particle(
-                pos=pos, vel=Vec2(0,0), ttl=0.5, max_ttl=0.5,
-                size=60, color=(255, 100, 50), particle_type="shockwave", drag=0
-            ))
+            mult = 2.2
         elif enemy_type == "swarm":
             scale = 0.6
-            count_mult = 0.5
-        elif enemy_type == "boss":
-            scale = 2.5
-            count_mult = 3.0
+            mult = 0.6
+        elif enemy_type == "flyer":
+            scale = 1.2
+            mult = 1.3
+        elif enemy_type == "engineer":
+            scale = 1.1
+            mult = 1.1
 
-        # 1. Shockwave
-        self.particles.append(Particle(
-            pos=pos, vel=Vec2(0,0), ttl=0.3, max_ttl=0.3,
-            size=15 * scale, color=color, particle_type="shockwave", drag=0
-        ))
-        
-        # 2. Core Flash
-        self.particles.append(Particle(
-            pos=pos, vel=Vec2(0,0), ttl=0.15, max_ttl=0.15,
-            size=30 * scale, color=(255, 255, 255), particle_type="flash", drag=0
-        ))
-        
-        # 3. Debris and Sparks
-        count = int(16 * count_mult)
+        self._add_ring(pos, radius=18 * scale, color=color, ttl=0.28, thickness=4.0)
+        self._add_flash(pos, radius=26 * scale, color=(255, 255, 255), ttl=0.14)
+
+        count = int(18 * mult)
         for _ in range(count):
             angle = random.uniform(0, math.tau)
-            speed = random.uniform(100, 350)
+            speed = random.uniform(120, 420) * scale
             vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
-            
-            # Mix of sparks (fast, short) and debris (slow, long)
-            is_debris = random.random() < 0.4
-            
-            if is_debris:
-                p_type = "debris"
-                ttl = random.uniform(0.5, 0.9)
-                size = random.uniform(3, 6) * scale
-                drag = 1.5
+            if random.random() < 0.45:
+                self._add_debris(pos, vel, size=random.uniform(2.5, 5.5) * scale, color=(110, 110, 120), ttl=random.uniform(0.55, 1.0))
             else:
-                p_type = "spark"
-                ttl = random.uniform(0.2, 0.5)
-                size = random.uniform(2, 4) * scale
-                drag = 2.5
-                
-            self.particles.append(Particle(
-                pos=pos, vel=vel, ttl=ttl, max_ttl=ttl,
-                size=size, color=color, particle_type=p_type, drag=drag
-            ))
-            
-        # 4. Smoke for larger enemies
-        if scale >= 1.0:
-            for _ in range(int(5 * scale)):
-                angle = random.uniform(0, math.tau)
-                speed = random.uniform(20, 60)
-                vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
-                self.particles.append(Particle(
-                    pos=pos, vel=vel, ttl=0.8, max_ttl=0.8,
-                    size=random.uniform(8, 15) * scale, color=(100, 100, 100), particle_type="smoke", drag=0.5
-                ))
-    
-    def add_powerup_collection(self, pos: Vec2, color: Tuple[int, int, int]):
-        """Create particles when powerup is collected."""
-        # Upward spiral or burst
-        for _ in range(15):
+                self._add_spark(pos, vel, length=random.uniform(10, 20) * scale, color=color, ttl=random.uniform(0.18, 0.5), drag=2.4)
+
+        for _ in range(int(6 * mult)):
+            vel = Vec2(random.uniform(-40, 40), random.uniform(20, 90))
+            self._add_smoke(pos, vel, radius=random.uniform(10, 18) * scale, color=(110, 110, 120), ttl=random.uniform(0.65, 1.0), drag=0.5)
+
+    def add_powerup_collection(self, pos: Vec2, color: Color):
+        self._add_ring(pos, radius=10, color=color, ttl=0.3, thickness=3.0)
+        for _ in range(18):
             angle = random.uniform(0, math.tau)
-            speed = random.uniform(150, 300)
+            speed = random.uniform(160, 320)
             vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
-            
-            self.particles.append(Particle(
-                pos=pos, vel=vel, ttl=0.4, max_ttl=0.4,
-                size=random.uniform(2, 5), color=color, particle_type="spark", drag=1.0
-            ))
-            
-        # Ring
-        self.particles.append(Particle(
-            pos=pos, vel=Vec2(0,0), ttl=0.3, max_ttl=0.3,
-            size=5, color=color, particle_type="shockwave", drag=0
-        ))
-    
+            self._add_spark(pos, vel, length=random.uniform(10, 16), color=color, ttl=0.35, drag=1.4)
+
+    def add_step_dust(self, pos: Vec2, direction: Vec2):
+        # Subtle dust behind moving player.
+        back = Vec2(-direction.x, -direction.y)
+        for _ in range(2):
+            vel = back * random.uniform(40, 80) + Vec2(random.uniform(-30, 30), random.uniform(-30, 30))
+            self._add_smoke(pos, vel, radius=random.uniform(4, 7), color=(120, 120, 140), ttl=random.uniform(0.25, 0.45), drag=1.8)
+
+    def add_shield_hit(self, pos: Vec2, strength: float):
+        c = (120, 220, 255)
+        self._add_flash(pos, radius=12 + strength * 0.06, color=c, ttl=0.07)
+        self._add_ring(pos, radius=18 + strength * 0.08, color=c, ttl=0.18, thickness=4.0)
+        for _ in range(6):
+            angle = random.uniform(0, math.tau)
+            speed = random.uniform(120, 260)
+            vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
+            self._add_spark(pos, vel, length=random.uniform(10, 16), color=c, ttl=random.uniform(0.12, 0.22), drag=3.0)
+
+    def add_vortex_swirl(self, pos: Vec2, t: float, radius: float, color: Color = (180, 140, 255)):
+        # Emit a couple of orbiting sparks each frame while active.
+        for i in range(3):
+            ang = t * 7.0 + i * (math.tau / 3)
+            p = pos + Vec2(math.cos(ang), math.sin(ang)) * radius
+            tang = Vec2(-math.sin(ang), math.cos(ang))
+            vel = tang * random.uniform(120, 180) + Vec2(random.uniform(-35, 35), random.uniform(-35, 35))
+            self._add_spark(p, vel, length=random.uniform(12, 18), color=color, ttl=0.12, drag=6.0)
+        self._add_ring(pos, radius=radius * 0.45, color=color, ttl=0.18, thickness=3.0)
+
+    def add_laser_beam(self, start: Vec2, end: Vec2, color: Color = (255, 120, 255)):
+        # A few sparks along the beam for energy feel.
+        dx = end.x - start.x
+        dy = end.y - start.y
+        for _ in range(10):
+            t = random.uniform(0.05, 0.95)
+            p = Vec2(start.x + dx * t, start.y + dy * t)
+            angle = random.uniform(0, math.tau)
+            speed = random.uniform(80, 220)
+            vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
+            self._add_spark(p, vel, length=random.uniform(8, 14), color=color, ttl=random.uniform(0.08, 0.16), drag=5.0)
+
+    # ----------------------------
+    # Update and render
+    # ----------------------------
     def update(self, dt: float):
-        """Update all particles."""
-        for particle in list(self.particles):
-            particle.ttl -= dt
-            
-            # Apply drag
-            if particle.drag > 0:
-                particle.vel = particle.vel * (1.0 - particle.drag * dt)
-            
-            # Apply gravity (downward) based on type
-            if particle.particle_type == "debris":
-                particle.vel.y -= 400 * dt
-            elif particle.particle_type == "smoke":
-                particle.vel.y += 50 * dt  # Smoke rises
-            elif particle.particle_type == "spark":
-                particle.vel.y -= 150 * dt
-            
-            # Update position
-            particle.pos = particle.pos + particle.vel * dt
-            
-            # Remove dead particles
-            if particle.ttl <= 0:
-                self.particles.remove(particle)
-    
+        for p in list(self.particles):
+            p.ttl -= dt
+            if p.ttl <= 0:
+                for o in p.objs:
+                    if hasattr(o, "delete"):
+                        o.delete()
+                self.particles.remove(p)
+                continue
+
+            # Drag
+            if p.drag > 0:
+                p.vel = p.vel * max(0.0, 1.0 - p.drag * dt)
+
+            # Type-based forces
+            if p.particle_type == "debris":
+                p.vel.y -= 420 * dt
+            elif p.particle_type == "smoke":
+                p.vel.y += 45 * dt
+            elif p.particle_type == "spark":
+                p.vel.y -= 160 * dt
+
+            p.pos = p.pos + p.vel * dt
+
     def render(self, shake: Vec2):
-        """Render all particles directly without adding to batch."""
         if not self.particles:
             return
-        
-        # Create temporary batch for this frame's particles only
-        temp_batch = pyglet.graphics.Batch()
-        
-        for particle in self.particles:
-            # Calculate visibility based on TTL
-            alpha_ratio = particle.ttl / particle.max_ttl
-            alpha = int(255 * alpha_ratio)
-            
-            # Scale for fade-out effect
-            size = max(0.5, particle.size * alpha_ratio)
-            
-            sx, sy = to_iso(particle.pos, shake)
-            
-            if particle.particle_type == "shockwave":
-                # Expanding ring effect
-                radius = particle.size + (1.0 - alpha_ratio) * 80  # Expand
-                alpha = int(200 * alpha_ratio)
-                
-                # Using Arc for ring if available, else Circle
-                try:
-                    arc = shapes.Arc(
-                        sx, sy, radius, segments=32, thickness=3,
-                        color=particle.color, batch=temp_batch
-                    )
-                    arc.opacity = alpha
-                except AttributeError:
-                    # Fallback for older pyglet
-                    circle = shapes.Circle(
-                        sx, sy, radius, color=particle.color, batch=temp_batch
-                    )
-                    circle.opacity = int(100 * alpha_ratio)
-                    
-            elif particle.particle_type == "flash":
-                # Static bright flash
-                alpha = int(255 * alpha_ratio)
-                circle = shapes.Circle(
-                    sx, sy, particle.size, color=particle.color, batch=temp_batch
-                )
-                circle.opacity = alpha
-                
-            elif particle.particle_type == "smoke":
-                # Fading, growing smoke
-                alpha = int(100 * alpha_ratio)
-                size = particle.size * (1.0 + (1.0 - alpha_ratio)) # Grow
-                circle = shapes.Circle(
-                    sx, sy, size, color=particle.color, batch=temp_batch
-                )
-                circle.opacity = alpha
-                
-            else: # spark, debris
-                alpha = int(255 * alpha_ratio)
-                size = max(1.0, particle.size * alpha_ratio)
-                
-                if particle.particle_type == "debris":
-                    # Square-ish for debris?
-                    rect = shapes.Rectangle(
-                        sx - size, sy - size, size*2, size*2,
-                        color=particle.color, batch=temp_batch
-                    )
-                    rect.opacity = alpha
-                    rect.rotation = particle.ttl * 360  # Spin
-                else:
-                    circle = shapes.Circle(
-                        sx, sy, size, color=particle.color, batch=temp_batch
-                    )
-                    circle.opacity = alpha
-        
-        # Draw temporary batch
-        temp_batch.draw()
+
+        for p in self.particles:
+            alpha_ratio = max(0.0, min(1.0, p.ttl / p.max_ttl))
+            sx, sy = to_iso(p.pos, shake)
+
+            if p.particle_type == "flash":
+                outer, core = p.objs
+                outer.x, outer.y = sx, sy
+                core.x, core.y = sx, sy
+                outer.radius = p.size * (0.8 + 0.2 * alpha_ratio)
+                core.radius = max(1.0, p.size * 0.45 * alpha_ratio)
+                outer.opacity = int(140 * alpha_ratio)
+                core.opacity = int(255 * alpha_ratio)
+
+            elif p.particle_type == "smoke":
+                (blob,) = p.objs
+                blob.x, blob.y = sx, sy
+                blob.radius = p.size * (1.0 + (1.0 - alpha_ratio) * 1.1)
+                blob.opacity = int(70 * alpha_ratio)
+
+            elif p.particle_type == "ring":
+                (arc,) = p.objs
+                arc.x, arc.y = sx, sy
+                arc.radius = p.size + (1.0 - alpha_ratio) * 80
+                arc.opacity = int(170 * alpha_ratio)
+
+            elif p.particle_type == "spark":
+                outer, core = p.objs
+                length = p.size * (0.45 + 0.55 * alpha_ratio)
+                dirv = p.vel.normalized()
+                if dirv.length() <= 1e-6:
+                    dirv = Vec2(math.cos(p.angle), math.sin(p.angle))
+                x2 = sx - dirv.x * length
+                y2 = sy - dirv.y * length
+                outer.x, outer.y, outer.x2, outer.y2 = sx, sy, x2, y2
+                core.x, core.y, core.x2, core.y2 = sx, sy, x2, y2
+                outer.opacity = int(200 * alpha_ratio)
+                core.opacity = int(230 * alpha_ratio)
+
+            elif p.particle_type == "debris":
+                (rect,) = p.objs
+                rect.x, rect.y = sx, sy
+                rect.opacity = int(220 * alpha_ratio)
+                rect.rotation = (p.ttl / p.max_ttl) * 360.0
+
+        self.batch.draw()

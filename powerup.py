@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class PowerUp:
     """PowerUp entity."""
     pos: Vec2
-    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser"
+    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex"
 
 
 def apply_powerup(player: "Player", p: PowerUp, now: float):
@@ -31,3 +31,6 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
         player.shield = min(120, player.shield + 45)
     elif p.kind == "laser":
         player.laser_until = max(player.laser_until, now + 8.0)
+    elif p.kind == "vortex":
+        # A damaging aura that swirls around the player.
+        player.vortex_until = max(player.vortex_until, now + 10.0)

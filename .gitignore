@@ -11,3 +11,12 @@ dist/
 .ruff_cache/
 
 *.log
+
+# Editor/OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini

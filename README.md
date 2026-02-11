@@ -132,7 +132,7 @@ Output:
 
 ## Run Upgrades
 
-- After clearing every **3 waves**, you’ll be prompted to pick **1** upgrade.
+- After clearing every **3 waves**, you'll be prompted to pick **1** upgrade.
 - These upgrades last for the **current run only**.
 
 ## Game Features

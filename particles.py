@@ -213,13 +213,23 @@ class ParticleSystem:
     # Update and render
     # ----------------------------
     def update(self, dt: float):
-        for p in list(self.particles):
+        if not self.particles:
+            return
+
+        i = 0
+        n = len(self.particles)
+        while i < n:
+            p = self.particles[i]
             p.ttl -= dt
             if p.ttl <= 0:
                 for o in p.objs:
                     if hasattr(o, "delete"):
                         o.delete()
-                self.particles.remove(p)
+                # Remove without allocating/copying lists.
+                last = self.particles[n - 1]
+                self.particles[i] = last
+                self.particles.pop()
+                n -= 1
                 continue
 
             # Drag
@@ -235,6 +245,7 @@ class ParticleSystem:
                 p.vel.y -= 160 * dt
 
             p.pos = p.pos + p.vel * dt
+            i += 1
 
     def render(self, shake: Vec2):
         if not self.particles:

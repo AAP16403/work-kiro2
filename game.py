@@ -83,6 +83,18 @@ class Game(pyglet.window.Window):
         self.mouse_xy = (self.width / 2, self.height / 2)
         self.mouse_down = False
 
+        # Cached UI labels to avoid per-frame allocations.
+        self._pause_hint = pyglet.text.Label(
+            "Press ESC to pause",
+            font_name="Arial",
+            font_size=10,
+            x=self.width - 10,
+            y=self.height - 14,
+            anchor_x="right",
+            anchor_y="top",
+            color=(150, 150, 150, 200),
+        )
+
         pyglet.clock.schedule_interval(self.update, 1.0 / FPS)
 
     def _get_display_size(self):
@@ -412,6 +424,9 @@ class Game(pyglet.window.Window):
 
         if self.hud:
             self.hud.y = height - 14
+        if getattr(self, "_pause_hint", None):
+            self._pause_hint.x = width - 10
+            self._pause_hint.y = height - 14
 
         if self.room:
             self.room.resize(width, height)
@@ -875,18 +890,8 @@ class Game(pyglet.window.Window):
             elif self.game_state == "game_over":
                 self.game_over_menu.draw()
             else:
-                # Draw pause hint
-                pause_hint = pyglet.text.Label(
-                    "Press ESC to pause",
-                    font_name="Arial",
-                    font_size=10,
-                    x=self.width - 10,
-                    y=self.height - 14,
-                    anchor_x="right",
-                    anchor_y="top",
-                    color=(150, 150, 150, 200)
-                )
-                pause_hint.draw()
+                if self._pause_hint:
+                    self._pause_hint.draw()
 
 
 def main():

@@ -9,13 +9,12 @@ import pyglet
 pyglet.options["shadow_window"] = False
 
 import config
-from config import SCREEN_W, SCREEN_H, FPS, PLAYER_SPEED, PROJECTILE_SPEED, WAVE_COOLDOWN, HUD_TEXT, ENEMY_COLORS, POWERUP_COLORS
+from config import SCREEN_W, SCREEN_H, FPS, WAVE_COOLDOWN, HUD_TEXT, ENEMY_COLORS, POWERUP_COLORS
 from player import Player
 from map import Room
 from level import GameState, spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death
 from enemy import update_enemy
 from powerup import apply_powerup
-from projectile import Projectile
 from utils import (
     Vec2,
     clamp_to_room,

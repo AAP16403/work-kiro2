@@ -13,3 +13,4 @@ class Projectile:
     damage: int
     ttl: float = 2.0
     owner: str = "player"  # "player" or "enemy"
+    projectile_type: str = "bullet"  # "bullet", "spread", "missile", "plasma"

@@ -126,7 +126,7 @@ def spawn_weapon_projectiles(
             
             projectiles.append(Projectile(
                 muzzle, vel, final_damage,
-                ttl=2.0, owner="player"
+                ttl=2.0, owner="player", projectile_type="bullet"
             ))
     
     elif weapon.projectile_type == "spread":
@@ -143,16 +143,14 @@ def spawn_weapon_projectiles(
             
             projectiles.append(Projectile(
                 muzzle, vel, final_damage,
-                ttl=2.2, owner="player"
+                ttl=2.2, owner="player", projectile_type="spread"
             ))
     
     elif weapon.projectile_type == "missile":
         # Larger, slower projectiles
         vel = aim_direction * weapon.projectile_speed
         muzzle_extended = muzzle + aim_direction * 4.0
-        proj = Projectile(muzzle_extended, vel, final_damage, ttl=3.0, owner="player")
-        proj.projectile_type = "missile"
-        projectiles.append(proj)
+        projectiles.append(Projectile(muzzle_extended, vel, final_damage, ttl=3.0, owner="player", projectile_type="missile"))
     
     elif weapon.projectile_type == "plasma":
         # Multiple projectiles with spread
@@ -167,9 +165,7 @@ def spawn_weapon_projectiles(
             
             vel = Vec2(rotated_x, rotated_y) * weapon.projectile_speed
             
-            proj = Projectile(muzzle, vel, final_damage, ttl=2.5, owner="player")
-            proj.projectile_type = "plasma"
-            projectiles.append(proj)
+            projectiles.append(Projectile(muzzle, vel, final_damage, ttl=2.5, owner="player", projectile_type="plasma"))
     
     return projectiles
 

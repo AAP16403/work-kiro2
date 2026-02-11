@@ -517,6 +517,10 @@ class Visuals:
             # Purple plasma projectile
             sh = shapes.Circle(0, 0, 4, color=(150, 100, 255), batch=self.batch)
             core = shapes.Circle(0, 0, 2, color=(200, 150, 255), batch=self.batch)
+        elif projectile_type == "spread":
+            # Orange spread pellets
+            sh = shapes.Circle(0, 0, 4, color=(255, 200, 100), batch=self.batch)
+            core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
         else:  # bullet or default
             # Standard yellow bullet
             sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch)

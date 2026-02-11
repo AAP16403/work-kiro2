@@ -37,7 +37,7 @@ The game code is now organized into separate, modular files for better maintaina
 
 #### **projectile.py**
 - `Projectile` dataclass for bullets
-- Attributes: position, velocity, damage, TTL, owner
+- Attributes: position, velocity, damage, TTL, owner, projectile_type
 
 #### **powerup.py**
 - `PowerUp` dataclass for collectible items

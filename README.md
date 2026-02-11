@@ -74,7 +74,7 @@ The game code is now organized into separate, modular files for better maintaina
   - Projectile rendering
   - PowerUp visual effects with symbols
 
-#### **Untitled-1.py** (Main Game)
+#### **game.py** (Main Game)
 - `Game` class inheriting from `pyglet.window.Window`
 - Game loop and event handling
 - Input processing (keyboard, mouse)
@@ -82,6 +82,9 @@ The game code is now organized into separate, modular files for better maintaina
 - Game state updates
 - Rendering coordination
 - Entry point: `main()` function
+
+#### **Untitled-1.py** (Launcher)
+- Thin entrypoint that calls `game.main()` (kept for a stable run/build filename)
 
 ## Running the Game
 
@@ -126,6 +129,11 @@ Output:
 - **WASD** or **Arrow Keys** - Move around the room
 - **Hold Left Mouse Button** - Shoot at enemies
 - **Right Mouse Button** - Use Ultra ability (requires Ultra powerup)
+
+## Run Upgrades
+
+- After clearing every **3 waves**, you’ll be prompted to pick **1** upgrade.
+- These upgrades last for the **current run only**.
 
 ## Game Features
 

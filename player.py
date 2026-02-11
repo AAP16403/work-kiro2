@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 class Player:
     """Player entity."""
     pos: Vec2
+    max_hp: int = PLAYER_HP
     hp: int = PLAYER_HP
     shield: int = 0
     speed: float = PLAYER_SPEED

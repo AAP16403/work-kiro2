@@ -1,6 +1,6 @@
 """Menu system for game configuration and navigation."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 import math
 import random
@@ -31,78 +31,90 @@ class MenuButton:
     font_size: int = 16
     text_color: tuple = (255, 255, 255, 255)
     is_hovered: bool = False
+
+    _batch: object = field(init=False, default=None, repr=False)
+    _shadow: object = field(init=False, default=None, repr=False)
+    _border: object = field(init=False, default=None, repr=False)
+    _bg: object = field(init=False, default=None, repr=False)
+    _shine: object = field(init=False, default=None, repr=False)
+    _label: object = field(init=False, default=None, repr=False)
     
     def contains_point(self, px: float, py: float) -> bool:
         """Check if point is inside button."""
         return self.x <= px <= self.x + self.width and self.y <= py <= self.y + self.height
-    
-    def draw(self, batch) -> List:
-        """Draw button and return list of visual objects."""
-        objects = []
-        color = self.hover_color if self.is_hovered else self.color
-        shadow_off = max(2, int(self.height * 0.08))
-        border_pad = max(2, int(self.height * 0.06))
-        
-        # Shadow
-        shadow = shapes.Rectangle(
-            self.x + shadow_off,
-            self.y - shadow_off,
-            self.width,
-            self.height,
-            color=(0, 0, 0),
-            batch=batch,
-        )
-        shadow.opacity = 85
-        objects.append(shadow)
 
-        # Border (slightly larger rectangle behind)
-        border = shapes.Rectangle(
-            self.x - border_pad,
-            self.y - border_pad,
-            self.width + border_pad * 2,
-            self.height + border_pad * 2,
-            color=(220, 235, 255),
-            batch=batch,
-        )
-        border.opacity = 70 if self.is_hovered else 35
-        objects.append(border)
-
-        # Button background
-        bg = shapes.Rectangle(
-            self.x, self.y, self.width, self.height,
-            color=color, batch=batch
-        )
-        bg.opacity = 235 if self.is_hovered else 210
-        objects.append(bg)
-        
-        # Subtle top shine
-        shine_h = max(3, int(self.height * 0.16))
-        shine = shapes.Rectangle(
-            self.x + 2,
-            self.y + self.height - shine_h - 2,
-            max(1, self.width - 4),
-            shine_h,
-            color=(255, 255, 255),
-            batch=batch,
-        )
-        shine.opacity = 55 if self.is_hovered else 32
-        objects.append(shine)
-        
-        # Button text
-        label = pyglet.text.Label(
+    def ensure(self, batch: pyglet.graphics.Batch) -> None:
+        if self._batch is batch and self._bg is not None:
+            return
+        self._batch = batch
+        self._shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=batch)
+        self._shadow.opacity = 85
+        self._border = shapes.Rectangle(0, 0, 1, 1, color=(220, 235, 255), batch=batch)
+        self._bg = shapes.Rectangle(0, 0, 1, 1, color=self.color, batch=batch)
+        self._shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=batch)
+        self._label = pyglet.text.Label(
             self.text,
             font_name=self.font_name,
             font_size=self.font_size,
-            x=self.x + self.width // 2,
-            y=self.y + self.height // 2,
+            x=0,
+            y=0,
             anchor_x="center",
             anchor_y="center",
             batch=batch,
             color=self.text_color,
         )
-        objects.append(label)
-        
-        return objects
+        self.sync()
+
+    def sync(self) -> None:
+        if self._bg is None:
+            return
+        color = self.hover_color if self.is_hovered else self.color
+        shadow_off = max(2, int(self.height * 0.08))
+        border_pad = max(2, int(self.height * 0.06))
+        shine_h = max(3, int(self.height * 0.16))
+
+        self._shadow.x = self.x + shadow_off
+        self._shadow.y = self.y - shadow_off
+        self._shadow.width = self.width
+        self._shadow.height = self.height
+
+        self._border.x = self.x - border_pad
+        self._border.y = self.y - border_pad
+        self._border.width = self.width + border_pad * 2
+        self._border.height = self.height + border_pad * 2
+        self._border.opacity = 70 if self.is_hovered else 35
+
+        self._bg.x = self.x
+        self._bg.y = self.y
+        self._bg.width = self.width
+        self._bg.height = self.height
+        self._bg.color = color
+        self._bg.opacity = 235 if self.is_hovered else 210
+
+        self._shine.x = self.x + 2
+        self._shine.y = self.y + self.height - shine_h - 2
+        self._shine.width = max(1, self.width - 4)
+        self._shine.height = shine_h
+        self._shine.opacity = 55 if self.is_hovered else 32
+
+        self._label.text = self.text
+        self._label.font_name = self.font_name
+        self._label.font_size = self.font_size
+        self._label.x = self.x + self.width // 2
+        self._label.y = self.y + self.height // 2
+
+    def delete(self) -> None:
+        for o in (self._shadow, self._border, self._bg, self._shine, self._label):
+            if o is None:
+                continue
+            if hasattr(o, "delete"):
+                o.delete()
+        self._batch = None
+        self._shadow = None
+        self._border = None
+        self._bg = None
+        self._shine = None
+        self._label = None
 
 
 @dataclass
@@ -123,6 +135,13 @@ class MenuSlider:
     track_thickness: float = 2.0
     value_fmt: str = "{:.0f}"
     value_suffix: str = ""
+
+    _batch: object = field(init=False, default=None, repr=False)
+    _label_obj: object = field(init=False, default=None, repr=False)
+    _track_shadow: object = field(init=False, default=None, repr=False)
+    _track: object = field(init=False, default=None, repr=False)
+    _knob_back: object = field(init=False, default=None, repr=False)
+    _knob: object = field(init=False, default=None, repr=False)
     
     def get_knob_x(self) -> float:
         """Calculate knob position based on current value."""
@@ -143,59 +162,68 @@ class MenuSlider:
     
     def draw(self, batch) -> List:
         """Draw slider and return list of visual objects."""
-        objects = []
-        val_str = self.value_fmt.format(self.current_val)
-        
-        # Label
-        label = pyglet.text.Label(
-            f"{self.label}: {val_str}{self.value_suffix}",
+        # Backwards compat: keep `draw(batch)` but make it persistent.
+        self.ensure(batch)
+        self.sync()
+        return [o for o in (self._label_obj, self._track_shadow, self._track, self._knob_back, self._knob) if o is not None]
+
+    def ensure(self, batch: pyglet.graphics.Batch) -> None:
+        if self._batch is batch and self._track is not None:
+            return
+        self._batch = batch
+        self._label_obj = pyglet.text.Label(
+            "",
             font_name=self.font_name,
             font_size=self.font_size,
-            x=self.x,
-            y=self.y + 20,
+            x=0,
+            y=0,
             anchor_x="left",
             anchor_y="bottom",
             batch=batch,
-            color=(255, 255, 255, 255)
+            color=(255, 255, 255, 255),
         )
-        objects.append(label)
-        
-        # Track
-        track_shadow = shapes.Line(
-            self.x, self.y, self.x + self.width, self.y,
-            thickness=max(1.0, self.track_thickness + 3.0),
-            color=(0, 0, 0),
-            batch=batch,
-        )
-        track_shadow.opacity = 90
-        objects.append(track_shadow)
+        self._track_shadow = shapes.Line(0, 0, 0, 0, thickness=1.0, color=(0, 0, 0), batch=batch)
+        self._track_shadow.opacity = 90
+        self._track = shapes.Line(0, 0, 0, 0, thickness=1.0, color=(120, 130, 155), batch=batch)
+        self._track.opacity = 160
+        self._knob_back = shapes.Circle(0, 0, self.knob_radius + 3, color=(255, 255, 255), batch=batch)
+        self._knob_back.opacity = 55
+        self._knob = shapes.Circle(0, 0, self.knob_radius, color=(130, 190, 240), batch=batch)
+        self._knob.opacity = 240
+        self.sync()
 
-        track = shapes.Line(
-            self.x, self.y, self.x + self.width, self.y,
-            thickness=self.track_thickness,
-            color=(120, 130, 155),
-            batch=batch,
-        )
-        track.opacity = 160
-        objects.append(track)
-        
-        # Knob
-        knob_back = shapes.Circle(
-            self.get_knob_x(), self.y, self.knob_radius + 3,
-            color=(255, 255, 255), batch=batch
-        )
-        knob_back.opacity = 55
-        objects.append(knob_back)
+    def sync(self) -> None:
+        if self._track is None:
+            return
+        val_str = self.value_fmt.format(self.current_val)
+        self._label_obj.text = f"{self.label}: {val_str}{self.value_suffix}"
+        self._label_obj.font_name = self.font_name
+        self._label_obj.font_size = self.font_size
+        self._label_obj.x = self.x
+        self._label_obj.y = self.y + 20
 
-        knob = shapes.Circle(
-            self.get_knob_x(), self.y, self.knob_radius,
-            color=(150, 210, 255) if self.is_dragging else (130, 190, 240),
-            batch=batch,
-        )
-        knob.opacity = 240
-        objects.append(knob)
-        
-        return objects
+        thickness_shadow = max(1.0, float(self.track_thickness) + 3.0)
+        self._track_shadow.x = self.x
+        self._track_shadow.y = self.y
+        self._track_shadow.x2 = self.x + self.width
+        self._track_shadow.y2 = self.y
+        self._track_shadow.thickness = thickness_shadow
+
+        self._track.x = self.x
+        self._track.y = self.y
+        self._track.x2 = self.x + self.width
+        self._track.y2 = self.y
+        self._track.thickness = float(self.track_thickness)
+
+        knob_x = self.get_knob_x()
+        self._knob_back.x = knob_x
+        self._knob_back.y = self.y
+        self._knob_back.radius = float(self.knob_radius + 3)
+
+        self._knob.x = knob_x
+        self._knob.y = self.y
+        self._knob.radius = float(self.knob_radius)
+        self._knob.color = (150, 210, 255) if self.is_dragging else (130, 190, 240)
 
 
 class Menu:
@@ -247,6 +275,7 @@ class Menu:
             anchor_x="center",
             anchor_y="center",
             color=(200, 220, 255, 255),
+            batch=self.batch,
         )
 
         self.subtitle = pyglet.text.Label(
@@ -258,8 +287,11 @@ class Menu:
             anchor_x="center",
             anchor_y="center",
             color=(150, 150, 150, 255),
+            batch=self.batch,
         )
 
+        for btn in self.buttons:
+            btn.ensure(self.batch)
         self.resize(width, height)
 
     def update(self, dt: float):
@@ -300,6 +332,7 @@ class Menu:
         for i, btn in enumerate(self.buttons):
             btn.x = cx - button_w // 2
             btn.y = start_y - i * (button_h + gap)
+            btn.sync()
 
         # Panel size wraps buttons with padding.
         pad_x = int(70 * scale)
@@ -337,6 +370,7 @@ class Menu:
         """Handle mouse motion for button hover."""
         for button in self.buttons:
             button.is_hovered = button.contains_point(x, y)
+            button.sync()
     
     def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
         """Handle mouse clicks. Returns action string or None."""
@@ -357,12 +391,6 @@ class Menu:
     def draw(self):
         """Draw the menu."""
         self.batch.draw()
-        self.title.draw()
-        self.subtitle.draw()
-        for btn in self.buttons:
-            temp_batch = pyglet.graphics.Batch()
-            _ = btn.draw(temp_batch)
-            temp_batch.draw()
 
 
 class SettingsMenu:
@@ -472,7 +500,8 @@ class SettingsMenu:
             y=height - 40,
             anchor_x="center",
             anchor_y="center",
-            color=(200, 220, 255, 255)
+            color=(200, 220, 255, 255),
+            batch=self.batch,
         )
         
         self.difficulty_label = pyglet.text.Label(
@@ -483,7 +512,8 @@ class SettingsMenu:
             y=height // 2 + 100,
             anchor_x="left",
             anchor_y="center",
-            color=(255, 255, 255, 255)
+            color=(255, 255, 255, 255),
+            batch=self.batch,
         )
         
         self.window_label = pyglet.text.Label(
@@ -494,8 +524,18 @@ class SettingsMenu:
             y=height // 2 - 10,
             anchor_x="left",
             anchor_y="center",
-            color=(255, 255, 255, 255)
+            color=(255, 255, 255, 255),
+            batch=self.batch,
         )
+
+        self._selected_diff_highlight = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
+        self._selected_diff_highlight.opacity = 60
+        self._selected_size_highlight = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
+        self._selected_size_highlight.opacity = 60
+
+        for btn in self.difficulty_buttons + self.size_buttons + [self.back_button]:
+            btn.ensure(self.batch)
+        self.arena_slider.ensure(self.batch)
 
         self.resize(width, height)
 
@@ -632,11 +672,13 @@ class SettingsMenu:
         """Handle mouse motion for button hover."""
         for btn in self.difficulty_buttons + self.size_buttons + [self.back_button]:
             btn.is_hovered = btn.contains_point(x, y)
+            btn.sync()
 
     def on_mouse_drag(self, x: float, y: float, dx: float, dy: float):
         """Handle mouse drag for sliders."""
         if self.arena_slider.is_dragging:
             self.arena_slider.set_value_from_x(x)
+            self.arena_slider.sync()
     
     def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
         """Handle mouse clicks. Returns action string or None."""
@@ -659,12 +701,14 @@ class SettingsMenu:
         ):
             self.arena_slider.is_dragging = True
             self.arena_slider.set_value_from_x(x)
+            self.arena_slider.sync()
         
         return None
     
     def on_mouse_release(self, x: float, y: float, button: int):
         """Handle mouse release."""
         self.arena_slider.is_dragging = False
+        self.arena_slider.sync()
     
     def get_settings(self) -> dict:
         """Get current settings."""
@@ -679,61 +723,188 @@ class SettingsMenu:
     
     def draw(self):
         """Draw the settings menu."""
+        # Keep highlights in sync with the selected buttons.
+        if self.difficulty_buttons:
+            selected_diff = self.difficulty_buttons[self.difficulty]
+            self._selected_diff_highlight.x = selected_diff.x - 2
+            self._selected_diff_highlight.y = selected_diff.y - 2
+            self._selected_diff_highlight.width = selected_diff.width + 4
+            self._selected_diff_highlight.height = selected_diff.height + 4
+        if self.size_buttons:
+            selected_size = self.size_buttons[self.window_size_idx]
+            self._selected_size_highlight.x = selected_size.x - 2
+            self._selected_size_highlight.y = selected_size.y - 2
+            self._selected_size_highlight.width = selected_size.width + 4
+            self._selected_size_highlight.height = selected_size.height + 4
+
+        for btn in self.difficulty_buttons + self.size_buttons + [self.back_button]:
+            btn.sync()
+        self.arena_slider.sync()
         self.batch.draw()
-        self.title.draw()
-        self.difficulty_label.draw()
-        self.window_label.draw()
-        
-        # Draw difficulty buttons
-        for btn in self.difficulty_buttons:
-            temp_batch = pyglet.graphics.Batch()
-            _ = btn.draw(temp_batch)
-            temp_batch.draw()
-        
-        # Draw window size buttons
-        for btn in self.size_buttons:
-            temp_batch = pyglet.graphics.Batch()
-            _ = btn.draw(temp_batch)
-            temp_batch.draw()
-        
-        # Draw slider
-        temp_batch = pyglet.graphics.Batch()
-        _ = self.arena_slider.draw(temp_batch)
-        temp_batch.draw()
-        
-        # Draw back button
-        temp_batch = pyglet.graphics.Batch()
-        _ = self.back_button.draw(temp_batch)
-        temp_batch.draw()
-        
-        # Highlight selected options
-        selected_diff = self.difficulty_buttons[self.difficulty]
-        highlight = shapes.Rectangle(
-            selected_diff.x - 2, selected_diff.y - 2,
-            selected_diff.width + 4, selected_diff.height + 4,
-            color=(255, 255, 255)
+
+
+class UpgradeMenu:
+    """In-run upgrade selection menu (shown every few waves)."""
+
+    def __init__(self, width: int, height: int):
+        self.screen_width = width
+        self.screen_height = height
+        self.batch = pyglet.graphics.Batch()
+
+        self.overlay = shapes.Rectangle(0, 0, width, height, color=(0, 0, 0), batch=self.batch)
+        self.overlay.opacity = 175
+
+        self._panel_border = shapes.Rectangle(0, 0, 1, 1, color=(130, 160, 230), batch=self.batch)
+        self._panel_border.opacity = 40
+        self._panel = shapes.Rectangle(0, 0, 1, 1, color=(14, 18, 28), batch=self.batch)
+        self._panel.opacity = 210
+        self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
+        self._panel_shine.opacity = 14
+
+        self.title = pyglet.text.Label(
+            "CHOOSE AN UPGRADE",
+            font_name="Segoe UI",
+            font_size=26,
+            x=width // 2,
+            y=height - 80,
+            anchor_x="center",
+            anchor_y="center",
+            color=(230, 240, 255, 255),
+            batch=self.batch,
         )
-        highlight.opacity = 60
-        highlight.draw()
-        
-        selected_size = self.size_buttons[self.window_size_idx]
-        highlight2 = shapes.Rectangle(
-            selected_size.x - 2, selected_size.y - 2,
-            selected_size.width + 4, selected_size.height + 4,
-            color=(255, 255, 255)
+        self.subtitle = pyglet.text.Label(
+            "Every 3 waves. Run-only bonuses.",
+            font_name="Segoe UI",
+            font_size=12,
+            x=width // 2,
+            y=height - 110,
+            anchor_x="center",
+            anchor_y="center",
+            color=(165, 170, 185, 255),
+            batch=self.batch,
         )
-        highlight2.opacity = 60
-        highlight2.draw()
+
+        self.option_buttons: list[MenuButton] = [
+            MenuButton(0, 0, 320, 56, "Option 1", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)),
+            MenuButton(0, 0, 320, 56, "Option 2", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)),
+            MenuButton(0, 0, 320, 56, "Option 3", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)),
+        ]
+        for btn in self.option_buttons:
+            btn.ensure(self.batch)
+
+        self.option_desc: list[pyglet.text.Label] = []
+        for _ in range(3):
+            self.option_desc.append(
+                pyglet.text.Label(
+                    "",
+                    font_name="Segoe UI",
+                    font_size=11,
+                    x=0,
+                    y=0,
+                    anchor_x="left",
+                    anchor_y="center",
+                    color=(170, 175, 190, 255),
+                    batch=self.batch,
+                )
+            )
+
+        self._options: list[dict] = []
+        self.resize(width, height)
+
+    def set_options(self, options: list[dict]) -> None:
+        self._options = list(options or [])[:3]
+        while len(self._options) < 3:
+            self._options.append({"key": "", "title": "—", "desc": ""})
+        for i, opt in enumerate(self._options):
+            self.option_buttons[i].text = str(opt.get("title", "—"))
+            self.option_desc[i].text = str(opt.get("desc", ""))
+            self.option_buttons[i].sync()
+
+    def resize(self, width: int, height: int):
+        self.screen_width = width
+        self.screen_height = height
+        self.overlay.width = width
+        self.overlay.height = height
+
+        cx = width // 2
+        cy = height // 2
+        scale = min(_ui_scale(width, height), 1.55)
+
+        panel_w = min(int(width * 0.86), int(760 * scale))
+        panel_h = int(360 * scale)
+        panel_x = cx - panel_w // 2
+        panel_y = cy - panel_h // 2
+
+        self._panel_border.x = panel_x - 3
+        self._panel_border.y = panel_y - 3
+        self._panel_border.width = panel_w + 6
+        self._panel_border.height = panel_h + 6
+        self._panel.x = panel_x
+        self._panel.y = panel_y
+        self._panel.width = panel_w
+        self._panel.height = panel_h
+        self._panel_shine.x = panel_x + 4
+        self._panel_shine.y = panel_y + panel_h - max(8, int(20 * scale))
+        self._panel_shine.width = panel_w - 8
+        self._panel_shine.height = max(6, int(14 * scale))
+
+        self.title.x = cx
+        self.title.y = panel_y + panel_h - int(55 * scale)
+        self.title.font_size = max(16, int(28 * scale))
+        self.subtitle.x = cx
+        self.subtitle.y = self.title.y - int(28 * scale)
+        self.subtitle.font_size = max(10, int(12 * scale))
+
+        btn_w = min(int(panel_w * 0.78), int(520 * scale))
+        btn_h = int(62 * scale)
+        gap = int(18 * scale)
+        start_y = self.subtitle.y - int(45 * scale) - btn_h
+
+        for i, btn in enumerate(self.option_buttons):
+            btn.width = btn_w
+            btn.height = btn_h
+            btn.font_size = max(12, int(17 * scale))
+            btn.x = cx - btn_w // 2
+            btn.y = start_y - i * (btn_h + gap)
+            btn.sync()
+
+            self.option_desc[i].x = btn.x + int(12 * scale)
+            self.option_desc[i].y = btn.y - int(12 * scale)
+            self.option_desc[i].font_size = max(9, int(11 * scale))
+
+    def on_mouse_motion(self, x: float, y: float):
+        for btn in self.option_buttons:
+            btn.is_hovered = btn.contains_point(x, y)
+            btn.sync()
+
+    def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
+        if button != pyglet.window.mouse.LEFT:
+            return None
+        for i, btn in enumerate(self.option_buttons):
+            if btn.contains_point(x, y):
+                key = str(self._options[i].get("key", ""))
+                return key or None
+        return None
+
+    def draw(self):
+        self.batch.draw()
 
 
 class PauseMenu:
     """Pause menu screen."""
     
     def __init__(self, width: int, height: int):
-        self.buttons: List[MenuButton] = []
-        self.buttons.append(MenuButton(0, 0, 160, 50, "Resume", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)))
-        self.buttons.append(MenuButton(0, 0, 160, 50, "Quit to Menu", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)))
-        
+        self.batch = pyglet.graphics.Batch()
+        self.overlay = shapes.Rectangle(0, 0, width, height, color=(0, 0, 0), batch=self.batch)
+        self.overlay.opacity = 150
+
+        self.buttons: List[MenuButton] = [
+            MenuButton(0, 0, 160, 50, "Resume", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)),
+            MenuButton(0, 0, 160, 50, "Quit to Menu", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)),
+        ]
+        for b in self.buttons:
+            b.ensure(self.batch)
+
         self.title = pyglet.text.Label(
             "PAUSED",
             font_name="Segoe UI",
@@ -742,11 +913,9 @@ class PauseMenu:
             y=0,
             anchor_x="center",
             anchor_y="center",
-            color=(255, 255, 255, 255)
+            color=(255, 255, 255, 255),
+            batch=self.batch,
         )
-        
-        self.overlay = shapes.Rectangle(0, 0, width, height, color=(0, 0, 0))
-        self.overlay.opacity = 150
         self.resize(width, height)
 
     def resize(self, width: int, height: int):
@@ -774,10 +943,12 @@ class PauseMenu:
         for btn, y in zip(self.buttons, ys):
             btn.x = cx - btn.width // 2
             btn.y = y
+            btn.sync()
 
     def on_mouse_motion(self, x: float, y: float):
         for button in self.buttons:
             button.is_hovered = button.contains_point(x, y)
+            button.sync()
 
     def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
         if button != pyglet.window.mouse.LEFT:
@@ -791,22 +962,26 @@ class PauseMenu:
         return None
 
     def draw(self):
-        self.overlay.draw()
-        self.title.draw()
         for btn in self.buttons:
-            temp_batch = pyglet.graphics.Batch()
-            _ = btn.draw(temp_batch)
-            temp_batch.draw()
+            btn.sync()
+        self.batch.draw()
 
 
 class GameOverMenu:
     """Game Over screen."""
     
     def __init__(self, width: int, height: int):
-        self.buttons: List[MenuButton] = []
-        self.buttons.append(MenuButton(0, 0, 160, 50, "Try Again", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)))
-        self.buttons.append(MenuButton(0, 0, 160, 50, "Main Menu", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)))
-        
+        self.batch = pyglet.graphics.Batch()
+        self.overlay = shapes.Rectangle(0, 0, width, height, color=(20, 0, 0), batch=self.batch)
+        self.overlay.opacity = 200
+
+        self.buttons: List[MenuButton] = [
+            MenuButton(0, 0, 160, 50, "Try Again", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)),
+            MenuButton(0, 0, 160, 50, "Main Menu", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)),
+        ]
+        for b in self.buttons:
+            b.ensure(self.batch)
+
         self.title = pyglet.text.Label(
             "GAME OVER",
             font_name="Segoe UI",
@@ -815,9 +990,10 @@ class GameOverMenu:
             y=0,
             anchor_x="center",
             anchor_y="center",
-            color=(255, 50, 50, 255)
+            color=(255, 50, 50, 255),
+            batch=self.batch,
         )
-        
+
         self.score_label = pyglet.text.Label(
             "Reached Wave 1",
             font_name="Segoe UI",
@@ -826,11 +1002,9 @@ class GameOverMenu:
             y=0,
             anchor_x="center",
             anchor_y="center",
-            color=(255, 255, 255, 255)
+            color=(255, 255, 255, 255),
+            batch=self.batch,
         )
-        
-        self.overlay = shapes.Rectangle(0, 0, width, height, color=(20, 0, 0))
-        self.overlay.opacity = 200
         self.resize(width, height)
 
     def resize(self, width: int, height: int):
@@ -859,6 +1033,7 @@ class GameOverMenu:
         for btn, y in zip(self.buttons, ys):
             btn.x = cx - btn.width // 2
             btn.y = y
+            btn.sync()
 
     def set_wave(self, wave: int):
         self.score_label.text = f"You reached Wave {wave}"
@@ -866,6 +1041,7 @@ class GameOverMenu:
     def on_mouse_motion(self, x: float, y: float):
         for button in self.buttons:
             button.is_hovered = button.contains_point(x, y)
+            button.sync()
 
     def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
         if button != pyglet.window.mouse.LEFT:
@@ -879,10 +1055,6 @@ class GameOverMenu:
         return None
 
     def draw(self):
-        self.overlay.draw()
-        self.title.draw()
-        self.score_label.draw()
         for btn in self.buttons:
-            temp_batch = pyglet.graphics.Batch()
-            _ = btn.draw(temp_batch)
-            temp_batch.draw()
+            btn.sync()
+        self.batch.draw()

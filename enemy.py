@@ -403,53 +403,53 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             span = config.ROOM_RADIUS * 2.2
             start = anchor - dirv * span
             end = anchor + dirv * span
-            state.thunders.append(ThunderLine(start=start, end=end, damage=20, thickness=18.0, warn=0.45, ttl=0.18))
+            th_dmg = 14 + state.wave // 5
+            state.thunders.append(ThunderLine(start=start, end=end, damage=th_dmg, thickness=14.0, warn=0.55, ttl=0.16))
 
             # Personality + phases: mix in bullet patterns. Swirl/rings are rare to keep difficulty fair.
-            proj_speed = 210.0 + state.wave * 2.0
-            dmg = 7 + state.wave // 3
+            proj_speed = 195.0 + state.wave * 1.8
+            dmg = 5 + state.wave // 4
             aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.8)
             gun = _cycle_gun(enemy, ["plasma", "bullet", "spread"])
             if phase == 0:
                 if persona != "cautious":
-                    _fire_fan(state, enemy.pos, aim, count=5, spread_deg=55.0, speed=proj_speed, damage=dmg, ttl=2.5, projectile_type=gun)
+                    _fire_fan(state, enemy.pos, aim, count=4, spread_deg=50.0, speed=proj_speed, damage=dmg, ttl=2.5, projectile_type=gun)
             elif phase == 1:
-                _fire_fan(state, enemy.pos, aim, count=7, spread_deg=70.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type=gun)
+                _fire_fan(state, enemy.pos, aim, count=5, spread_deg=62.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type=gun)
             else:
-                swirl_chance = 0.22
+                swirl_chance = 0.12
                 if persona == "trickster":
-                    swirl_chance = 0.5
+                    swirl_chance = 0.25
                 if random.random() < swirl_chance:
-                    ring_gun = _cycle_gun(enemy, ["plasma", "spread", "bullet"])
+                    ring_gun = _cycle_gun(enemy, ["plasma", "bullet"])
                     _fire_ring(
                         state,
                         enemy.pos,
-                        count=10,
-                        speed=proj_speed * 0.9,
-                        damage=dmg + 2,
-                        ttl=2.65,
+                        count=8,
+                        speed=proj_speed * 0.88,
+                        damage=dmg + 1,
+                        ttl=2.55,
                         start_deg=enemy.t * 35.0,
                         projectile_type=ring_gun,
                     )
                 else:
-                    _fire_fan(state, enemy.pos, aim, count=9, spread_deg=85.0, speed=proj_speed, damage=dmg + 2, ttl=2.6, projectile_type=gun)
-                    if persona != "cautious":
-                        _fire_fan(state, enemy.pos, _perp(aim), count=5, spread_deg=40.0, speed=proj_speed * 0.95, damage=max(1, dmg), ttl=2.4, projectile_type=gun)
+                    _fire_fan(state, enemy.pos, aim, count=7, spread_deg=76.0, speed=proj_speed, damage=dmg + 2, ttl=2.6, projectile_type=gun)
 
             # Henchmen: spawn a couple of ranged adds sometimes.
-            if len(getattr(state, "enemies", [])) < getattr(state, "max_enemies", 12) + 4 and random.random() < 0.35:
-                for _ in range(2):
-                    ang = random.uniform(0, math.tau)
-                    pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(40, 70)
-                    state.enemies.append(Enemy(pos=pos, hp=18 + state.wave * 3, speed=55 + state.wave * 1.4, behavior="ranged"))
-            base_cd = 1.6 - state.wave * 0.02
+            adds_cap = getattr(state, "max_enemies", 12) + 2
+            if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.22:
+                ang = random.uniform(0, math.tau)
+                pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(45, 80)
+                state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=50 + state.wave * 1.25, behavior="ranged"))
+
+            base_cd = 1.95 - state.wave * 0.015
             if phase == 1:
-                base_cd *= 0.92
+                base_cd *= 0.95
             elif phase == 2:
-                base_cd *= 0.84
-            if persona == "aggressive":
                 base_cd *= 0.9
-            enemy.attack_cd = max(0.65, base_cd)
+            if persona == "aggressive":
+                base_cd *= 0.95
+            enemy.attack_cd = max(0.9, base_cd)
         return
 
     if enemy.behavior == "boss_laser":
@@ -473,55 +473,59 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             beam_len = config.ROOM_RADIUS * 2.0
             start = Vec2(enemy.pos.x, enemy.pos.y)
             end = start + dir_to * beam_len
+            beam_dmg = 16 + state.wave // 3
             state.lasers.append(
                 LaserBeam(
                     start=start,
                     end=end,
-                    damage=22 + state.wave // 2,
-                    thickness=14.0,
-                    warn=0.35,
-                    ttl=0.12,
+                    damage=beam_dmg,
+                    thickness=12.0,
+                    warn=0.42,
+                    ttl=0.10,
                     color=(255, 120, 255),
                     owner="enemy",
                 )
             )
             if phase >= 1:
                 # Slightly offset follow-up beams for a "sweep" feel.
-                for off in (-16, 16) if phase == 1 else (-24, -8, 8, 24):
+                offsets = (-16, 16) if phase == 1 else (-22, 22)
+                for off in offsets:
                     d2 = _rotate(dir_to, off)
                     state.lasers.append(
                         LaserBeam(
                             start=start,
                             end=start + d2 * beam_len,
-                            damage=18 + state.wave // 2,
-                            thickness=11.0,
-                            warn=0.38 if phase == 1 else 0.32,
-                            ttl=0.10,
+                            damage=12 + state.wave // 3,
+                            thickness=9.0,
+                            warn=0.46 if phase == 1 else 0.4,
+                            ttl=0.09,
                             color=(255, 120, 255),
                             owner="enemy",
                         )
                     )
 
             # Mix-in: shotgun bursts later in the fight (or for tricksters).
-            if phase == 2 or (persona == "trickster" and phase >= 1):
+            if (phase == 2 and random.random() < 0.45) or (persona == "trickster" and phase >= 1 and random.random() < 0.35):
                 proj_speed = 235.0 + state.wave * 2.2
-                dmg = 6 + state.wave // 4
+                dmg = 5 + state.wave // 5
                 aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.75)
-                pellets = 5 if phase == 1 else 7
-                spread = 72.0 if phase == 1 else 82.0
+                pellets = 4 if phase == 1 else 6
+                spread = 66.0 if phase == 1 else 76.0
                 _fire_fan(state, enemy.pos, aim, count=pellets, spread_deg=spread, speed=proj_speed, damage=dmg, ttl=2.5, projectile_type="plasma" if persona == "trickster" else "bullet")
 
             # Henchmen: occasional fast chasers.
-            if len(getattr(state, "enemies", [])) < getattr(state, "max_enemies", 12) + 5 and random.random() < 0.25:
+            adds_cap = getattr(state, "max_enemies", 12) + 2
+            if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.15:
                 ang = random.uniform(0, math.tau)
                 pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(50, 90)
-                state.enemies.append(Enemy(pos=pos, hp=16 + state.wave * 3, speed=90 + state.wave * 2.2, behavior="chaser"))
-            base_cd = 0.9 - state.wave * 0.02
+                state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=85 + state.wave * 2.0, behavior="chaser"))
+
+            base_cd = 1.15 - state.wave * 0.015
             if phase == 2:
-                base_cd *= 0.85
+                base_cd *= 0.92
             if persona == "aggressive":
-                base_cd *= 0.9
-            enemy.attack_cd = max(0.22, base_cd)
+                base_cd *= 0.95
+            enemy.attack_cd = max(0.5, base_cd)
         return
 
     if enemy.behavior == "boss_trapmaster":
@@ -544,7 +548,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             if not hasattr(state, "traps"):
                 state.traps = []
             # Ring of traps around the player.
-            n = 5
+            n = 4
             r = 85
             base_ang = random.uniform(0, math.tau)
             for i in range(n):
@@ -567,9 +571,10 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
                     _fire_fan(state, enemy.pos, _perp(aim), count=5, spread_deg=46.0, speed=proj_speed * 0.95, damage=max(1, dmg), ttl=2.45, projectile_type="spread")
 
             # Henchmen: engineers join the fight.
-            if len(getattr(state, "enemies", [])) < getattr(state, "max_enemies", 12) + 4 and random.random() < 0.4:
+            adds_cap = getattr(state, "max_enemies", 12) + 2
+            if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.2:
                 pos = enemy.pos + Vec2(random.uniform(-70, 70), random.uniform(-70, 70))
-                state.enemies.append(Enemy(pos=pos, hp=26 + state.wave * 4, speed=55 + state.wave * 1.3, behavior="engineer"))
+                state.enemies.append(Enemy(pos=pos, hp=22 + state.wave * 3, speed=52 + state.wave * 1.2, behavior="engineer"))
             base_cd = 2.2 - state.wave * 0.03
             if phase >= 1:
                 base_cd *= 0.9
@@ -591,12 +596,12 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
         enemy.attack_cd -= dt
         if enemy.attack_cd <= 0.0:
             # Summon a few swarm enemies (capped to avoid runaway difficulty/perf).
-            adds_cap = getattr(state, "max_enemies", 12) + 10
+            adds_cap = getattr(state, "max_enemies", 12) + 6
             slots = max(0, int(adds_cap) - len(getattr(state, "enemies", [])))
-            for _ in range(min(3, slots)):
+            for _ in range(min(2, slots)):
                 ang = random.uniform(0, math.tau)
                 pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(30, 60)
-                state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=95 + state.wave * 1.5, behavior="swarm"))
+                state.enemies.append(Enemy(pos=pos, hp=12 + state.wave * 2, speed=92 + state.wave * 1.4, behavior="swarm"))
 
             # Spit a fan of shots.
             proj_speed = 210.0 + state.wave * 2.5

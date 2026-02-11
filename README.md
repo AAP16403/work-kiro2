@@ -20,12 +20,20 @@ The game code is now organized into separate, modular files for better maintaina
 
 #### **player.py**
 - `Player` dataclass with stats and controls
-- Player attributes: position, HP, speed, damage, fire_rate
+- Player attributes: position, HP, shield, speed, damage, fire_rate
+- Timed powerups (laser/vortex) and current weapon
 
 #### **enemy.py**
 - `Enemy` dataclass with behavior types
 - `update_enemy()` function for AI behavior
-- Three enemy types: "chaser", "ranged", "charger"
+- Enemy types: "chaser", "ranged", "charger", "swarm", "tank", "spitter", "flyer", "engineer"
+- Bosses: "boss_thunder", "boss_laser", "boss_trapmaster", "boss_swarmqueen", "boss_brute"
+  - Bosses use phases + personality with mixed bullet patterns
+
+#### **weapons.py**
+- Weapon definitions and wave-based weapon selection
+- Projectile spawning per weapon type
+- Effective fire-rate calculation (weapon base rate + player fire-rate upgrades)
 
 #### **projectile.py**
 - `Projectile` dataclass for bullets
@@ -34,12 +42,22 @@ The game code is now organized into separate, modular files for better maintaina
 #### **powerup.py**
 - `PowerUp` dataclass for collectible items
 - `apply_powerup()` function to apply effects to player
-- Types: "heal", "damage", "speed", "firerate"
+- Types: "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon"
+
+#### **hazards.py**
+- Trap and boss hazards (laser beams, thunder lines)
 
 #### **level.py**
 - `GameState` dataclass - central game state
 - `spawn_wave()` - creates enemy waves with increasing difficulty
 - `maybe_spawn_powerup()` - random powerup spawning
+- Boss wave every 5 waves and boss loot drops
+
+#### **particles.py**
+- Hit/muzzle/death/pickup particles and special effects (laser/vortex)
+
+#### **menu.py**
+- Main menu, settings, pause, and game over menus
 
 #### **map.py**
 - `Room` class - manages the game map
@@ -112,15 +130,17 @@ Output:
 
 - **Isometric Perspective** - Depth-sorted rendering
 - **Wave-Based Combat** - Difficulty increases per wave
-- **Three Enemy Types**:
-  - Chaser (red) - rushes the player
-  - Ranged (blue) - keeps distance and fires
-  - Charger (orange) - charges in bursts
-- **Four PowerUp Types**:
-  - Heal (green +) - restores 25 HP
+- **Enemy Variety + Boss Waves** - Bosses appear every 5 waves with distinct patterns
+- **Weapon System** - Different weapon types with distinct projectile patterns
+- **Powerups**:
+  - Heal (green +) - restores HP
   - Damage (red !) - increases attack power
   - Speed (blue >) - increases movement speed
   - Fire Rate (yellow *) - faster shooting
+  - Shield (cyan O) - temporary extra HP buffer
+  - Laser (magenta =) - short-duration beam weapon
+  - Vortex (purple @) - damaging aura
+  - Weapon (white/blue W) - swaps to a new gun (bosses always drop one)
 
 ## Dependencies
 

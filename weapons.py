@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List
 from projectile import Projectile
 from utils import Vec2
+from config import PLAYER_FIRE_RATE
 import random
 import math
 
@@ -68,6 +69,33 @@ WEAPONS = {
         projectile_type="plasma"
     ),
 }
+
+def get_weapon_pool_for_wave(wave: int) -> list[str]:
+    """Return the allowed weapon keys for a given wave."""
+    if wave <= 2:
+        return ["basic"]
+    if wave <= 4:
+        return ["basic", "rapid", "spread"]
+    if wave <= 6:
+        return ["rapid", "spread", "plasma"]
+    return ["spread", "plasma", "heavy"]
+
+
+def get_weapon_key_for_wave(wave: int) -> str:
+    """Pick a random weapon key appropriate for the wave."""
+    return random.choice(get_weapon_pool_for_wave(int(wave)))
+
+
+def get_effective_fire_rate(weapon: Weapon, player_fire_rate: float) -> float:
+    """Compute the actual cooldown used for shooting.
+
+    Player fire_rate acts as a global modifier relative to PLAYER_FIRE_RATE,
+    while each weapon has its own base fire_rate.
+    """
+    base = max(0.06, float(weapon.fire_rate))
+    mult = float(player_fire_rate) / max(0.06, float(PLAYER_FIRE_RATE))
+    mult = max(0.45, min(2.25, mult))
+    return max(0.06, base * mult)
 
 
 def spawn_weapon_projectiles(
@@ -148,14 +176,7 @@ def spawn_weapon_projectiles(
 
 def get_weapon_for_wave(wave: int) -> Weapon:
     """Get a random weapon appropriate for the wave."""
-    if wave <= 2:
-        return WEAPONS["basic"]
-    elif wave <= 4:
-        return random.choice([WEAPONS["basic"], WEAPONS["rapid"], WEAPONS["spread"]])
-    elif wave <= 6:
-        return random.choice([WEAPONS["rapid"], WEAPONS["spread"], WEAPONS["plasma"]])
-    else:
-        return random.choice([WEAPONS["spread"], WEAPONS["plasma"], WEAPONS["heavy"]])
+    return WEAPONS[get_weapon_key_for_wave(int(wave))]
 
 
 def get_weapon_color(weapon_type: str) -> tuple:

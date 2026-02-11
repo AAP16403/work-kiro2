@@ -553,6 +553,7 @@ class Visuals:
             "shield": ((120, 220, 255), "O", 14),    # Cyan shield
             "laser": ((255, 120, 255), "=", 14),     # Magenta beam
             "vortex": ((180, 140, 255), "@", 14),    # Vortex
+            "weapon": ((220, 230, 255), "W", 14),    # Weapon pickup
         }.get(p.kind, ((200, 200, 200), "?", 12))
 
         # Large, glowing center orb

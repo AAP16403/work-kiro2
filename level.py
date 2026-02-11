@@ -11,6 +11,7 @@ from layout import Obstacle
 from projectile import Projectile
 from powerup import PowerUp
 from utils import Vec2, random_spawn_edge
+from weapons import get_weapon_key_for_wave
 
 
 @dataclass
@@ -187,8 +188,13 @@ def maybe_spawn_powerup(state: GameState, center: Vec2):
         kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
         if random.random() < 0.06:
             kind = "vortex"
+        elif state.wave >= 3 and random.random() < 0.05:
+            kind = "weapon"
         pos = random_spawn_edge(center, config.ROOM_RADIUS * 0.6)
-        state.powerups.append(PowerUp(pos, kind))
+        if kind == "weapon":
+            state.powerups.append(PowerUp(pos, kind, data=get_weapon_key_for_wave(state.wave)))
+        else:
+            state.powerups.append(PowerUp(pos, kind))
 
 
 def spawn_powerup_on_kill(state: GameState, center: Vec2):
@@ -199,6 +205,31 @@ def spawn_powerup_on_kill(state: GameState, center: Vec2):
         kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
         if random.random() < 0.03:
             kind = "vortex"
+        elif state.wave >= 4 and random.random() < 0.02:
+            kind = "weapon"
         # Spawn near center
         pos = center + Vec2(random.uniform(-50, 50), random.uniform(-50, 50))
-        state.powerups.append(PowerUp(pos, kind))
+        if kind == "weapon":
+            state.powerups.append(PowerUp(pos, kind, data=get_weapon_key_for_wave(state.wave)))
+        else:
+            state.powerups.append(PowerUp(pos, kind))
+
+
+def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2):
+    """Spawn loot when an enemy dies (bosses drop better rewards)."""
+    b = str(behavior or "")
+    if b.startswith("boss_"):
+        # Bosses always drop a weapon and at least one regular powerup.
+        state.powerups.append(PowerUp(center + Vec2(random.uniform(-20, 20), random.uniform(-20, 20)), "weapon", data=get_weapon_key_for_wave(state.wave + 1)))
+        # One guaranteed sustain/utility drop.
+        kind = random.choice(["heal", "shield", "laser"])
+        state.powerups.append(PowerUp(center + Vec2(random.uniform(-35, 35), random.uniform(-35, 35)), kind))
+        # Small bonus chance for a second drop.
+        if random.random() < 0.35:
+            kind2 = random.choice(["damage", "speed", "firerate"])
+            if random.random() < 0.08:
+                kind2 = "vortex"
+            state.powerups.append(PowerUp(center + Vec2(random.uniform(-45, 45), random.uniform(-45, 45)), kind2))
+        return
+
+    spawn_powerup_on_kill(state, center)

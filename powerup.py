@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from config import PLAYER_HP
 from utils import Vec2
+from weapons import WEAPONS
 
 if TYPE_CHECKING:
     from player import Player
@@ -14,7 +15,8 @@ if TYPE_CHECKING:
 class PowerUp:
     """PowerUp entity."""
     pos: Vec2
-    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex"
+    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon"
+    data: str | None = None
 
 
 def apply_powerup(player: "Player", p: PowerUp, now: float):
@@ -34,3 +36,7 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
     elif p.kind == "vortex":
         # A damaging aura that swirls around the player.
         player.vortex_until = max(player.vortex_until, now + 10.0)
+    elif p.kind == "weapon":
+        key = str(p.data or "basic").lower()
+        if key in WEAPONS:
+            player.current_weapon = WEAPONS[key]

@@ -44,6 +44,7 @@ POWERUP_COLORS = {
     "shield": (120, 220, 255),
     "laser": (255, 120, 255),
     "vortex": (180, 140, 255),
+    "weapon": (220, 230, 255),
 }
 
 # Enemy Colors

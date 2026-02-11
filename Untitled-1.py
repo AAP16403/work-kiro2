@@ -12,7 +12,7 @@ import config
 from config import SCREEN_W, SCREEN_H, FPS, PLAYER_SPEED, PROJECTILE_SPEED, WAVE_COOLDOWN, HUD_TEXT, ENEMY_COLORS, POWERUP_COLORS
 from player import Player
 from map import Room
-from level import GameState, spawn_wave, maybe_spawn_powerup
+from level import GameState, spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death
 from enemy import update_enemy
 from powerup import apply_powerup
 from projectile import Projectile
@@ -27,7 +27,7 @@ from utils import (
     resolve_circle_obstacles,
 )
 from visuals import Visuals, GroupCache
-from weapons import get_weapon_for_wave, spawn_weapon_projectiles, get_weapon_color
+from weapons import get_weapon_for_wave, spawn_weapon_projectiles, get_effective_fire_rate
 from particles import ParticleSystem
 from menu import Menu, SettingsMenu, PauseMenu, GameOverMenu
 from hazards import LaserBeam
@@ -443,8 +443,7 @@ class Game(pyglet.window.Window):
                         if e.hp <= 0:
                             s.enemies.remove(e)
                             self.visuals.drop_enemy(e)
-                            from level import spawn_powerup_on_kill
-                            spawn_powerup_on_kill(s, e.pos)
+                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
 
         # Traps
         for tr in list(getattr(s, "traps", [])):
@@ -490,7 +489,8 @@ class Game(pyglet.window.Window):
             player_vel = Vec2(0.0, 0.0)
 
         # Player shooting
-        if self.mouse_down and (s.time - self.player.last_shot) >= self.player.fire_rate:
+        weapon_cd = get_effective_fire_rate(self.player.current_weapon, self.player.fire_rate)
+        if self.mouse_down and (s.time - self.player.last_shot) >= weapon_cd:
             world_mouse = iso_to_world(self.mouse_xy)
             aim = (world_mouse - self.player.pos).normalized()
             muzzle = self.player.pos + aim * 14.0
@@ -509,8 +509,7 @@ class Game(pyglet.window.Window):
                         if e.hp <= 0:
                             s.enemies.remove(e)
                             self.visuals.drop_enemy(e)
-                            from level import spawn_powerup_on_kill
-                            spawn_powerup_on_kill(s, e.pos)
+                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
             else:
                 # Use current weapon to spawn projectiles
                 weapon = self.player.current_weapon
@@ -535,8 +534,7 @@ class Game(pyglet.window.Window):
                 self.visuals.drop_enemy(e)
                 s.shake = 9.0
                 # Chance to spawn powerup on kill
-                from level import spawn_powerup_on_kill
-                spawn_powerup_on_kill(s, self.player.pos)
+                spawn_loot_on_enemy_death(s, e.behavior, self.player.pos)
 
         # Projectiles
         for p in list(s.projectiles):
@@ -584,8 +582,7 @@ class Game(pyglet.window.Window):
                                     s.shake = 15.0
                             
                             # Chance to spawn powerup on kill
-                            from level import spawn_powerup_on_kill
-                            spawn_powerup_on_kill(s, e.pos)
+                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
                         if p in s.projectiles:
                             s.projectiles.remove(p)
                             self.visuals.drop_projectile(p)
@@ -600,7 +597,16 @@ class Game(pyglet.window.Window):
 
         # Powerups
         for pu in list(s.powerups):
-            if dist(pu.pos, self.player.pos) < 16:
+            dpu = dist(pu.pos, self.player.pos)
+            magnet_r = 190.0 if getattr(pu, "kind", "") == "weapon" else 150.0
+            if dpu < magnet_r and dpu > 1e-6:
+                pull = (self.player.pos - pu.pos).normalized()
+                pull_speed = 220.0 + (magnet_r - dpu) * 2.0
+                pu.pos = pu.pos + pull * pull_speed * dt
+                dpu = dist(pu.pos, self.player.pos)
+
+            pickup_r = 20.0 if getattr(pu, "kind", "") == "weapon" else 16.0
+            if dpu < pickup_r:
                 # Particle effect for powerup collection
                 color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
                 self.particle_system.add_powerup_collection(pu.pos, color)

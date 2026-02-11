@@ -30,9 +30,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\build_exe.ps1"
 if errorlevel 1 goto :fail
 
 echo.
+echo Creating .zip...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Push-Location '%CD%\\dist'; if (Test-Path '.\\Kiro2Game.zip') { Remove-Item -Force '.\\Kiro2Game.zip' }; Compress-Archive -Path '.\\Kiro2Game' -DestinationPath '.\\Kiro2Game.zip' -Force; Pop-Location"
+if errorlevel 1 goto :fail
+
+echo.
 echo SUCCESS.
 echo Output folder: %CD%\dist\Kiro2Game\
 echo EXE: %CD%\dist\Kiro2Game\Kiro2Game.exe
+echo ZIP: %CD%\dist\Kiro2Game.zip
 echo.
 pause
 exit /b 0
@@ -43,4 +49,3 @@ echo FAILED. Scroll up for the first error message.
 echo.
 pause
 exit /b 1
-

@@ -32,6 +32,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="Kiro2Game",
+    icon="laser-gun_38685.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -50,4 +51,3 @@ coll = COLLECT(
     upx_exclude=[],
     name="Kiro2Game",
 )
-

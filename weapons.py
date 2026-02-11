@@ -83,7 +83,19 @@ def get_weapon_pool_for_wave(wave: int) -> list[str]:
 
 def get_weapon_key_for_wave(wave: int) -> str:
     """Pick a random weapon key appropriate for the wave."""
-    return random.choice(get_weapon_pool_for_wave(int(wave)))
+    w = int(wave)
+    pool = get_weapon_pool_for_wave(w)
+    if w <= 2:
+        weights = [1.0]
+    elif w <= 4:
+        # Keep basic common early; introduce rapid/spread gradually.
+        weights = [0.55, 0.25, 0.20]  # basic, rapid, spread
+    elif w <= 6:
+        weights = [0.35, 0.35, 0.30]  # rapid, spread, plasma
+    else:
+        # Heavy is intentionally rarer; it's a high-commitment weapon.
+        weights = [0.45, 0.45, 0.10]  # spread, plasma, heavy
+    return random.choices(pool, weights=weights, k=1)[0]
 
 
 def get_effective_fire_rate(weapon: Weapon, player_fire_rate: float) -> float:

@@ -24,4 +24,6 @@ class Player:
     vortex_until: float = 0.0
     vortex_radius: float = 70.0
     vortex_dps: float = 38.0
+    ultra_charges: int = 0
+    ultra_cd_until: float = 0.0
     current_weapon: "Weapon" = field(default=None)  # Will be set in Game.__init__

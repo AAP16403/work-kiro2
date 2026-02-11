@@ -558,6 +558,7 @@ class Visuals:
             "laser": ((255, 120, 255), "=", 14),     # Magenta beam
             "vortex": ((180, 140, 255), "@", 14),    # Vortex
             "weapon": ((220, 230, 255), "W", 14),    # Weapon pickup
+            "ultra": ((255, 230, 170), "U", 14),     # Ultra ability charge
         }.get(p.kind, ((200, 200, 200), "?", 12))
 
         # Large, glowing center orb

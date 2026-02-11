@@ -208,6 +208,58 @@ class Game(pyglet.window.Window):
         if amount > 0:
             self.player.hp -= amount
 
+    def _use_ultra(self):
+        if self.game_state != "playing" or not self.state or not self.player:
+            return
+
+        s = self.state
+        if getattr(self.player, "ultra_charges", 0) <= 0:
+            return
+        if s.time < getattr(self.player, "ultra_cd_until", 0.0):
+            return
+
+        world_mouse = iso_to_world(self.mouse_xy)
+        aim = (world_mouse - self.player.pos).normalized()
+        if aim.length() <= 1e-6:
+            aim = Vec2(1.0, 0.0)
+
+        muzzle = self.player.pos + aim * 14.0
+        beam_len = config.ROOM_RADIUS * 2.05
+        end = muzzle + aim * beam_len
+        dmg = int(config.ULTRA_DAMAGE_BASE + self.player.damage * config.ULTRA_DAMAGE_MULT)
+
+        beam = LaserBeam(
+            start=muzzle,
+            end=end,
+            damage=dmg,
+            thickness=float(config.ULTRA_BEAM_THICKNESS),
+            ttl=float(config.ULTRA_BEAM_TTL),
+            owner="player",
+            color=tuple(config.ULTRA_BEAM_COLOR),
+        )
+        s.lasers.append(beam)
+        if self.particle_system:
+            self.particle_system.add_laser_beam(muzzle, end, color=beam.color)
+        s.shake = max(s.shake, 12.0)
+
+        hit_r = float(config.ULTRA_BEAM_THICKNESS) * 0.75
+        for e in list(s.enemies):
+            if point_segment_distance(e.pos, muzzle, end) <= hit_r:
+                e.hp -= dmg
+                enemy_color = ENEMY_COLORS.get(e.behavior, (200, 200, 200))
+                if self.particle_system:
+                    self.particle_system.add_hit_particles(e.pos, enemy_color)
+                if e.hp <= 0:
+                    s.enemies.remove(e)
+                    if self.visuals:
+                        self.visuals.drop_enemy(e)
+                    if self.particle_system:
+                        self.particle_system.add_death_explosion(e.pos, enemy_color, e.behavior)
+                    spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+
+        self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)
+        self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN)
+
     def _enemy_radius(self, enemy) -> float:
         b = getattr(enemy, "behavior", "")
         if b.startswith("boss_"):
@@ -354,8 +406,11 @@ class Game(pyglet.window.Window):
             elif action == "quit_to_menu":
                 self._return_to_menu()
         elif self.game_state == "playing":
+            self.mouse_xy = (x, y)
             if button == pyglet.window.mouse.LEFT:
                 self.mouse_down = True
+            elif button == pyglet.window.mouse.RIGHT:
+                self._use_ultra()
 
     def on_mouse_release(self, x, y, button, modifiers):
         if button == pyglet.window.mouse.LEFT:
@@ -597,14 +652,16 @@ class Game(pyglet.window.Window):
         # Powerups
         for pu in list(s.powerups):
             dpu = dist(pu.pos, self.player.pos)
-            magnet_r = 190.0 if getattr(pu, "kind", "") == "weapon" else 150.0
+            kind = getattr(pu, "kind", "")
+            is_special = kind in ("weapon", "ultra")
+            magnet_r = 190.0 if is_special else 150.0
             if dpu < magnet_r and dpu > 1e-6:
                 pull = (self.player.pos - pu.pos).normalized()
                 pull_speed = 220.0 + (magnet_r - dpu) * 2.0
                 pu.pos = pu.pos + pull * pull_speed * dt
                 dpu = dist(pu.pos, self.player.pos)
 
-            pickup_r = 20.0 if getattr(pu, "kind", "") == "weapon" else 16.0
+            pickup_r = 20.0 if is_special else 16.0
             if dpu < pickup_r:
                 # Particle effect for powerup collection
                 color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
@@ -712,9 +769,16 @@ class Game(pyglet.window.Window):
             laser_txt = f"   Laser: {laser_left:.0f}s" if laser_left > 0 else ""
             vortex_left = max(0.0, self.player.vortex_until - self.state.time)
             vortex_txt = f"   Vortex: {vortex_left:.0f}s" if vortex_left > 0 else ""
+            ultra_charges = int(getattr(self.player, "ultra_charges", 0))
+            ultra_cd = max(0.0, float(getattr(self.player, "ultra_cd_until", 0.0)) - self.state.time)
+            ultra_txt = ""
+            if ultra_charges > 0:
+                ultra_txt = f"   Ultra: {ultra_charges}"
+                if ultra_cd > 0:
+                    ultra_txt += f" ({ultra_cd:.0f}s)"
             boss = next((e for e in self.state.enemies if getattr(e, "behavior", "").startswith("boss_")), None)
             boss_txt = f"   BOSS: {boss.behavior[5:].replace('_',' ').title()} HP:{boss.hp}" if boss else ""
-            self.hud.text = f"HP: {self.player.hp}   Shield: {self.player.shield}   Wave: {self.state.wave}   Enemies: {len(self.state.enemies)}   Weapon: {self.player.current_weapon.name.capitalize()}{laser_txt}{vortex_txt}{boss_txt}"
+            self.hud.text = f"HP: {self.player.hp}   Shield: {self.player.shield}   Wave: {self.state.wave}   Enemies: {len(self.state.enemies)}   Weapon: {self.player.current_weapon.name.capitalize()}{laser_txt}{vortex_txt}{ultra_txt}{boss_txt}"
             self.hud.draw()
             
             if self.game_state == "paused":

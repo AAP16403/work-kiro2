@@ -175,7 +175,11 @@ def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tu
 
     is_boss = behavior.startswith("boss_")
     hp_mult = mods["boss_hp"] if is_boss else mods["hp"]
-    hp = max(1, int(hp * hp_mult))
+    hp = float(hp) * float(hp_mult)
+    if is_boss:
+        # Bosses need to stay relevant even as the player stacks upgrades.
+        hp *= (1.25 + 0.01 * float(wave))
+    hp = max(1, int(hp))
     speed = float(speed) * mods["speed"]
     return (hp, speed, atk)
 
@@ -188,6 +192,8 @@ def maybe_spawn_powerup(state: GameState, center: Vec2):
         kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
         if random.random() < 0.06:
             kind = "vortex"
+        elif state.wave >= 4 and random.random() < 0.03:
+            kind = "ultra"
         elif state.wave >= 3 and random.random() < 0.05:
             kind = "weapon"
         pos = random_spawn_edge(center, config.ROOM_RADIUS * 0.6)
@@ -205,6 +211,8 @@ def spawn_powerup_on_kill(state: GameState, center: Vec2):
         kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
         if random.random() < 0.03:
             kind = "vortex"
+        elif state.wave >= 4 and random.random() < 0.015:
+            kind = "ultra"
         elif state.wave >= 4 and random.random() < 0.02:
             kind = "weapon"
         # Spawn near center
@@ -227,8 +235,11 @@ def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2):
         # Small bonus chance for a second drop.
         if random.random() < 0.35:
             kind2 = random.choice(["damage", "speed", "firerate"])
-            if random.random() < 0.08:
+            r = random.random()
+            if r < 0.08:
                 kind2 = "vortex"
+            elif state.wave >= 5 and r < 0.3:
+                kind2 = "ultra"
             state.powerups.append(PowerUp(center + Vec2(random.uniform(-45, 45), random.uniform(-45, 45)), kind2))
         return
 

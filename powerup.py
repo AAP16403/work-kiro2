@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from config import PLAYER_HP
+from config import PLAYER_HP, ULTRA_MAX_CHARGES
 from utils import Vec2
 from weapons import WEAPONS
 
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 class PowerUp:
     """PowerUp entity."""
     pos: Vec2
-    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon"
+    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon", "ultra"
     data: str | None = None
 
 
@@ -24,11 +24,11 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
     if p.kind == "heal":
         player.hp = min(PLAYER_HP, player.hp + 25)
     elif p.kind == "damage":
-        player.damage += 5
+        player.damage += 4
     elif p.kind == "speed":
         player.speed += 18
     elif p.kind == "firerate":
-        player.fire_rate = max(0.12, player.fire_rate - 0.04)
+        player.fire_rate = max(0.16, player.fire_rate - 0.03)
     elif p.kind == "shield":
         player.shield = min(120, player.shield + 45)
     elif p.kind == "laser":
@@ -40,3 +40,5 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
         key = str(p.data or "basic").lower()
         if key in WEAPONS:
             player.current_weapon = WEAPONS[key]
+    elif p.kind == "ultra":
+        player.ultra_charges = min(ULTRA_MAX_CHARGES, int(getattr(player, "ultra_charges", 0)) + 1)

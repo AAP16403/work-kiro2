@@ -64,27 +64,48 @@ def _rotate(v: Vec2, deg: float) -> Vec2:
     return Vec2(v.x * cos_a - v.y * sin_a, v.x * sin_a + v.y * cos_a)
 
 
-def _fire_fan(state, origin: Vec2, aim: Vec2, count: int, spread_deg: float, speed: float, damage: int, ttl: float = 2.6):
+def _fire_fan(
+    state,
+    origin: Vec2,
+    aim: Vec2,
+    count: int,
+    spread_deg: float,
+    speed: float,
+    damage: int,
+    ttl: float = 2.6,
+    projectile_type: str = "bullet",
+):
     """Fire a spread/fan of enemy bullets around an aim direction."""
+    ptype = str(projectile_type or "bullet")
     n = max(1, int(count))
     if n == 1:
-        state.projectiles.append(Projectile(origin, aim * float(speed), int(damage), ttl=float(ttl), owner="enemy"))
+        state.projectiles.append(Projectile(origin, aim * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype))
         return
     step = float(spread_deg) / float(n - 1) if n > 1 else 0.0
     start = -float(spread_deg) * 0.5
     for i in range(n):
         d = _rotate(aim, start + step * i)
-        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy"))
+        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype))
 
 
-def _fire_ring(state, origin: Vec2, count: int, speed: float, damage: int, ttl: float = 2.8, start_deg: float = 0.0):
+def _fire_ring(
+    state,
+    origin: Vec2,
+    count: int,
+    speed: float,
+    damage: int,
+    ttl: float = 2.8,
+    start_deg: float = 0.0,
+    projectile_type: str = "bullet",
+):
     """Fire bullets in a full ring around the origin."""
+    ptype = str(projectile_type or "bullet")
     n = max(3, int(count))
     base = float(start_deg)
     for i in range(n):
         a = base + (i / n) * 360.0
         d = Vec2(math.cos(math.radians(a)), math.sin(math.radians(a)))
-        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy"))
+        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype))
 
 
 def _boss_init(enemy: Enemy):
@@ -95,6 +116,8 @@ def _boss_init(enemy: Enemy):
         enemy.ai["persona"] = personas[int(enemy.seed * 1000) % len(personas)]
     if "phase" not in enemy.ai:
         enemy.ai["phase"] = 0
+    if "gun_idx" not in enemy.ai:
+        enemy.ai["gun_idx"] = 0
 
 
 def _boss_phase(enemy: Enemy) -> int:
@@ -105,6 +128,15 @@ def _boss_phase(enemy: Enemy) -> int:
     if r > 0.33:
         return 1
     return 2
+
+
+def _cycle_gun(enemy: Enemy, guns: list[str]) -> str:
+    """Cycle through a list of projectile types for variety."""
+    if not guns:
+        return "bullet"
+    idx = int(enemy.ai.get("gun_idx", 0))
+    enemy.ai["gun_idx"] = idx + 1
+    return str(guns[idx % len(guns)])
 
 
 def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: Vec2 | None = None):
@@ -373,17 +405,36 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             end = anchor + dirv * span
             state.thunders.append(ThunderLine(start=start, end=end, damage=20, thickness=18.0, warn=0.45, ttl=0.18))
 
-            # Personality + phases: mix in spread/ring bullet patterns.
+            # Personality + phases: mix in bullet patterns. Swirl/rings are rare to keep difficulty fair.
             proj_speed = 210.0 + state.wave * 2.0
             dmg = 7 + state.wave // 3
             aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.8)
+            gun = _cycle_gun(enemy, ["plasma", "bullet", "spread"])
             if phase == 0:
                 if persona != "cautious":
-                    _fire_fan(state, enemy.pos, aim, count=5, spread_deg=55.0, speed=proj_speed, damage=dmg, ttl=2.5)
+                    _fire_fan(state, enemy.pos, aim, count=5, spread_deg=55.0, speed=proj_speed, damage=dmg, ttl=2.5, projectile_type=gun)
             elif phase == 1:
-                _fire_fan(state, enemy.pos, aim, count=7, spread_deg=70.0, speed=proj_speed, damage=dmg + 1, ttl=2.6)
+                _fire_fan(state, enemy.pos, aim, count=7, spread_deg=70.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type=gun)
             else:
-                _fire_ring(state, enemy.pos, count=12, speed=proj_speed * 0.92, damage=dmg + 2, ttl=2.7, start_deg=enemy.t * 35.0)
+                swirl_chance = 0.22
+                if persona == "trickster":
+                    swirl_chance = 0.5
+                if random.random() < swirl_chance:
+                    ring_gun = _cycle_gun(enemy, ["plasma", "spread", "bullet"])
+                    _fire_ring(
+                        state,
+                        enemy.pos,
+                        count=10,
+                        speed=proj_speed * 0.9,
+                        damage=dmg + 2,
+                        ttl=2.65,
+                        start_deg=enemy.t * 35.0,
+                        projectile_type=ring_gun,
+                    )
+                else:
+                    _fire_fan(state, enemy.pos, aim, count=9, spread_deg=85.0, speed=proj_speed, damage=dmg + 2, ttl=2.6, projectile_type=gun)
+                    if persona != "cautious":
+                        _fire_fan(state, enemy.pos, _perp(aim), count=5, spread_deg=40.0, speed=proj_speed * 0.95, damage=max(1, dmg), ttl=2.4, projectile_type=gun)
 
             # Henchmen: spawn a couple of ranged adds sometimes.
             if len(getattr(state, "enemies", [])) < getattr(state, "max_enemies", 12) + 4 and random.random() < 0.35:
@@ -451,13 +502,14 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
                         )
                     )
 
-            # Mix-in: shotgun bursts at higher phases (or trickster persona).
-            if phase >= 1 or persona == "trickster":
+            # Mix-in: shotgun bursts later in the fight (or for tricksters).
+            if phase == 2 or (persona == "trickster" and phase >= 1):
                 proj_speed = 235.0 + state.wave * 2.2
-                dmg = 7 + state.wave // 3
+                dmg = 6 + state.wave // 4
                 aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.75)
-                pellets = 6 if phase == 1 else 8
-                _fire_fan(state, enemy.pos, aim, count=pellets, spread_deg=78.0, speed=proj_speed, damage=dmg, ttl=2.5)
+                pellets = 5 if phase == 1 else 7
+                spread = 72.0 if phase == 1 else 82.0
+                _fire_fan(state, enemy.pos, aim, count=pellets, spread_deg=spread, speed=proj_speed, damage=dmg, ttl=2.5, projectile_type="plasma" if persona == "trickster" else "bullet")
 
             # Henchmen: occasional fast chasers.
             if len(getattr(state, "enemies", [])) < getattr(state, "max_enemies", 12) + 5 and random.random() < 0.25:
@@ -500,17 +552,19 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
                 pos = player_pos + Vec2(math.cos(ang), math.sin(ang)) * r
                 state.traps.append(Trap(pos=pos, radius=30.0, damage=18, ttl=9.0, armed_delay=0.55, kind="spike"))
 
-            # Phases: add shrapnel bursts (spread and ring) after trap placement.
+            # Phases: add shrapnel bursts after trap placement (no swirl/ring spam).
             proj_speed = 200.0 + state.wave * 2.0
             dmg = 7 + state.wave // 4
             aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.85)
             if phase == 0:
                 if persona != "cautious":
-                    _fire_fan(state, enemy.pos, aim, count=5, spread_deg=60.0, speed=proj_speed, damage=dmg, ttl=2.6)
+                    _fire_fan(state, enemy.pos, aim, count=5, spread_deg=60.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type="spread")
             elif phase == 1:
-                _fire_fan(state, enemy.pos, aim, count=7, spread_deg=85.0, speed=proj_speed, damage=dmg + 1, ttl=2.7)
+                _fire_fan(state, enemy.pos, aim, count=7, spread_deg=85.0, speed=proj_speed, damage=dmg + 1, ttl=2.7, projectile_type="spread")
             else:
-                _fire_ring(state, enemy.pos, count=14, speed=proj_speed * 0.9, damage=dmg + 2, ttl=2.8, start_deg=enemy.t * 40.0)
+                _fire_fan(state, enemy.pos, aim, count=9, spread_deg=98.0, speed=proj_speed, damage=dmg + 2, ttl=2.65, projectile_type="spread")
+                if persona in ("aggressive", "trickster"):
+                    _fire_fan(state, enemy.pos, _perp(aim), count=5, spread_deg=46.0, speed=proj_speed * 0.95, damage=max(1, dmg), ttl=2.45, projectile_type="spread")
 
             # Henchmen: engineers join the fight.
             if len(getattr(state, "enemies", [])) < getattr(state, "max_enemies", 12) + 4 and random.random() < 0.4:
@@ -536,8 +590,10 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
 
         enemy.attack_cd -= dt
         if enemy.attack_cd <= 0.0:
-            # Summon a few swarm enemies.
-            for _ in range(3):
+            # Summon a few swarm enemies (capped to avoid runaway difficulty/perf).
+            adds_cap = getattr(state, "max_enemies", 12) + 10
+            slots = max(0, int(adds_cap) - len(getattr(state, "enemies", [])))
+            for _ in range(min(3, slots)):
                 ang = random.uniform(0, math.tau)
                 pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(30, 60)
                 state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=95 + state.wave * 1.5, behavior="swarm"))
@@ -548,19 +604,33 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             if phase == 0:
                 for off in (-24, -8, 8, 24):
                     vel = _rotate(dir_to, off) * proj_speed
-                    state.projectiles.append(Projectile(enemy.pos, vel, dmg, ttl=2.6, owner="enemy"))
+                    state.projectiles.append(Projectile(enemy.pos, vel, dmg, ttl=2.6, owner="enemy", projectile_type="bullet"))
             elif phase == 1:
-                _fire_fan(state, enemy.pos, dir_to, count=7, spread_deg=95.0, speed=proj_speed, damage=dmg + 1, ttl=2.6)
+                _fire_fan(state, enemy.pos, dir_to, count=7, spread_deg=95.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type="spread")
                 if persona == "trickster":
                     # Extra side-shot.
-                    _fire_fan(state, enemy.pos, _perp(dir_to), count=3, spread_deg=24.0, speed=proj_speed * 0.95, damage=max(1, dmg - 1), ttl=2.4)
+                    _fire_fan(state, enemy.pos, _perp(dir_to), count=3, spread_deg=24.0, speed=proj_speed * 0.95, damage=max(1, dmg - 1), ttl=2.4, projectile_type="spread")
             else:
                 # Spiral burst: advance a stored angle for consistent "personality".
                 ang = float(enemy.ai.get("spiral_deg", 0.0))
                 enemy.ai["spiral_deg"] = ang + (72.0 if persona == "aggressive" else 58.0)
                 base_dir = Vec2(math.cos(math.radians(ang)), math.sin(math.radians(ang)))
-                _fire_ring(state, enemy.pos, count=10, speed=proj_speed * 0.92, damage=dmg + 2, ttl=2.7, start_deg=ang)
-                _fire_fan(state, enemy.pos, base_dir, count=5, spread_deg=45.0, speed=proj_speed, damage=dmg + 1, ttl=2.6)
+
+                gun = _cycle_gun(enemy, ["bullet", "spread", "plasma"])
+                ring_n = 10
+                ring_speed = proj_speed * 0.92
+                ring_dmg = dmg + 2
+                if gun == "plasma":
+                    ring_n = 8
+                    ring_speed = proj_speed * 0.86
+                    ring_dmg = dmg + 3
+                elif gun == "spread":
+                    ring_n = 12
+                    ring_speed = proj_speed * 0.98
+                    ring_dmg = dmg + 1
+
+                _fire_ring(state, enemy.pos, count=ring_n, speed=ring_speed, damage=ring_dmg, ttl=2.7, start_deg=ang, projectile_type=gun)
+                _fire_fan(state, enemy.pos, base_dir, count=5, spread_deg=45.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type=gun)
 
             base_cd = 2.0 - state.wave * 0.02
             if phase == 2:
@@ -597,11 +667,22 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             state.traps.append(Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=80.0, damage=0, ttl=0.8, armed_delay=0.35, kind="slam_warn"))
             state.traps.append(Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=70.0, damage=26, ttl=0.55, armed_delay=0.35, kind="slam"))
             if phase_boss >= 1:
-                # Shockwave bullets on slam.
+                # Slam follow-up: heavy cone, not a full swirl ring.
                 proj_speed = 200.0 + state.wave * 1.8
                 dmg = 7 + state.wave // 4
-                ring_n = 12 if phase_boss == 1 else 16
-                _fire_ring(state, Vec2(enemy.pos.x, enemy.pos.y), count=ring_n, speed=proj_speed, damage=dmg + (1 if persona == "aggressive" else 0), ttl=2.7, start_deg=enemy.t * 30.0)
+                aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.6)
+                pellets = 7 if phase_boss == 1 else 9
+                _fire_fan(
+                    state,
+                    Vec2(enemy.pos.x, enemy.pos.y),
+                    aim,
+                    count=pellets,
+                    spread_deg=74.0,
+                    speed=proj_speed,
+                    damage=dmg + (1 if persona == "aggressive" else 0),
+                    ttl=2.65,
+                    projectile_type="spread",
+                )
 
             base_cd = 2.0 - state.wave * 0.02
             if phase_boss == 2:

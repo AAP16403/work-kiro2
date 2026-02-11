@@ -13,6 +13,10 @@
   - Glyph `W` (`visuals.py`)
   - Color mapping (`config.POWERUP_COLORS["weapon"]`)
 
+### Ultra ability (`powerup.py` / `config.py` / `Untitled-1.py`)
+- New powerup kind: `ultra` (glyph `U`) grants an Ultra charge
+- Use Ultra with right-click; uses a high-damage beam and then goes on cooldown
+
 ### Boss upgrades (`enemy.py`)
 - Bosses now use:
   - HP-based phases (3 phases)

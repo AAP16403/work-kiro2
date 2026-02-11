@@ -125,6 +125,7 @@ Output:
 
 - **WASD** or **Arrow Keys** - Move around the room
 - **Hold Left Mouse Button** - Shoot at enemies
+- **Right Mouse Button** - Use Ultra ability (requires Ultra powerup)
 
 ## Game Features
 
@@ -141,6 +142,7 @@ Output:
   - Laser (magenta =) - short-duration beam weapon
   - Vortex (purple @) - damaging aura
   - Weapon (white/blue W) - swaps to a new gun (bosses always drop one)
+  - Ultra (gold U) - grants an Ultra charge (right-click), with cooldown
 
 ## Dependencies
 

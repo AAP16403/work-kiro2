@@ -23,6 +23,15 @@ PROJECTILE_SPEED = 360.0
 WAVE_COOLDOWN = 2.0
 MAX_ENEMIES = 12  # Maximum concurrent enemies in a wave
 
+# Ultra ability (special powerup -> right click)
+ULTRA_MAX_CHARGES = 2
+ULTRA_COOLDOWN = 10.0
+ULTRA_DAMAGE_BASE = 55
+ULTRA_DAMAGE_MULT = 2.7
+ULTRA_BEAM_THICKNESS = 16.0
+ULTRA_BEAM_TTL = 0.12
+ULTRA_BEAM_COLOR = (255, 230, 170)
+
 # Isometric projection
 ISO_SCALE_X = 1.0
 ISO_SCALE_Y = 0.5
@@ -45,6 +54,7 @@ POWERUP_COLORS = {
     "laser": (255, 120, 255),
     "vortex": (180, 140, 255),
     "weapon": (220, 230, 255),
+    "ultra": (255, 230, 170),
 }
 
 # Enemy Colors

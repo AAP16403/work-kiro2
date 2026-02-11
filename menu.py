@@ -250,7 +250,7 @@ class Menu:
         )
 
         self.subtitle = pyglet.text.Label(
-            "WASD/Arrows to move, Hold Mouse to shoot, ESC for menu",
+            "WASD/Arrows to move, Hold LMB to shoot, RMB Ultra, ESC for menu",
             font_name="Segoe UI",
             font_size=12,
             x=width // 2,

@@ -15,6 +15,7 @@ dist/
 # Android / Buildozer (kept in-repo scripts, ignore generated env/artifacts)
 android/.venv_buildozer/
 android/_logs/
+android/_artifacts/
 android/_wsl_backups/
 android/__pycache__/
 android/.buildozer/

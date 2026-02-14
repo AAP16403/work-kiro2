@@ -43,8 +43,12 @@ from weapons import (
     spawn_weapon_projectiles,
 )
 
-from controls import TouchControls
-from overlay import GameOverlay
+try:
+    from .controls import TouchControls
+    from .overlay import GameOverlay
+except ImportError:
+    from controls import TouchControls
+    from overlay import GameOverlay
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -252,9 +256,32 @@ class Kiro2AndroidGame(FloatLayout):
         if amount > 0:
             self.player.hp -= int(amount)
 
+    @staticmethod
+    def _behavior_name(enemy) -> str:
+        behavior = getattr(enemy, "behavior", "")
+        if isinstance(behavior, str):
+            return behavior
+        cls_name = behavior.__class__.__name__.lower()
+        aliases = {
+            "chase": "chaser",
+            "ranged": "ranged",
+            "swarm": "swarm",
+            "charger": "charger",
+            "tank": "tank",
+            "spitter": "spitter",
+            "flyer": "flyer",
+            "engineer": "engineer",
+            "thunderboss": "boss_thunder",
+            "laserboss": "boss_laser",
+            "trapmasterboss": "boss_trapmaster",
+            "swarmqueenboss": "boss_swarmqueen",
+            "bruteboss": "boss_brute",
+        }
+        return aliases.get(cls_name, cls_name)
+
     def _enemy_radius(self, enemy) -> float:
-        b = getattr(enemy, "behavior", "")
-        if str(b).startswith("boss_"):
+        b = self._behavior_name(enemy)
+        if b.startswith("boss_"):
             return 24.0
         return {
             "tank": 16.0,
@@ -303,7 +330,7 @@ class Kiro2AndroidGame(FloatLayout):
                 e.hp -= dmg
                 if e.hp <= 0:
                     s.enemies.remove(e)
-                    spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+                    spawn_loot_on_enemy_death(s, self._behavior_name(e), e.pos)
 
         self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)
         self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN)
@@ -409,7 +436,7 @@ class Kiro2AndroidGame(FloatLayout):
                         s.shake = max(s.shake, 2.5)
                         if e.hp <= 0:
                             s.enemies.remove(e)
-                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+                            spawn_loot_on_enemy_death(s, self._behavior_name(e), e.pos)
 
         # Traps
         for tr in list(getattr(s, "traps", [])):
@@ -465,7 +492,7 @@ class Kiro2AndroidGame(FloatLayout):
                         s.shake = max(s.shake, 4.0)
                         if e.hp <= 0:
                             s.enemies.remove(e)
-                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+                            spawn_loot_on_enemy_death(s, self._behavior_name(e), e.pos)
             else:
                 s.projectiles.extend(spawn_weapon_projectiles(muzzle, aim, self.player.current_weapon, s.time, self.player.damage))
 
@@ -484,7 +511,7 @@ class Kiro2AndroidGame(FloatLayout):
                 self._enemy_afterglow.pop(id(e), None)
                 s.enemies.remove(e)
                 s.shake = 9.0
-                spawn_loot_on_enemy_death(s, e.behavior, self.player.pos)
+                spawn_loot_on_enemy_death(s, self._behavior_name(e), self.player.pos)
 
         # Projectiles
         for p in list(s.projectiles):
@@ -516,10 +543,10 @@ class Kiro2AndroidGame(FloatLayout):
                         s.shake = max(s.shake, 4.0)
                         if e.hp <= 0:
                             s.enemies.remove(e)
-                            if e.behavior == "tank" and dist(e.pos, self.player.pos) < 70:
+                            if self._behavior_name(e) == "tank" and dist(e.pos, self.player.pos) < 70:
                                 self._damage_player(15)
                                 s.shake = 15.0
-                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+                            spawn_loot_on_enemy_death(s, self._behavior_name(e), e.pos)
                         if p in s.projectiles:
                             self._projectile_trails.pop(id(p), None)
                             s.projectiles.remove(p)
@@ -749,7 +776,7 @@ class Kiro2AndroidGame(FloatLayout):
 
             # Enemies
             for e in getattr(s, "enemies", []):
-                c = config.ENEMY_COLORS.get(getattr(e, "behavior", ""), (200, 200, 200))
+                c = config.ENEMY_COLORS.get(self._behavior_name(e), (200, 200, 200))
                 circle_at(e.pos, self._enemy_radius(e), c, alpha=0.95)
                 hp = max(0, int(getattr(e, "hp", 0)))
                 max_hp = max(1, int(getattr(e, "max_hp", hp)))

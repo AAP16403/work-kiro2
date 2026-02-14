@@ -109,6 +109,29 @@ class Game(pyglet.window.Window):
         margin = float(getattr(config, "ARENA_MARGIN", 0.92))
         config.ROOM_RADIUS = compute_room_radius(self.width, self.height, margin=margin)
 
+    @staticmethod
+    def _behavior_name(enemy) -> str:
+        behavior = getattr(enemy, "behavior", "")
+        if isinstance(behavior, str):
+            return behavior
+        cls_name = behavior.__class__.__name__.lower()
+        aliases = {
+            "chase": "chaser",
+            "ranged": "ranged",
+            "swarm": "swarm",
+            "charger": "charger",
+            "tank": "tank",
+            "spitter": "spitter",
+            "flyer": "flyer",
+            "engineer": "engineer",
+            "thunderboss": "boss_thunder",
+            "laserboss": "boss_laser",
+            "trapmasterboss": "boss_trapmaster",
+            "swarmqueenboss": "boss_swarmqueen",
+            "bruteboss": "boss_brute",
+        }
+        return aliases.get(cls_name, cls_name)
+
     def _prune_dead_weak_handlers(self) -> None:
         """Remove collected WeakMethod handlers to prevent pyglet assertions on dispatch."""
         try:
@@ -259,7 +282,8 @@ class Game(pyglet.window.Window):
         for e in list(s.enemies):
             if point_segment_distance(e.pos, muzzle, end) <= hit_r:
                 e.hp -= dmg
-                enemy_color = ENEMY_COLORS.get(e.behavior, (200, 200, 200))
+                behavior_name = self._behavior_name(e)
+                enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
                 if self.particle_system:
                     self.particle_system.add_hit_particles(e.pos, enemy_color)
                 if e.hp <= 0:
@@ -267,14 +291,14 @@ class Game(pyglet.window.Window):
                     if self.visuals:
                         self.visuals.drop_enemy(e)
                     if self.particle_system:
-                        self.particle_system.add_death_explosion(e.pos, enemy_color, e.behavior)
-                    spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+                        self.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
+                    spawn_loot_on_enemy_death(s, behavior_name, e.pos)
 
         self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)
         self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN)
 
     def _enemy_radius(self, enemy) -> float:
-        b = getattr(enemy, "behavior", "")
+        b = self._behavior_name(enemy)
         if b.startswith("boss_"):
             return 24.0
         return {
@@ -592,7 +616,7 @@ class Game(pyglet.window.Window):
                         if e.hp <= 0:
                             s.enemies.remove(e)
                             self.visuals.drop_enemy(e)
-                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+                            spawn_loot_on_enemy_death(s, self._behavior_name(e), e.pos)
 
         # Traps
         for tr in list(getattr(s, "traps", [])):
@@ -658,7 +682,7 @@ class Game(pyglet.window.Window):
                         if e.hp <= 0:
                             s.enemies.remove(e)
                             self.visuals.drop_enemy(e)
-                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+                            spawn_loot_on_enemy_death(s, self._behavior_name(e), e.pos)
             else:
                 # Use current weapon to spawn projectiles
                 weapon = self.player.current_weapon
@@ -683,7 +707,7 @@ class Game(pyglet.window.Window):
                 self.visuals.drop_enemy(e)
                 s.shake = 9.0
                 # Chance to spawn powerup on kill
-                spawn_loot_on_enemy_death(s, e.behavior, self.player.pos)
+                spawn_loot_on_enemy_death(s, self._behavior_name(e), self.player.pos)
 
         # Projectiles
         for p in list(s.projectiles):
@@ -716,7 +740,8 @@ class Game(pyglet.window.Window):
                         s.shake = max(s.shake, 4.0)
                         
                         # Hit particles
-                        enemy_color = ENEMY_COLORS.get(e.behavior, (200, 200, 200))
+                        behavior_name = self._behavior_name(e)
+                        enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
                         self.particle_system.add_hit_particles(e.pos, enemy_color)
                         
                         if e.hp <= 0:
@@ -724,16 +749,16 @@ class Game(pyglet.window.Window):
                             self.visuals.drop_enemy(e)
                             
                             # Death explosion
-                            self.particle_system.add_death_explosion(e.pos, enemy_color, e.behavior)
+                            self.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
                             
                             # Explosion damage (Tank enemies explode violently)
-                            if e.behavior == "tank":
+                            if behavior_name == "tank":
                                 if dist(e.pos, self.player.pos) < 70:
                                     self._damage_player(15)
                                     s.shake = 15.0
                             
                             # Chance to spawn powerup on kill
-                            spawn_loot_on_enemy_death(s, e.behavior, e.pos)
+                            spawn_loot_on_enemy_death(s, behavior_name, e.pos)
                         if p in s.projectiles:
                             s.projectiles.remove(p)
                             self.visuals.drop_projectile(p)

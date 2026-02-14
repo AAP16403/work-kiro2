@@ -121,8 +121,8 @@ is_broken_hostpython_cache() {
 
 run_buildozer() {
   case "$MODE" in
-    debug)   ( set +o pipefail; yes | buildozer -v android debug ) ;;
-    release) ( set +o pipefail; yes | buildozer -v android release ) ;;
+    debug)   buildozer -v android debug ;;
+    release) buildozer -v android release ;;
     *)
       echo "Unknown mode: $MODE (use debug|release)" >&2
       return 2

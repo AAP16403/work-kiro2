@@ -70,10 +70,10 @@ def spawn_wave(state: GameState, center: Vec2):
 
     # Boss wave every 5 waves.
     if state.wave % 5 == 0:
-        behavior = get_boss_for_wave(state.wave)
-        hp, speed, _attack_mult = _get_enemy_stats(behavior, state.wave, state.difficulty)
+        behavior_name = get_boss_for_wave(state.wave)
+        hp, speed, _attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
         pos = random_spawn_edge(center, config.ROOM_RADIUS)
-        e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior)
+        e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name)
         e.attack_cd = random.uniform(0.6, 1.6)
         state.enemies.append(e)
         return
@@ -86,11 +86,13 @@ def spawn_wave(state: GameState, center: Vec2):
     
     # Enemy type distribution changes with waves
     for _ in range(count):
-        behavior = _get_weighted_behavior(state.wave)
-        hp, speed, attack_mult = _get_enemy_stats(behavior, state.wave, state.difficulty)
+        behavior_name = _get_weighted_behavior(state.wave)
+        hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
         pos = random_spawn_edge(center, config.ROOM_RADIUS)
-        e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior)
-        if behavior == "engineer":
+        
+        e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name)
+
+        if behavior_name == "engineer":
             e.attack_cd = random.uniform(0.6, 1.4)
         else:
             e.attack_cd = random.uniform(0.2, 1.0)

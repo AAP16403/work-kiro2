@@ -61,6 +61,29 @@ class Visuals:
         self._thunder_handles: Dict[int, RenderHandle] = {}
         self._player_handle: Optional[RenderHandle] = None
 
+    @staticmethod
+    def _behavior_name(enemy) -> str:
+        behavior = getattr(enemy, "behavior", "")
+        if isinstance(behavior, str):
+            return behavior
+        cls_name = behavior.__class__.__name__.lower()
+        aliases = {
+            "chase": "chaser",
+            "ranged": "ranged",
+            "swarm": "swarm",
+            "charger": "charger",
+            "tank": "tank",
+            "spitter": "spitter",
+            "flyer": "flyer",
+            "engineer": "engineer",
+            "thunderboss": "boss_thunder",
+            "laserboss": "boss_laser",
+            "trapmasterboss": "boss_trapmaster",
+            "swarmqueenboss": "boss_swarmqueen",
+            "bruteboss": "boss_brute",
+        }
+        return aliases.get(cls_name, cls_name)
+
     def make_player(self):
         """Create player visual."""
         sh = shapes.Ellipse(0, 0, 26, 10, color=(0, 0, 0), batch=self.batch)
@@ -182,12 +205,13 @@ class Visuals:
         """Ensure enemy visual exists."""
         if id(enemy) in self._enemy_handles:
             return
-        base = ENEMY_COLORS.get(enemy.behavior, (200, 120, 120))
+        behavior = self._behavior_name(enemy)
+        base = ENEMY_COLORS.get(behavior, (200, 120, 120))
 
         sh = shapes.Ellipse(0, 0, 20, 7, color=(0, 0, 0), batch=self.batch)
         sh.opacity = 110
 
-        if enemy.behavior.startswith("boss_"):
+        if behavior.startswith("boss_"):
             sh.width = 40
             sh.height = 14
             body = shapes.Circle(0, 0, 22, color=base, batch=self.batch)
@@ -198,21 +222,21 @@ class Visuals:
             crown = shapes.Arc(0, 0, 24, segments=32, thickness=4, color=(255, 255, 255), batch=self.batch)
             crown.opacity = 60
 
-            if enemy.behavior == "boss_thunder":
+            if behavior == "boss_thunder":
                 sig = shapes.Line(0, 0, 0, 0, thickness=3, color=(200, 230, 255), batch=self.batch)
                 sig.opacity = 220
                 self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, sig)
-            elif enemy.behavior == "boss_laser":
+            elif behavior == "boss_laser":
                 eye = shapes.Circle(0, 0, 6, color=(255, 255, 255), batch=self.batch)
                 eye.opacity = 200
                 iris = shapes.Circle(0, 0, 3, color=(255, 120, 255), batch=self.batch)
                 iris.opacity = 220
                 self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, eye, iris)
-            elif enemy.behavior == "boss_trapmaster":
+            elif behavior == "boss_trapmaster":
                 gear = shapes.Arc(0, 0, 26, segments=32, thickness=5, color=(255, 210, 120), batch=self.batch)
                 gear.opacity = 120
                 self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, gear)
-            elif enemy.behavior == "boss_swarmqueen":
+            elif behavior == "boss_swarmqueen":
                 orb1 = shapes.Circle(0, 0, 6, color=(255, 255, 255), batch=self.batch)
                 orb2 = shapes.Circle(0, 0, 6, color=(255, 255, 255), batch=self.batch)
                 orb3 = shapes.Circle(0, 0, 6, color=(255, 255, 255), batch=self.batch)
@@ -220,7 +244,7 @@ class Visuals:
                 orb2.opacity = 90
                 orb3.opacity = 90
                 self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, orb1, orb2, orb3)
-            elif enemy.behavior == "boss_brute":
+            elif behavior == "boss_brute":
                 horn = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(255, 250, 240), batch=self.batch)
                 horn.opacity = 220
                 scar = shapes.Line(0, 0, 0, 0, thickness=4, color=(40, 10, 10), batch=self.batch)
@@ -230,7 +254,7 @@ class Visuals:
                 self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body)
             return
 
-        if enemy.behavior == "tank":
+        if behavior == "tank":
             sh.width = 28
             sh.height = 10
             body = shapes.Circle(0, 0, 16, color=base, batch=self.batch)
@@ -244,7 +268,7 @@ class Visuals:
             self._enemy_handles[id(enemy)] = RenderHandle(sh, body, armor, plate, eye)
             return
 
-        if enemy.behavior == "ranged":
+        if behavior == "ranged":
             body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
             cannon = shapes.Rectangle(0, 0, 18, 6, color=(30, 40, 55), batch=self.batch)
             cannon.anchor_x = 4
@@ -256,7 +280,7 @@ class Visuals:
             self._enemy_handles[id(enemy)] = RenderHandle(sh, body, cannon, muzzle, eye)
             return
 
-        if enemy.behavior == "charger":
+        if behavior == "charger":
             body = shapes.Circle(0, 0, 13, color=base, batch=self.batch)
             horn1 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(250, 240, 220), batch=self.batch)
             horn2 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(250, 240, 220), batch=self.batch)
@@ -266,7 +290,7 @@ class Visuals:
             self._enemy_handles[id(enemy)] = RenderHandle(sh, body, horn1, horn2, eye)
             return
 
-        if enemy.behavior == "flyer":
+        if behavior == "flyer":
             body = shapes.Circle(0, 0, 11, color=base, batch=self.batch)
             wing1 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=base, batch=self.batch)
             wing2 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=base, batch=self.batch)
@@ -278,7 +302,7 @@ class Visuals:
             self._enemy_handles[id(enemy)] = RenderHandle(sh, body, wing1, wing2, tail, eye)
             return
 
-        if enemy.behavior == "spitter":
+        if behavior == "spitter":
             body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
             sac1 = shapes.Circle(0, 0, 5, color=(255, 240, 170), batch=self.batch)
             sac2 = shapes.Circle(0, 0, 4, color=(255, 240, 170), batch=self.batch)
@@ -289,7 +313,7 @@ class Visuals:
             self._enemy_handles[id(enemy)] = RenderHandle(sh, body, sac1, sac2, mouth)
             return
 
-        if enemy.behavior == "swarm":
+        if behavior == "swarm":
             sh.width = 16
             sh.height = 6
             body = shapes.Circle(0, 0, 9, color=base, batch=self.batch)
@@ -302,7 +326,7 @@ class Visuals:
             self._enemy_handles[id(enemy)] = RenderHandle(sh, body, dot1, dot2, dot3)
             return
 
-        if enemy.behavior == "chaser":
+        if behavior == "chaser":
             body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
             spike1 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(250, 250, 250), batch=self.batch)
             spike2 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(250, 250, 250), batch=self.batch)
@@ -315,7 +339,7 @@ class Visuals:
             self._enemy_handles[id(enemy)] = RenderHandle(sh, body, spike1, spike2, spike3, eye1, eye2)
             return
 
-        if enemy.behavior == "engineer":
+        if behavior == "engineer":
             body = shapes.Circle(0, 0, 13, color=base, batch=self.batch)
             backpack = shapes.Rectangle(0, 0, 12, 10, color=(40, 60, 70), batch=self.batch)
             backpack.anchor_x = 6
@@ -340,10 +364,11 @@ class Visuals:
     def sync_enemy(self, enemy, shake: Vec2):
         """Update enemy visual position."""
         h = self._enemy_handles[id(enemy)]
+        behavior = self._behavior_name(enemy)
         sx, sy = to_iso(enemy.pos, shake)
         bob = math.sin(enemy.t * 6.0) * 1.5
 
-        if enemy.behavior.startswith("boss_"):
+        if behavior.startswith("boss_"):
             objs = h.objs
             sh = objs[0]
             sh.x, sh.y = sx, sy - 26
@@ -356,25 +381,25 @@ class Visuals:
                 body.x, body.y = sx, sy + bob
                 crown.radius = 24 + 2.0 * (0.5 + 0.5 * math.sin(enemy.t * 4.0))
 
-            if enemy.behavior == "boss_thunder":
+            if behavior == "boss_thunder":
                 sig = objs[5]
                 sig.x, sig.y = sx - 10, sy + 20 + bob
                 sig.x2, sig.y2 = sx + 10, sy + 10 + bob
-            elif enemy.behavior == "boss_laser":
+            elif behavior == "boss_laser":
                 eye, iris = objs[5], objs[6]
                 eye.x, eye.y = sx + 6, sy + 8 + bob
                 iris.x, iris.y = sx + 6 + 2.0 * math.sin(enemy.t * 9.0), sy + 8 + bob
-            elif enemy.behavior == "boss_trapmaster":
+            elif behavior == "boss_trapmaster":
                 gear = objs[5]
                 gear.x, gear.y = sx, sy + bob
                 gear.radius = 26 + 1.5 * math.sin(enemy.t * 3.2)
-            elif enemy.behavior == "boss_swarmqueen":
+            elif behavior == "boss_swarmqueen":
                 orb1, orb2, orb3 = objs[5], objs[6], objs[7]
                 r = 20
                 orb1.x, orb1.y = sx + math.cos(enemy.t * 2.2) * r, sy + bob + math.sin(enemy.t * 2.2) * r
                 orb2.x, orb2.y = sx + math.cos(enemy.t * 2.2 + 2.1) * r, sy + bob + math.sin(enemy.t * 2.2 + 2.1) * r
                 orb3.x, orb3.y = sx + math.cos(enemy.t * 2.2 + 4.2) * r, sy + bob + math.sin(enemy.t * 2.2 + 4.2) * r
-            elif enemy.behavior == "boss_brute":
+            elif behavior == "boss_brute":
                 horn, scar = objs[5], objs[6]
                 horn.x, horn.y = sx, sy + bob + 26
                 horn.x2, horn.y2 = sx + 18, sy + bob + 16
@@ -383,7 +408,7 @@ class Visuals:
 
             h.set_group(self.groups.get(int(sy)))
             return
-        if enemy.behavior == "engineer":
+        if behavior == "engineer":
             sh, body, backpack, visor, tool, tool2 = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
@@ -394,7 +419,7 @@ class Visuals:
             h.set_group(self.groups.get(int(sy)))
             return
 
-        if enemy.behavior == "tank":
+        if behavior == "tank":
             sh, body, armor, plate, eye = h.objs
             sh.x, sh.y = sx, sy - 19
             body.x, body.y = sx, sy + bob * 0.4
@@ -404,7 +429,7 @@ class Visuals:
             h.set_group(self.groups.get(int(sy)))
             return
 
-        if enemy.behavior == "ranged":
+        if behavior == "ranged":
             sh, body, cannon, muzzle, eye = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
@@ -414,7 +439,7 @@ class Visuals:
             h.set_group(self.groups.get(int(sy)))
             return
 
-        if enemy.behavior == "charger":
+        if behavior == "charger":
             sh, body, horn1, horn2, eye = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
@@ -429,7 +454,7 @@ class Visuals:
             h.set_group(self.groups.get(int(sy)))
             return
 
-        if enemy.behavior == "flyer":
+        if behavior == "flyer":
             sh, body, wing1, wing2, tail, eye = h.objs
             sh.x, sh.y = sx, sy - 17
             body.x, body.y = sx, sy + bob
@@ -445,7 +470,7 @@ class Visuals:
             h.set_group(self.groups.get(int(sy)))
             return
 
-        if enemy.behavior == "spitter":
+        if behavior == "spitter":
             sh, body, sac1, sac2, mouth = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
@@ -457,7 +482,7 @@ class Visuals:
             h.set_group(self.groups.get(int(sy)))
             return
 
-        if enemy.behavior == "swarm":
+        if behavior == "swarm":
             sh, body, dot1, dot2, dot3 = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
@@ -468,7 +493,7 @@ class Visuals:
             h.set_group(self.groups.get(int(sy)))
             return
 
-        if enemy.behavior == "chaser":
+        if behavior == "chaser":
             sh, body, spike1, spike2, spike3, eye1, eye2 = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob

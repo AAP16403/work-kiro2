@@ -49,8 +49,25 @@ class Vec2:
     def __mul__(self, s: float):
         return Vec2(self.x * s, self.y * s)
 
+    def __rmul__(self, s: float):
+        return self.__mul__(s)
+
+    def __truediv__(self, s: float):
+        if abs(s) <= 1e-12:
+            return Vec2(0.0, 0.0)
+        return Vec2(self.x / s, self.y / s)
+
+    def __neg__(self):
+        return Vec2(-self.x, -self.y)
+
     def length(self) -> float:
         return math.hypot(self.x, self.y)
+
+    def length_squared(self) -> float:
+        return self.x * self.x + self.y * self.y
+
+    def dot(self, other) -> float:
+        return self.x * other.x + self.y * other.y
 
     def normalized(self):
         l = self.length()

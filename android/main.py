@@ -8,6 +8,7 @@ Build with Buildozer (recommended: run in Linux/WSL):
 
 from __future__ import annotations
 
+from collections import deque
 import math
 import os
 import random
@@ -68,6 +69,10 @@ class Kiro2AndroidGame(FloatLayout):
         self._upgrade_options: list[dict] = []
 
         self._incoming_damage_mult = 1.0
+        self._projectile_trails: dict[int, deque[Vec2]] = {}
+        self._enemy_afterglow: dict[int, deque[Vec2]] = {}
+        self._stars: list[tuple[float, float, float, float, float]] = []
+        self._vfx_t = 0.0
 
         self.overlay = GameOverlay(
             on_ultra=self._use_ultra,
@@ -96,7 +101,32 @@ class Kiro2AndroidGame(FloatLayout):
             config.ROOM_RADIUS = compute_room_radius(int(self.width), int(self.height), margin=float(getattr(config, "ARENA_MARGIN", 0.97)))
         except Exception:
             pass
+        self._rebuild_starfield()
         self._ensure_layout()
+
+    def _rebuild_starfield(self) -> None:
+        self._stars.clear()
+        short_side = max(320.0, min(float(self.width), float(self.height)))
+        count = int(max(28, min(120, short_side / 7.0)))
+        for _ in range(count):
+            x = random.uniform(0.0, float(self.width))
+            y = random.uniform(0.0, float(self.height))
+            r = random.uniform(0.6, 2.2)
+            tw = random.uniform(0.8, 2.2)
+            phase = random.uniform(0.0, math.tau)
+            self._stars.append((x, y, r, tw, phase))
+
+    def _remember_trail(self, table: dict[int, deque[Vec2]], key: int, pos: Vec2, max_len: int) -> None:
+        q = table.get(key)
+        if q is None:
+            q = deque(maxlen=max_len)
+            table[key] = q
+        q.append(Vec2(float(pos.x), float(pos.y)))
+
+    def _clear_vfx(self) -> None:
+        self._projectile_trails.clear()
+        self._enemy_afterglow.clear()
+        self._vfx_t = 0.0
 
     def _ensure_layout(self) -> None:
         if not getattr(config, "ENABLE_OBSTACLES", False):
@@ -143,6 +173,7 @@ class Kiro2AndroidGame(FloatLayout):
         self._aim_dir = Vec2(1.0, 0.0)
         self.controls.release_all()
         self._upgrade_options = []
+        self._clear_vfx()
         self.overlay.hide_game_over()
         self.overlay.hide_upgrade()
         self.overlay.hide_menu()
@@ -159,6 +190,7 @@ class Kiro2AndroidGame(FloatLayout):
         self._aim_dir = Vec2(1.0, 0.0)
         self.controls.release_all()
         self._upgrade_options = []
+        self._clear_vfx()
         self.overlay.hide_upgrade()
         self.overlay.hide_game_over()
         self.overlay.hide_menu()
@@ -351,6 +383,7 @@ class Kiro2AndroidGame(FloatLayout):
         s = self.state
         dt = float(max(0.0, min(1.0 / 20.0, dt)))  # clamp (pause/resume safety)
         s.time += dt
+        self._vfx_t += dt
 
         aim_dir = self.controls.aim.direction_world()
         auto_shoot = False
@@ -441,18 +474,21 @@ class Kiro2AndroidGame(FloatLayout):
         # Enemies
         for e in list(s.enemies):
             update_enemy(e, self.player.pos, s, dt, player_vel=player_vel)
+            self._remember_trail(self._enemy_afterglow, id(e), e.pos, max_len=7)
             e.pos = clamp_to_room(e.pos, float(config.ROOM_RADIUS) * 0.96)
             if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
                 e.pos = resolve_circle_obstacles(e.pos, self._enemy_radius(e), s.obstacles)
                 e.pos = clamp_to_room(e.pos, float(config.ROOM_RADIUS) * 0.96)
             if dist(e.pos, self.player.pos) < 12:
                 self._damage_player(10)
+                self._enemy_afterglow.pop(id(e), None)
                 s.enemies.remove(e)
                 s.shake = 9.0
                 spawn_loot_on_enemy_death(s, e.behavior, self.player.pos)
 
         # Projectiles
         for p in list(s.projectiles):
+            self._remember_trail(self._projectile_trails, id(p), p.pos, max_len=11)
             p.pos = p.pos + p.vel * dt
             p.ttl -= dt
             if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
@@ -462,9 +498,11 @@ class Kiro2AndroidGame(FloatLayout):
                         blocked = True
                         break
                 if blocked:
+                    self._projectile_trails.pop(id(p), None)
                     s.projectiles.remove(p)
                     continue
             if p.ttl <= 0:
+                self._projectile_trails.pop(id(p), None)
                 s.projectiles.remove(p)
 
         # Collisions
@@ -483,6 +521,7 @@ class Kiro2AndroidGame(FloatLayout):
                                 s.shake = 15.0
                             spawn_loot_on_enemy_death(s, e.behavior, e.pos)
                         if p in s.projectiles:
+                            self._projectile_trails.pop(id(p), None)
                             s.projectiles.remove(p)
                         break
             else:
@@ -490,6 +529,7 @@ class Kiro2AndroidGame(FloatLayout):
                     self._damage_player(p.damage)
                     s.shake = max(s.shake, 6.0)
                     if p in s.projectiles:
+                        self._projectile_trails.pop(id(p), None)
                         s.projectiles.remove(p)
 
         # Powerups
@@ -542,6 +582,16 @@ class Kiro2AndroidGame(FloatLayout):
                     s.shake = max(s.shake, 10.0)
             if lb.t >= lb.warn + lb.ttl:
                 s.lasers.remove(lb)
+
+        if self.state:
+            alive_proj = {id(pj) for pj in self.state.projectiles}
+            stale_proj = [k for k in self._projectile_trails.keys() if k not in alive_proj]
+            for k in stale_proj:
+                self._projectile_trails.pop(k, None)
+            alive_enemy = {id(en) for en in self.state.enemies}
+            stale_enemy = [k for k in self._enemy_afterglow.keys() if k not in alive_enemy]
+            for k in stale_enemy:
+                self._enemy_afterglow.pop(k, None)
 
         if self.player.hp <= 0 and self._game_mode != "game_over":
             self._game_mode = "game_over"
@@ -601,6 +651,22 @@ class Kiro2AndroidGame(FloatLayout):
             # Background
             Color(config.BG_BOTTOM[0] / 255.0, config.BG_BOTTOM[1] / 255.0, config.BG_BOTTOM[2] / 255.0, 1.0)
             Rectangle(pos=self.pos, size=self.size)
+            Color(config.BG_TOP[0] / 255.0, config.BG_TOP[1] / 255.0, config.BG_TOP[2] / 255.0, 0.48)
+            Rectangle(pos=(self.x, self.y + self.height * 0.47), size=(self.width, self.height * 0.53))
+
+            # Stars / nebula glow.
+            for sx, sy, rr, tw, phase in self._stars:
+                a = 0.14 + 0.16 * (0.5 + 0.5 * math.sin(self._vfx_t * tw + phase))
+                Color(0.72, 0.82, 1.0, a)
+                Ellipse(pos=(sx - rr, sy - rr), size=(rr * 2.0, rr * 2.0))
+            for i, (cx, cy, base_r, speed) in enumerate((
+                (self.width * 0.2, self.height * 0.8, min(self.width, self.height) * 0.34, 0.21),
+                (self.width * 0.78, self.height * 0.74, min(self.width, self.height) * 0.29, 0.18),
+                (self.width * 0.52, self.height * 0.66, min(self.width, self.height) * 0.42, 0.13),
+            )):
+                pulse = 0.92 + 0.12 * math.sin(self._vfx_t * (1.2 + i * 0.35))
+                Color(0.30 + i * 0.06, 0.20 + i * 0.03, 0.45 + i * 0.06, 0.07)
+                Ellipse(pos=(cx - base_r * pulse, cy - base_r * pulse), size=(base_r * 2.0 * pulse, base_r * 2.0 * pulse))
 
             # Arena outline
             r = float(config.ROOM_RADIUS) * 0.9
@@ -624,6 +690,8 @@ class Kiro2AndroidGame(FloatLayout):
                 pts.extend([sx, sy])
             Color(0.5, 0.55, 0.7, 0.7)
             Line(points=pts, close=True, width=dp(1.2))
+            Color(0.92, 0.88, 1.0, 0.08 + 0.06 * (0.5 + 0.5 * math.sin(self._vfx_t * 1.8)))
+            Line(points=pts, close=True, width=dp(2.6))
 
             draw_list: list[tuple[float, callable]] = []
 
@@ -651,6 +719,20 @@ class Kiro2AndroidGame(FloatLayout):
                 for ob in getattr(s, "obstacles", []):
                     circle_at(ob.pos, float(ob.radius), (95, 104, 128), alpha=0.9)
 
+            # Projectile trails (drawn before projectiles for bloom effect).
+            for pid, trail in self._projectile_trails.items():
+                if len(trail) < 2:
+                    continue
+                for i in range(1, len(trail)):
+                    p0 = trail[i - 1]
+                    p1 = trail[i]
+                    sx0, sy0 = to_iso(p0, shake)
+                    sx1, sy1 = to_iso(p1, shake)
+                    t = i / float(len(trail))
+                    alpha = 0.06 + 0.2 * t
+                    Color(0.95, 0.92, 1.0, alpha)
+                    Line(points=[sx0, sy0, sx1, sy1], width=max(dp(0.7), dp(2.6) * t))
+
             # Powerups
             for pu in getattr(s, "powerups", []):
                 color = config.POWERUP_COLORS.get(getattr(pu, "kind", ""), (220, 220, 220))
@@ -669,11 +751,45 @@ class Kiro2AndroidGame(FloatLayout):
             for e in getattr(s, "enemies", []):
                 c = config.ENEMY_COLORS.get(getattr(e, "behavior", ""), (200, 200, 200))
                 circle_at(e.pos, self._enemy_radius(e), c, alpha=0.95)
+                hp = max(0, int(getattr(e, "hp", 0)))
+                max_hp = max(1, int(getattr(e, "max_hp", hp)))
+                if hp < max_hp:
+                    sy_bar = to_iso(e.pos, shake)[1] + dp(16)
+                    sx_bar = to_iso(e.pos, shake)[0]
+                    w = dp(26)
+                    h = dp(3.2)
+                    frac = max(0.0, min(1.0, hp / float(max_hp)))
+                    Color(0.05, 0.05, 0.07, 0.7)
+                    Rectangle(pos=(sx_bar - w * 0.5, sy_bar), size=(w, h))
+                    Color(0.95 - 0.45 * frac, 0.24 + 0.64 * frac, 0.28, 0.85)
+                    Rectangle(pos=(sx_bar - w * 0.5, sy_bar), size=(w * frac, h))
+
+            # Enemy afterglow.
+            for _eid, trail in self._enemy_afterglow.items():
+                if len(trail) < 2:
+                    continue
+                for i, pnt in enumerate(trail):
+                    sxg, syg = to_iso(pnt, shake)
+                    t = i / float(len(trail))
+                    rr = dp(1.2 + 3.2 * t)
+                    Color(1.0, 0.86, 0.65, 0.03 + 0.08 * t)
+                    Ellipse(pos=(sxg - rr, syg - rr), size=(rr * 2.0, rr * 2.0))
 
             # Player
             circle_at(p.pos, 14.0, (235, 235, 235), alpha=1.0)
             if int(getattr(p, "shield", 0)) > 0:
                 circle_at(p.pos, 18.0, (120, 220, 255), alpha=0.25)
+            if s.time < float(getattr(p, "laser_until", 0.0)):
+                sxp, syp = to_iso(p.pos, shake)
+                pulse = 0.65 + 0.35 * math.sin(self._vfx_t * 12.0)
+                rr = dp(11.0 + 4.0 * pulse)
+                Color(1.0, 0.54, 0.96, 0.14 * pulse)
+                Ellipse(pos=(sxp - rr, syp - rr), size=(rr * 2.0, rr * 2.0))
+            if s.time < float(getattr(p, "vortex_until", 0.0)):
+                sxp, syp = to_iso(p.pos, shake)
+                vort_r = dp(16 + 4 * math.sin(self._vfx_t * 6.2))
+                Color(0.64, 0.48, 1.0, 0.14)
+                Line(circle=(sxp, syp, vort_r), width=dp(1.4))
 
             # Lasers / thunder
             for lb in getattr(s, "lasers", []):
@@ -689,6 +805,8 @@ class Kiro2AndroidGame(FloatLayout):
                 r_, g_, b_ = getattr(th, "color", (170, 200, 255))
                 Color(r_ / 255.0, g_ / 255.0, b_ / 255.0, 0.75)
                 Line(points=[sx1, sy1, sx2, sy2], width=max(dp(1.0), float(getattr(th, "thickness", 16.0)) * 0.25))
+                Color(1.0, 1.0, 1.0, 0.26)
+                Line(points=[sx1, sy1, sx2, sy2], width=max(dp(0.9), float(getattr(th, "thickness", 16.0)) * 0.10))
 
             # Touch sticks indicators (left move + right aim)
             if self.controls.move.active():

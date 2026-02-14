@@ -34,6 +34,8 @@ class Room:
         self._bg_b.opacity = 120
 
         self._ambient: List[tuple[shapes.Circle, float, float, float]] = []
+        self._scanlines: List[tuple[shapes.Line, int, float]] = []
+        self._vignette: List[tuple[shapes.Circle, float]] = []
         self._build_ambient()
         self._build_floor()
 
@@ -50,6 +52,30 @@ class Room:
             vy = random.uniform(-8, 8)
             phase = random.uniform(0, math.tau)
             self._ambient.append((orb, vx, vy, phase))
+
+        # Subtle filmic vignette.
+        corners = (
+            (0, 0),
+            (self._w, 0),
+            (0, self._h),
+            (self._w, self._h),
+        )
+        for cx, cy in corners:
+            vr = min(self._w, self._h) * random.uniform(0.32, 0.46)
+            c = shapes.Circle(cx, cy, vr, color=(6, 7, 12), batch=self.batch)
+            c.opacity = random.randint(34, 54)
+            phase = random.uniform(0.0, math.tau)
+            self._vignette.append((c, phase))
+
+        # Very soft moving scanlines for synthwave vibe.
+        scan_count = max(12, min(24, int(self._h / 42)))
+        for i in range(scan_count):
+            y = (i / max(1, scan_count - 1)) * self._h
+            ln = shapes.Line(0, y, self._w, y, thickness=1, color=(90, 120, 180), batch=self.batch)
+            base = random.randint(9, 20)
+            ln.opacity = base
+            phase = random.uniform(0.0, math.tau)
+            self._scanlines.append((ln, base, phase))
 
     def resize(self, width: int, height: int):
         self._w = width
@@ -91,6 +117,10 @@ class Room:
             if hasattr(o, "delete"):
                 o.delete()
         self._decor.clear()
+        for ln, _base, _phase in self._scanlines:
+            if hasattr(ln, "delete"):
+                ln.delete()
+        self._scanlines.clear()
         self._build_floor()
 
     def _build_floor(self):
@@ -302,3 +332,9 @@ class Room:
             elif orb.y > self._h + 60:
                 orb.y = -60
             orb.opacity = int(18 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.6 + phase)))
+
+        for ln, base, phase in self._scanlines:
+            ln.opacity = int(base * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(self._t * 1.15 + phase))))
+
+        for vg, phase in self._vignette:
+            vg.opacity = int(28 + 28 * (0.5 + 0.5 * math.sin(self._t * 0.45 + phase)))

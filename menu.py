@@ -286,6 +286,9 @@ class Menu:
             y=height - 120,
             anchor_x="center",
             anchor_y="center",
+            width=max(320, width - 64),
+            multiline=True,
+            align="center",
             color=(150, 150, 150, 255),
             batch=self.batch,
         )
@@ -360,6 +363,7 @@ class Menu:
         self.subtitle.x = cx
         self.subtitle.font_size = max(10, int(13 * scale))
         self.subtitle.y = height - int(130 * scale)
+        self.subtitle.width = max(320, width - 64)
 
         self._bg_a.width = width
         self._bg_a.height = height
@@ -630,17 +634,19 @@ class SettingsMenu:
         self.window_label.x = left_x
         self.window_label.y = int(base_y + button_h + int(26 * scale))
 
-        slider_y = base_y - rows * (button_h + row_gap) - int(74 * scale)
+        self.back_button.x = cx - self.back_button.width // 2
+        self.back_button.y = panel_y + int(18 * scale)
+
+        grid_bottom = base_y - (rows - 1) * (button_h + row_gap)
+        slider_pref_y = grid_bottom - int(74 * scale)
+        slider_min_y = self.back_button.y + self.back_button.height + int(34 * scale)
+        slider_max_y = grid_bottom - int(42 * scale)
         self.arena_slider.x = left_x
-        min_slider_y = int(panel_y + int(18 * scale) + button_h + int(52 * scale))
-        self.arena_slider.y = max(int(slider_y), int(min_slider_y))
+        self.arena_slider.y = max(int(slider_min_y), min(int(slider_pref_y), int(slider_max_y)))
         self.arena_slider.width = min(int(380 * scale), int(panel_w - (left_x - panel_x) * 2))
         self.arena_slider.font_size = max(11, int(14 * scale))
         self.arena_slider.knob_radius = max(6.0, 9.0 * scale)
         self.arena_slider.track_thickness = max(2.0, 3.0 * scale)
-
-        self.back_button.x = cx - self.back_button.width // 2
-        self.back_button.y = panel_y + int(18 * scale)
 
         self.title.x = cx
         self.title.font_size = max(18, int(32 * scale))
@@ -814,9 +820,9 @@ class UpgradeMenu:
     def set_options(self, options: list[dict]) -> None:
         self._options = list(options or [])[:3]
         while len(self._options) < 3:
-            self._options.append({"key": "", "title": "—", "desc": ""})
+            self._options.append({"key": "", "title": "--", "desc": ""})
         for i, opt in enumerate(self._options):
-            self.option_buttons[i].text = str(opt.get("title", "—"))
+            self.option_buttons[i].text = str(opt.get("title", "--"))
             self.option_desc[i].text = str(opt.get("desc", ""))
             self.option_buttons[i].sync()
 
@@ -856,8 +862,8 @@ class UpgradeMenu:
         self.subtitle.font_size = max(10, int(12 * scale))
 
         btn_w = min(int(panel_w * 0.78), int(520 * scale))
-        btn_h = int(62 * scale)
-        gap = int(18 * scale)
+        btn_h = int(72 * scale)
+        gap = int(16 * scale)
         start_y = self.subtitle.y - int(45 * scale) - btn_h
 
         for i, btn in enumerate(self.option_buttons):
@@ -869,7 +875,7 @@ class UpgradeMenu:
             btn.sync()
 
             self.option_desc[i].x = btn.x + int(12 * scale)
-            self.option_desc[i].y = btn.y - int(12 * scale)
+            self.option_desc[i].y = btn.y + int(btn_h * 0.28)
             self.option_desc[i].font_size = max(9, int(11 * scale))
 
     def on_mouse_motion(self, x: float, y: float):
@@ -1058,3 +1064,4 @@ class GameOverMenu:
         for btn in self.buttons:
             btn.sync()
         self.batch.draw()
+

@@ -4,6 +4,21 @@ set -euo pipefail
 MODE="${1:-debug}"     # debug|release
 DO_CLEAN="${2:-0}"     # 1 to clean
 
+PROG_TOTAL=6
+PROG_STEP=0
+prog_step() {
+  local label="$1"
+  PROG_STEP=$((PROG_STEP + 1))
+  local width=20
+  local filled=$(( PROG_STEP * width / PROG_TOTAL ))
+  local empty=$(( width - filled ))
+  local bar
+  bar="$(printf '%*s' "$filled" '' | tr ' ' '#')"
+  local pad
+  pad="$(printf '%*s' "$empty" '' | tr ' ' '-')"
+  echo "[${PROG_STEP}/${PROG_TOTAL}] [${bar}${pad}] ${label}" >&2
+}
+
 if [[ "$MODE" == "setup" ]]; then
   cd "$(dirname "$0")"
   chmod +x ./setup_build_env.sh
@@ -53,8 +68,10 @@ ensure_apt_packages() {
     libtinfo6 cmake libffi-dev libssl-dev
 }
 
+prog_step "Checking/Installing system prerequisites"
 ensure_apt_packages
 
+prog_step "Checking required commands"
 ensure_cmd python3 python3
 ensure_cmd pip3 python3-pip
 ensure_cmd git git
@@ -67,16 +84,23 @@ cd "$(dirname "$0")"
 VENV_DIR="${KIRO2_BUILDOZER_VENV:-.venv_buildozer}"
 BUILDOZER="$VENV_DIR/bin/buildozer"
 if [[ ! -x "$BUILDOZER" ]]; then
+  prog_step "Creating Python venv + installing Buildozer"
   echo "Creating buildozer venv at: $(pwd)/$VENV_DIR" >&2
   python3 -m venv "$VENV_DIR"
   "$VENV_DIR/bin/python" -m pip install -U pip setuptools wheel
   "$VENV_DIR/bin/python" -m pip install -U buildozer cython
+else
+  prog_step "Buildozer venv already present"
 fi
 
 if [[ "$DO_CLEAN" == "1" ]]; then
+  prog_step "Cleaning previous Android build"
   "$BUILDOZER" android clean
+else
+  prog_step "Skipping clean"
 fi
 
+prog_step "Running Buildozer ($MODE)"
 case "$MODE" in
   debug)   "$BUILDOZER" -v android debug ;;
   release) "$BUILDOZER" -v android release ;;

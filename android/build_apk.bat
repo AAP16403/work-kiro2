@@ -14,6 +14,28 @@ rem   android\build_apk.bat fixwsl     (tries to repair WSL)
 rem   android\build_apk.bat updatewsl  (runs wsl --update)
 rem   android\build_apk.bat repairlxss (repairs broken WSL registry entries)
 
+rem Simple progress bar for visualization (best-effort; build itself can still take a long time).
+set "PROG_TOTAL=6"
+set "PROG_STEP=0"
+
+goto :after_progress_defs
+
+:prog_step
+set /a PROG_STEP+=1
+set "PROG_LABEL=%~1"
+set /a PROG_PERCENT=(PROG_STEP*100)/PROG_TOTAL
+set /a PROG_FILLED=(PROG_STEP*20)/PROG_TOTAL
+set /a PROG_EMPTY=20-PROG_FILLED
+set "PROG_BAR="
+for /l %%I in (1,1,!PROG_FILLED!) do set "PROG_BAR=!PROG_BAR!#"
+set "PROG_PAD="
+for /l %%I in (1,1,!PROG_EMPTY!) do set "PROG_PAD=!PROG_PAD!-"
+echo [!PROG_STEP!/!PROG_TOTAL!] [!PROG_BAR!!PROG_PAD!] !PROG_PERCENT!%% !PROG_LABEL!
+echo [!PROG_STEP!/!PROG_TOTAL!] !PROG_LABEL! >> "%LOG_FILE%"
+exit /b 0
+
+:after_progress_defs
+
 rem Log file (helps diagnose WSL/Buildozer issues).
 set "SCRIPT_DIR_WIN=%~dp0"
 set "LOG_DIR=%SCRIPT_DIR_WIN%_logs"
@@ -49,6 +71,8 @@ if defined WSL_DISTRO_EFFECTIVE set "WSL_D=-d %WSL_DISTRO_EFFECTIVE%"
 echo Logging to: "%LOG_FILE%"
 if defined WSL_DISTRO_EFFECTIVE echo WSL_DISTRO=%WSL_DISTRO_EFFECTIVE% >> "%LOG_FILE%"
 echo.
+
+call :prog_step "Checking WSL availability"
 
 rem Locate wsl.exe robustly (handles PATH issues and 32-bit redirection).
 set "WSL_EXE="
@@ -89,6 +113,8 @@ echo === WSL distros (wsl -l -v) === >> "%LOG_FILE%"
 "%WSL_EXE%" -l -v >> "%LOG_FILE%" 2>&1
 echo. >> "%LOG_FILE%"
 
+call :prog_step "Validating WSL can start the distro"
+
 rem Quick smoke test: can WSL actually start a shell?
 if /i "%MODE%"=="installwsl" goto :after_smoke
 if /i "%MODE%"=="fixwsl" goto :after_smoke
@@ -112,6 +138,8 @@ if not errorlevel 1 (
 )
 del /q "%WSL_SMOKE_OUT%" >nul 2>nul
 :after_smoke
+
+call :prog_step "Checking distro registration"
 
 rem Registry helpers (more reliable than parsing wsl.exe output on some systems).
 set "LXSS_KEY=HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss"
@@ -262,6 +290,8 @@ set "SCRIPT_DIR=%~dp0"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 echo SCRIPT_DIR=%SCRIPT_DIR% >> "%LOG_FILE%"
 
+call :prog_step "Resolving repo path inside WSL"
+
 rem Convert Windows path to WSL path.
 set "WSL_ANDROID_DIR="
 if /i "%SCRIPT_DIR:~1,2%"==":\" (
@@ -285,6 +315,8 @@ if not defined WSL_ANDROID_DIR (
   exit /b 1
 )
 
+call :prog_step "Running Android build (WSL/Buildozer)"
+
 echo Building Android %MODE% (clean=%CLEAN%)...
 echo NOTE: First build will download Android SDK/NDK and may take a while.
 "%WSL_EXE%" %WSL_D% -e bash -lc "cd \"%WSL_ANDROID_DIR%\" && chmod +x ./build_apk.sh ./setup_build_env.sh && ./build_apk.sh \"%MODE%\" \"%CLEAN%\"" >> "%LOG_FILE%" 2>&1
@@ -294,6 +326,8 @@ if errorlevel 1 (
   echo See log: "%LOG_FILE%"
   exit /b 1
 )
+
+call :prog_step "Done"
 
 echo Done. Check: android\bin\
 echo Done. >> "%LOG_FILE%"

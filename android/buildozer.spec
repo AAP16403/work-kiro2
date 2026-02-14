@@ -4,11 +4,10 @@ package.name = kiro2
 package.domain = org.example
 version = 0.1
 
-# Point Buildozer at the repo root, but run this entrypoint.
+# Point Buildozer at repo root (must contain a top-level main.py).
 source.dir = ..
 source.include_exts = py,md,txt,png,jpg,jpeg,ico
 source.exclude_dirs = .git,.venv,build,dist,__pycache__
-entrypoint = android/main.py
 
 requirements = python3,kivy
 orientation = landscape

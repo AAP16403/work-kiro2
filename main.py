@@ -27,8 +27,10 @@ def _run_android() -> None:
     repo_root = os.path.dirname(os.path.abspath(__file__))
     android_dir = os.path.join(repo_root, "android")
     android_main_path = os.path.join(android_dir, "main.py")
-    if android_dir not in sys.path:
-        sys.path.insert(0, android_dir)
+    for p in (android_dir, repo_root):
+        if p in sys.path:
+            sys.path.remove(p)
+        sys.path.insert(0, p)
 
     spec = importlib.util.spec_from_file_location("kiro2_android_main", android_main_path)
     if spec is None or spec.loader is None:

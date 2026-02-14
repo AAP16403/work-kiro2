@@ -9,50 +9,139 @@ Build with Buildozer (recommended: run in Linux/WSL):
 from __future__ import annotations
 
 from collections import deque
+import importlib.util
 import math
 import os
 import random
 import sys
+import threading
 import traceback
 
 # Ensure the repo root is importable when this file is used as Buildozer entrypoint.
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
 ANDROID_DIR = os.path.abspath(os.path.dirname(__file__))
-if ANDROID_DIR not in sys.path:
-    sys.path.insert(0, ANDROID_DIR)
+for p in (REPO_ROOT, ANDROID_DIR):
+    if p in sys.path:
+        sys.path.remove(p)
+    sys.path.insert(0, p)
 
-import config
-from enemy import update_enemy
-from hazards import LaserBeam
-from layout import generate_obstacles
-from level import GameState, maybe_spawn_powerup, spawn_loot_on_enemy_death, spawn_wave
-from player import Player
-from powerup import apply_powerup
-from utils import (
-    Vec2,
-    clamp_to_room,
-    compute_room_radius,
-    dist,
-    point_segment_distance,
-    resolve_circle_obstacles,
-    set_view_size,
-    to_iso,
-)
-from weapons import (
-    get_effective_fire_rate,
-    get_weapon_color,
-    get_weapon_for_wave,
-    spawn_weapon_projectiles,
-)
+_BOOT_ERROR: str | None = None
+
+
+def _boot_log_path() -> str:
+    private_dir = os.environ.get("ANDROID_PRIVATE", "").strip()
+    if private_dir:
+        parent = os.path.dirname(private_dir)
+        if parent:
+            return os.path.join(parent, "kiro2_boot_error.log")
+    home = os.path.expanduser("~")
+    return os.path.join(home if home else ".", "kiro2_boot_error.log")
+
+
+def _append_boot_log(message: str) -> None:
+    try:
+        path = _boot_log_path()
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(message + "\n")
+    except Exception:
+        pass
+
+
+def _global_excepthook(exc_type, exc_value, exc_traceback) -> None:
+    tb = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    _append_boot_log("\n=== KIRO2 GLOBAL EXCEPTION ===\n" + tb)
+    try:
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+    except Exception:
+        pass
+
+
+sys.excepthook = _global_excepthook
+if hasattr(threading, "excepthook"):
+    def _thread_excepthook(args):
+        tb = "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))
+        _append_boot_log("\n=== KIRO2 THREAD EXCEPTION ===\n" + tb)
+    threading.excepthook = _thread_excepthook
+
+
+def _is_local_module(mod) -> bool:
+    mod_file = getattr(mod, "__file__", "") or ""
+    if not mod_file:
+        return False
+    return os.path.abspath(mod_file).startswith(REPO_ROOT)
+
+
+def _purge_nonlocal_module_tree(module_name: str) -> None:
+    for name, mod in list(sys.modules.items()):
+        if name != module_name and not name.startswith(module_name + "."):
+            continue
+        if mod is None:
+            sys.modules.pop(name, None)
+            continue
+        if not _is_local_module(mod):
+            sys.modules.pop(name, None)
+
+
+def _load_local_module(name: str, file_name: str):
+    file_path = os.path.join(ANDROID_DIR, file_name)
+    spec = importlib.util.spec_from_file_location(name, file_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load local Android module: {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 try:
-    from .controls import TouchControls
-    from .overlay import GameOverlay
-except ImportError:
-    from controls import TouchControls
-    from overlay import GameOverlay
+    for _name in (
+        "config",
+        "utils",
+        "projectile",
+        "hazards",
+        "weapons",
+        "powerup",
+        "player",
+        "layout",
+        "level",
+        "enemy",
+        "enemy_behaviors",
+    ):
+        _purge_nonlocal_module_tree(_name)
+    import config
+    from enemy import update_enemy
+    from hazards import LaserBeam
+    from layout import generate_obstacles
+    from level import GameState, maybe_spawn_powerup, spawn_loot_on_enemy_death, spawn_wave
+    from player import Player
+    from powerup import apply_powerup
+    from utils import (
+        Vec2,
+        clamp_to_room,
+        compute_room_radius,
+        dist,
+        point_segment_distance,
+        resolve_circle_obstacles,
+        set_view_size,
+        to_iso,
+    )
+    from weapons import (
+        get_effective_fire_rate,
+        get_weapon_color,
+        get_weapon_for_wave,
+        spawn_weapon_projectiles,
+    )
+except Exception:
+    _BOOT_ERROR = traceback.format_exc()
+
+try:
+    _controls_mod = _load_local_module("kiro2_android_controls", "controls.py")
+    _overlay_mod = _load_local_module("kiro2_android_overlay", "overlay.py")
+    TouchControls = _controls_mod.TouchControls
+    GameOverlay = _overlay_mod.GameOverlay
+except Exception:
+    if _BOOT_ERROR is None:
+        _BOOT_ERROR = traceback.format_exc()
+    TouchControls = None
+    GameOverlay = None
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -920,7 +1009,29 @@ class Kiro2AndroidGame(FloatLayout):
 
 
 class Kiro2AndroidApp(App):
+    @staticmethod
+    def _write_boot_error(message: str) -> None:
+        try:
+            path = _boot_log_path()
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("\n=== KIRO2 BOOT ERROR ===\n")
+                f.write(message + "\n")
+        except Exception:
+            pass
+
     def build(self):
+        if _BOOT_ERROR:
+            print("[boot] import/setup failed")
+            print(_BOOT_ERROR)
+            self._write_boot_error(_BOOT_ERROR)
+            fallback = Label(
+                text="Startup import error. See kiro2_boot_error.log",
+                halign="center",
+                valign="middle",
+                color=(1, 0.7, 0.7, 1),
+            )
+            fallback.bind(size=fallback.setter("text_size"))
+            return fallback
         try:
             root = Kiro2AndroidGame()
             return root

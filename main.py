@@ -6,6 +6,7 @@ directory. This launcher keeps desktop and Android entrypoints in sync.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 
@@ -23,9 +24,18 @@ def _is_android_runtime() -> bool:
 
 
 def _run_android() -> None:
-    from android.main import Kiro2AndroidApp
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    android_dir = os.path.join(repo_root, "android")
+    android_main_path = os.path.join(android_dir, "main.py")
+    if android_dir not in sys.path:
+        sys.path.insert(0, android_dir)
 
-    Kiro2AndroidApp().run()
+    spec = importlib.util.spec_from_file_location("kiro2_android_main", android_main_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load Android entrypoint: {android_main_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.Kiro2AndroidApp().run()
 
 
 def _run_desktop() -> None:

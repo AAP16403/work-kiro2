@@ -19,6 +19,9 @@ import traceback
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
+ANDROID_DIR = os.path.abspath(os.path.dirname(__file__))
+if ANDROID_DIR not in sys.path:
+    sys.path.insert(0, ANDROID_DIR)
 
 import config
 from enemy import update_enemy

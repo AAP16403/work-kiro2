@@ -12,6 +12,18 @@ dist/
 
 *.log
 
+# Android / Buildozer (kept in-repo scripts, ignore generated env/artifacts)
+android/.venv_buildozer/
+android/_logs/
+android/_wsl_backups/
+android/__pycache__/
+android/.buildozer/
+android/bin/
+android/.gradle/
+android/.python-for-android/
+android/.p4a/
+android/.kivy/
+
 # Editor/OS
 .vscode/
 .idea/

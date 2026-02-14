@@ -21,6 +21,9 @@ android.minapi = 24
 # Helps keep APK size down (optional; remove if you hit device-specific issues)
 android.archs = arm64-v8a
 
+# Pin python-for-android to a stable release (master can break unexpectedly).
+p4a.branch = v2024.01.21
+
 # Buildozer/SDK defaults are fine for a debug build.
 
 [buildozer]

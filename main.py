@@ -7,6 +7,19 @@ directory. This launcher keeps desktop and Android entrypoints in sync.
 from __future__ import annotations
 
 import os
+import sys
+
+
+def _is_android_runtime() -> bool:
+    if sys.platform == "android":
+        return True
+    android_markers = (
+        "ANDROID_ARGUMENT",
+        "ANDROID_PRIVATE",
+        "P4A_BOOTSTRAP",
+        "KIVY_BUILD",
+    )
+    return any(os.environ.get(k) for k in android_markers)
 
 
 def _run_android() -> None:
@@ -22,8 +35,7 @@ def _run_desktop() -> None:
 
 
 if __name__ == "__main__":
-    if "ANDROID_ARGUMENT" in os.environ or os.environ.get("KIVY_BUILD") == "1":
+    if _is_android_runtime():
         _run_android()
     else:
         _run_desktop()
-

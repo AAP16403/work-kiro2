@@ -13,6 +13,7 @@ import math
 import os
 import random
 import sys
+import traceback
 
 # Ensure the repo root is importable when this file is used as Buildozer entrypoint.
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -55,6 +56,7 @@ from kivy.clock import Clock
 from kivy.graphics import Color, Ellipse, Line, Rectangle
 from kivy.metrics import dp
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.label import Label
 class Kiro2AndroidGame(FloatLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -77,6 +79,7 @@ class Kiro2AndroidGame(FloatLayout):
         self._enemy_afterglow: dict[int, deque[Vec2]] = {}
         self._stars: list[tuple[float, float, float, float, float]] = []
         self._vfx_t = 0.0
+        self._runtime_failed = False
 
         self.overlay = GameOverlay(
             on_ultra=self._use_ultra,
@@ -95,8 +98,61 @@ class Kiro2AndroidGame(FloatLayout):
         self.overlay.hide_game_over()
         self.overlay.hide_upgrade()
 
-        Clock.schedule_interval(self._tick, 1.0 / 60.0)
-        Clock.schedule_interval(self._redraw, 1.0 / 60.0)
+        Clock.schedule_interval(self._tick_safe, 1.0 / 60.0)
+        Clock.schedule_interval(self._redraw_safe, 1.0 / 60.0)
+
+    def _error_log_path(self) -> str:
+        try:
+            app = App.get_running_app()
+            data_dir = getattr(app, "user_data_dir", "") if app else ""
+            if data_dir:
+                os.makedirs(data_dir, exist_ok=True)
+                return os.path.join(data_dir, "kiro2_error.log")
+        except Exception:
+            pass
+        home = os.path.expanduser("~")
+        return os.path.join(home if home else ".", "kiro2_error.log")
+
+    def _handle_runtime_error(self, stage: str, exc: Exception) -> None:
+        if self._runtime_failed:
+            return
+        self._runtime_failed = True
+        tb = traceback.format_exc()
+        msg = f"[{stage}] {exc.__class__.__name__}: {exc}"
+        try:
+            with open(self._error_log_path(), "a", encoding="utf-8") as f:
+                f.write("\n=== KIRO2 ANDROID RUNTIME ERROR ===\n")
+                f.write(msg + "\n")
+                f.write(tb + "\n")
+        except Exception:
+            pass
+        try:
+            self._game_mode = "game_over"
+            self._shooting = False
+            self.controls.release_all()
+            self.overlay.hide_upgrade()
+            self.overlay.show_game_over()
+            self.overlay.hud.text = "Runtime error. See kiro2_error.log"
+        except Exception:
+            pass
+        print(msg)
+        print(tb)
+
+    def _tick_safe(self, dt: float) -> None:
+        if self._runtime_failed:
+            return
+        try:
+            self._tick(dt)
+        except Exception as exc:
+            self._handle_runtime_error("tick", exc)
+
+    def _redraw_safe(self, dt: float) -> None:
+        if self._runtime_failed:
+            return
+        try:
+            self._redraw(dt)
+        except Exception as exc:
+            self._handle_runtime_error("redraw", exc)
 
     def on_size(self, *_args):
         set_view_size(int(self.width), int(self.height))
@@ -642,8 +698,12 @@ class Kiro2AndroidGame(FloatLayout):
         vortex_left = max(0.0, float(getattr(p, "vortex_until", 0.0)) - s.time)
         laser_txt = f"  Laser:{laser_left:.0f}s" if laser_left > 0 else ""
         vortex_txt = f"  Vortex:{vortex_left:.0f}s" if vortex_left > 0 else ""
-        boss = next((e for e in s.enemies if str(getattr(e, "behavior", "")).startswith("boss_")), None)
-        boss_txt = f"  BOSS:{boss.behavior[5:].replace('_', ' ').title()} {int(getattr(boss, 'hp', 0))}" if boss else ""
+        boss = next((e for e in s.enemies if self._behavior_name(e).startswith("boss_")), None)
+        if boss:
+            boss_name = self._behavior_name(boss)
+            boss_txt = f"  BOSS:{boss_name[5:].replace('_', ' ').title()} {int(getattr(boss, 'hp', 0))}"
+        else:
+            boss_txt = ""
         diff_txt = f"  Diff:{str(getattr(s, 'difficulty', 'normal')).capitalize()}"
         state_txt = "  [PAUSED]" if self._game_mode == "paused" else ""
         self.overlay.hud.text = (
@@ -858,8 +918,32 @@ class Kiro2AndroidGame(FloatLayout):
 
 class Kiro2AndroidApp(App):
     def build(self):
-        root = Kiro2AndroidGame()
-        return root
+        try:
+            root = Kiro2AndroidGame()
+            return root
+        except Exception as exc:
+            tb = traceback.format_exc()
+            print(f"[startup] {exc.__class__.__name__}: {exc}")
+            print(tb)
+            fallback = Label(
+                text="Startup error. See logcat / kiro2_error.log",
+                halign="center",
+                valign="middle",
+                color=(1, 0.7, 0.7, 1),
+            )
+            fallback.bind(size=fallback.setter("text_size"))
+            try:
+                app = App.get_running_app()
+                data_dir = getattr(app, "user_data_dir", "") if app else ""
+                if data_dir:
+                    os.makedirs(data_dir, exist_ok=True)
+                    with open(os.path.join(data_dir, "kiro2_error.log"), "a", encoding="utf-8") as f:
+                        f.write("\n=== KIRO2 STARTUP ERROR ===\n")
+                        f.write(f"{exc.__class__.__name__}: {exc}\n")
+                        f.write(tb + "\n")
+            except Exception:
+                pass
+            return fallback
 
 
 if __name__ == "__main__":

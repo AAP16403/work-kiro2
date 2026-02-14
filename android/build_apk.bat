@@ -321,7 +321,7 @@ echo Building Android %MODE% (clean=%CLEAN%)...
 echo NOTE: First build will download Android SDK/NDK and may take a while.
 echo === Build command === >> "%LOG_FILE%"
 echo WSL_ANDROID_DIR=%WSL_ANDROID_DIR% >> "%LOG_FILE%"
-"%WSL_EXE%" %WSL_D% -e bash -lc "set -e; SRC=\"%WSL_ANDROID_DIR%\"; RUN_DIR=\"$SRC\"; if [[ \"$SRC\" == *' '* ]]; then LINK=\"/tmp/kiro2_android_${USER}\"; rm -f \"$LINK\"; ln -s \"$SRC\" \"$LINK\"; RUN_DIR=\"$LINK\"; fi; cd \"$RUN_DIR\" && chmod +x ./build_apk.sh ./setup_build_env.sh && ./build_apk.sh \"%MODE%\" \"%CLEAN%\"" >> "%LOG_FILE%" 2>&1
+"%WSL_EXE%" %WSL_D% -e bash -lc "set -e; SRC=\"%WSL_ANDROID_DIR%\"; RUN_DIR=\"$SRC\"; if [[ \"$SRC\" == *' '* ]]; then ROOT=\"$(cd \"$SRC/..\" && pwd -P)\"; LINK_ROOT=\"/tmp/kiro2_repo_${USER}\"; rm -f \"$LINK_ROOT\"; ln -s \"$ROOT\" \"$LINK_ROOT\"; RUN_DIR=\"$LINK_ROOT/android\"; fi; cd \"$RUN_DIR\" && chmod +x ./build_apk.sh ./setup_build_env.sh && ./build_apk.sh \"%MODE%\" \"%CLEAN%\"" >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
   call :sanitize_log
   echo ERROR: Build failed. The full log is available at: %LOG_FILE%

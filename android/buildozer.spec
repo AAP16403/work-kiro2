@@ -19,6 +19,10 @@ android.api = 33
 android.minapi = 24
 
 # Helps keep APK size down (optional; remove if you hit device-specific issues)
-android.arch = arm64-v8a
+android.archs = arm64-v8a
 
 # Buildozer/SDK defaults are fine for a debug build.
+
+[buildozer]
+# Keep p4a/build cache in a path without spaces (required when repo path has spaces).
+build_dir = /tmp/kiro2_buildozer

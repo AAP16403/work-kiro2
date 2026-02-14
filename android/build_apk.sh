@@ -105,13 +105,47 @@ prog_step "Running Buildozer ($MODE)"
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
-case "$MODE" in
-  debug)   yes | buildozer -v android debug ;;
-  release) yes | buildozer -v android release ;;
-  *)
-    echo "Unknown mode: $MODE (use debug|release)" >&2
-    exit 2
-    ;;
-esac
+# Keep output log-friendly (build_apk.bat redirects stdout/stderr to a file).
+export NO_COLOR=1
+export CLICOLOR=0
+export CLICOLOR_FORCE=0
+export TERM=dumb
+
+is_broken_hostpython_cache() {
+  local pycfg
+  pycfg="$(find /tmp/kiro2_buildozer -type f -path "*/other_builds/hostpython3/desktop/hostpython3/native-build/pyconfig.h" 2>/dev/null | head -n 1 || true)"
+  [[ -n "$pycfg" ]] || return 1
+  grep -q '^/\* #undef SIZEOF_VOID_P \*/$' "$pycfg" || return 1
+  grep -q '^/\* #undef HAVE_PTHREAD_H \*/$' "$pycfg" || return 1
+}
+
+run_buildozer() {
+  case "$MODE" in
+    debug)   yes | buildozer -v android debug ;;
+    release) yes | buildozer -v android release ;;
+    *)
+      echo "Unknown mode: $MODE (use debug|release)" >&2
+      return 2
+      ;;
+  esac
+}
+
+set +e
+run_buildozer
+build_rc=$?
+set -e
+
+if [[ $build_rc -ne 0 ]] && [[ "$DO_CLEAN" != "1" ]] && is_broken_hostpython_cache; then
+  echo "Detected stale hostpython cache from a previous failed configure; cleaning and retrying once..." >&2
+  "$BUILDOZER" android clean
+  set +e
+  run_buildozer
+  build_rc=$?
+  set -e
+fi
+
+if [[ $build_rc -ne 0 ]]; then
+  exit "$build_rc"
+fi
 
 echo "Done. APK/AAB outputs are typically in: $(pwd)/bin" >&2

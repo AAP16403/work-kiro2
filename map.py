@@ -29,13 +29,14 @@ class Room:
         self._h = height
 
         # Gradient backdrop via stacked translucent rectangles.
-        self._bg_a = shapes.Rectangle(0, 0, width, height, color=(14, 18, 26), batch=batch)
-        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(9, 10, 16), batch=batch)
+        self._bg_a = shapes.Rectangle(0, 0, width, height, color=config.BG_TOP, batch=batch)
+        self._bg_b = shapes.Rectangle(0, 0, width, height, color=config.BG_BOTTOM, batch=batch)
         self._bg_b.opacity = 120
 
         self._ambient: List[tuple[shapes.Circle, float, float, float]] = []
         self._scanlines: List[tuple[shapes.Line, int, float]] = []
         self._vignette: List[tuple[shapes.Circle, float]] = []
+        self._bg_grid: List[tuple[shapes.Line, int, float]] = []
         self._build_ambient()
         self._build_floor()
 
@@ -76,6 +77,16 @@ class Room:
             ln.opacity = base
             phase = random.uniform(0.0, math.tau)
             self._scanlines.append((ln, base, phase))
+        
+        # New background grid
+        bg_grid_count = max(10, min(20, int(self._w / 50)))
+        for i in range(bg_grid_count):
+            x = (i / max(1, bg_grid_count - 1)) * self._w
+            ln = shapes.Line(x, 0, x, self._h, thickness=1, color=(100, 120, 160), batch=self.batch)
+            base = random.randint(5, 15)
+            ln.opacity = base
+            phase = random.uniform(0.0, math.tau)
+            self._bg_grid.append((ln, base, phase))
 
     def resize(self, width: int, height: int):
         self._w = width
@@ -121,6 +132,10 @@ class Room:
             if hasattr(ln, "delete"):
                 ln.delete()
         self._scanlines.clear()
+        for ln, _base, _phase in self._bg_grid:
+            if hasattr(ln, "delete"):
+                ln.delete()
+        self._bg_grid.clear()
         self._build_floor()
 
     def _build_floor(self):
@@ -250,6 +265,28 @@ class Room:
                 ln4.opacity = base
                 self._decor.extend([ln1, ln2, ln3, ln4])
 
+            # New: Add a chance for a smaller inner diamond
+            if random.random() < 0.3:
+                p1_inner = center + Vec2(sx * 0.5, 0.0)
+                p2_inner = center + Vec2(0.0, sy * 0.5)
+                p3_inner = center + Vec2(-sx * 0.5, 0.0)
+                p4_inner = center + Vec2(0.0, -sy * 0.5)
+                x1_inner, y1_inner = to_iso(p1_inner, Vec2(0, 0))
+                x2_inner, y2_inner = to_iso(p2_inner, Vec2(0, 0))
+                x3_inner, y3_inner = to_iso(p3_inner, Vec2(0, 0))
+                x4_inner, y4_inner = to_iso(p4_inner, Vec2(0, 0))
+                inner_col = random.choice([(60, 70, 90), (45, 55, 75)])
+                inner_poly = shapes.Polygon((x1_inner, y1_inner), (x2_inner, y2_inner), (x3_inner, y3_inner), (x4_inner, y4_inner), color=inner_col, batch=self.batch)
+                inner_poly.opacity = random.randint(30, 50)
+                self._decor.append(inner_poly)
+
+            # New: Add a chance for a central glow
+            if random.random() < 0.15:
+                cx, cy = to_iso(center, Vec2(0, 0))
+                glow = shapes.Circle(cx, cy, radius=random.uniform(3, 6), color=(150, 180, 220), batch=self.batch)
+                glow.opacity = random.randint(20, 40)
+                self._decor.append(glow)
+
         # Circuit lines (pulse in update).
         circuit_count = max(14, min(26, int(radius * 0.07)))
         dirs = [Vec2(1, 0), Vec2(0, 1), Vec2(1, 1), Vec2(1, -1)]
@@ -335,6 +372,9 @@ class Room:
 
         for ln, base, phase in self._scanlines:
             ln.opacity = int(base * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(self._t * 1.15 + phase))))
+
+        for ln, base, phase in self._bg_grid:
+            ln.opacity = int(base * (0.6 + 0.4 * (0.5 + 0.5 * math.sin(self._t * 0.4 + phase))))
 
         for vg, phase in self._vignette:
             vg.opacity = int(28 + 28 * (0.5 + 0.5 * math.sin(self._t * 0.45 + phase)))

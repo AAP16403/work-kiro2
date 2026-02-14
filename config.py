@@ -38,39 +38,39 @@ ISO_SCALE_X = 1.0
 ISO_SCALE_Y = 0.5
 
 # Colors
-BG_TOP = (14, 18, 26)
-BG_BOTTOM = (9, 10, 16)
-FLOOR_MAIN = (45, 52, 70)
-FLOOR_EDGE = (95, 104, 128)
-FLOOR_GRID = (64, 72, 96)
-HUD_TEXT = (235, 235, 235)
+BG_TOP = (10, 15, 30)
+BG_BOTTOM = (5, 8, 20)
+FLOOR_MAIN = (40, 30, 60)
+FLOOR_EDGE = (100, 80, 150)
+FLOOR_GRID = (80, 200, 255)
+HUD_TEXT = (240, 240, 240)
 
 # Powerup Colors
 POWERUP_COLORS = {
-    "heal": (100, 255, 150),
-    "damage": (255, 100, 100),
-    "speed": (100, 200, 255),
-    "firerate": (255, 220, 100),
-    "shield": (120, 220, 255),
+    "heal": (120, 255, 120),
+    "damage": (255, 120, 120),
+    "speed": (120, 180, 255),
+    "firerate": (255, 255, 120),
+    "shield": (100, 220, 255),
     "laser": (255, 120, 255),
-    "vortex": (180, 140, 255),
-    "weapon": (220, 230, 255),
-    "ultra": (255, 230, 170),
+    "vortex": (200, 160, 255),
+    "weapon": (230, 230, 255),
+    "ultra": (255, 240, 180),
 }
 
 # Enemy Colors
 ENEMY_COLORS = {
-    "chaser": (210, 80, 80),        # Red
-    "ranged": (90, 170, 240),       # Blue
-    "charger": (235, 150, 70),      # Orange
-    "swarm": (200, 100, 200),       # Purple
-    "tank": (100, 200, 100),        # Green
-    "spitter": (240, 200, 80),      # Yellow
-    "flyer": (150, 150, 240),       # Light blue
-    "engineer": (80, 220, 170),     # Teal
-    "boss_thunder": (170, 200, 255),
-    "boss_laser": (255, 120, 255),
-    "boss_trapmaster": (255, 170, 80),
-    "boss_swarmqueen": (220, 120, 255),
-    "boss_brute": (255, 80, 80),
+    "chaser": (255, 80, 80),        # Bright Red
+    "ranged": (80, 150, 255),       # Bright Blue
+    "charger": (255, 180, 80),      # Bright Orange
+    "swarm": (220, 100, 220),       # Bright Purple
+    "tank": (100, 220, 100),        # Bright Green
+    "spitter": (255, 220, 80),      # Bright Yellow
+    "flyer": (150, 180, 255),       # Light Blue
+    "engineer": (80, 240, 180),     # Bright Teal
+    "boss_thunder": (180, 210, 255),
+    "boss_laser": (255, 140, 255),
+    "boss_trapmaster": (255, 180, 100),
+    "boss_swarmqueen": (230, 140, 255),
+    "boss_brute": (255, 100, 100),
 }

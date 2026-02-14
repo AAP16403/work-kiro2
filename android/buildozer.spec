@@ -9,7 +9,7 @@ source.dir = ..
 source.include_exts = py,md,txt,png,jpg,jpeg,ico
 source.exclude_dirs = .git,.venv,build,dist,__pycache__
 
-requirements = python3,kivy
+requirements = python3,kivy==2.2.1
 orientation = landscape
 fullscreen = 1
 

@@ -54,7 +54,7 @@ def generate_obstacles(seed: int, segment: int, room_radius: float, difficulty: 
         if can_place(p, pr):
             obstacles.append(Obstacle(pos=p, radius=pr, kind=kind))
 
-    layouts = ["cross", "ring", "lanes", "cluster", "spiral"]
+    layouts = ["cross", "ring", "lanes", "cluster", "spiral", "maze"]
     layout = layouts[(int(seed) + segment) % len(layouts)]
 
     # Primary structure:
@@ -103,6 +103,20 @@ def generate_obstacles(seed: int, segment: int, room_radius: float, difficulty: 
             ang = rng.uniform(0, math.tau)
             p = Vec2(math.cos(ang), math.sin(ang)) * rng.uniform(r * 0.35, r * 0.6)
             place(p, min(26.0, r * 0.07), "crystal")
+
+    elif layout == "maze":
+        # A simple maze-like structure
+        grid_size = 10
+        cell_size = r * 2 / grid_size
+        wall_radius = cell_size * 0.3
+        for i in range(grid_size):
+            for j in range(grid_size):
+                if rng.random() > 0.3:
+                    x = -r + i * cell_size + cell_size / 2
+                    y = -r + j * cell_size + cell_size / 2
+                    p = Vec2(x, y)
+                    if dist(p, Vec2(0.0, 0.0)) > center_keepout:
+                        place(p, wall_radius, "pillar")
 
     else:  # spiral
         turns = 2.2

@@ -881,8 +881,9 @@ class Game(pyglet.window.Window):
                     ultra_txt += f" ({ultra_cd:.0f}s)"
             boss = next((e for e in self.state.enemies if getattr(e, "behavior", "").startswith("boss_")), None)
             boss_txt = f"   BOSS: {boss.behavior[5:].replace('_',' ').title()} HP:{boss.hp}" if boss else ""
+            diff_txt = f"   Diff: {str(getattr(self.state, 'difficulty', 'normal')).capitalize()}"
             hp_cap = int(getattr(self.player, "max_hp", self.player.hp))
-            self.hud.text = f"HP: {self.player.hp}/{hp_cap}   Shield: {self.player.shield}   Wave: {self.state.wave}   Enemies: {len(self.state.enemies)}   Weapon: {self.player.current_weapon.name.capitalize()}{laser_txt}{vortex_txt}{ultra_txt}{boss_txt}"
+            self.hud.text = f"HP: {self.player.hp}/{hp_cap}   Shield: {self.player.shield}   Wave: {self.state.wave}   Enemies: {len(self.state.enemies)}   Weapon: {self.player.current_weapon.name.capitalize()}{laser_txt}{vortex_txt}{ultra_txt}{boss_txt}{diff_txt}"
             self.hud.draw()
             
             if self.game_state == "paused":

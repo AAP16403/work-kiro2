@@ -54,8 +54,9 @@ class Kiro2AndroidGame(FloatLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.state = GameState(difficulty="normal")
-        self.state.max_enemies = int(getattr(config, "MAX_ENEMIES", 12))
+        self._difficulty = "normal"
+        self.state = GameState(difficulty=self._difficulty)
+        self._apply_difficulty_tuning()
         self.player = Player(pos=Vec2(0.0, 0.0))
         self.player.current_weapon = get_weapon_for_wave(self.state.wave)
 
@@ -63,7 +64,7 @@ class Kiro2AndroidGame(FloatLayout):
         self._shooting = False
         self._aim_dir = Vec2(1.0, 0.0)
 
-        self._game_mode: str = "playing"  # playing | upgrade | game_over
+        self._game_mode: str = "menu"  # menu | playing | paused | upgrade | game_over
         self._upgrade_options: list[dict] = []
 
         self._incoming_damage_mult = 1.0
@@ -71,11 +72,19 @@ class Kiro2AndroidGame(FloatLayout):
         self.overlay = GameOverlay(
             on_ultra=self._use_ultra,
             on_restart=self._reset_run,
+            on_pause_toggle=self._toggle_pause,
+            on_menu_start=self._start_run,
+            on_menu_difficulty=self._cycle_difficulty,
             on_shoot=self._set_shooting,
             on_upgrade_pick=self._on_upgrade_pick,
             show_fire_button=False,
         )
         self.add_widget(self.overlay)
+        self.overlay.show_menu(self._difficulty)
+        self.overlay.set_pause_visible(False)
+        self.overlay.set_pause_state(False)
+        self.overlay.hide_game_over()
+        self.overlay.hide_upgrade()
 
         Clock.schedule_interval(self._tick, 1.0 / 60.0)
         Clock.schedule_interval(self._redraw, 1.0 / 60.0)
@@ -98,9 +107,35 @@ class Kiro2AndroidGame(FloatLayout):
         seg = int(getattr(self.state, "layout_segment", 0))
         self.state.obstacles = generate_obstacles(self.state.layout_seed, seg, float(config.ROOM_RADIUS), difficulty=self.state.difficulty)
 
-    def _reset_run(self) -> None:
-        self.state = GameState(difficulty="normal")
-        self.state.max_enemies = int(getattr(config, "MAX_ENEMIES", 12))
+    def _apply_difficulty_tuning(self) -> None:
+        diff = str(getattr(self, "_difficulty", "normal")).lower()
+        self.state.difficulty = diff
+        if diff == "easy":
+            self.state.max_enemies = 10
+            self._incoming_damage_mult = 0.85
+        elif diff == "hard":
+            self.state.max_enemies = 14
+            self._incoming_damage_mult = 1.15
+        else:
+            self.state.max_enemies = int(getattr(config, "MAX_ENEMIES", 12))
+            self._incoming_damage_mult = 1.0
+
+    def _cycle_difficulty(self) -> None:
+        if self._game_mode != "menu":
+            return
+        order = ("easy", "normal", "hard")
+        try:
+            idx = order.index(self._difficulty)
+        except ValueError:
+            idx = 1
+        self._difficulty = order[(idx + 1) % len(order)]
+        self.overlay.show_menu(self._difficulty)
+
+    def _start_run(self) -> None:
+        if self._game_mode != "menu":
+            return
+        self.state = GameState(difficulty=self._difficulty)
+        self._apply_difficulty_tuning()
         self.player = Player(pos=Vec2(0.0, 0.0))
         self.player.current_weapon = get_weapon_for_wave(self.state.wave)
         self._game_mode = "playing"
@@ -108,10 +143,37 @@ class Kiro2AndroidGame(FloatLayout):
         self._aim_dir = Vec2(1.0, 0.0)
         self.controls.release_all()
         self._upgrade_options = []
-        self._incoming_damage_mult = 1.0
+        self.overlay.hide_game_over()
+        self.overlay.hide_upgrade()
+        self.overlay.hide_menu()
+        self.overlay.set_pause_visible(True)
+        self._ensure_layout()
+
+    def _reset_run(self) -> None:
+        self.state = GameState(difficulty=self._difficulty)
+        self._apply_difficulty_tuning()
+        self.player = Player(pos=Vec2(0.0, 0.0))
+        self.player.current_weapon = get_weapon_for_wave(self.state.wave)
+        self._game_mode = "playing"
+        self._shooting = False
+        self._aim_dir = Vec2(1.0, 0.0)
+        self.controls.release_all()
+        self._upgrade_options = []
         self.overlay.hide_upgrade()
         self.overlay.hide_game_over()
+        self.overlay.hide_menu()
+        self.overlay.set_pause_visible(True)
         self._ensure_layout()
+
+    def _toggle_pause(self) -> None:
+        if self._game_mode == "playing":
+            self._game_mode = "paused"
+            self.controls.release_all()
+            self._shooting = False
+            self.overlay.set_pause_state(True)
+        elif self._game_mode == "paused":
+            self._game_mode = "playing"
+            self.overlay.set_pause_state(False)
 
     def _set_shooting(self, down: bool) -> None:
         if self._game_mode != "playing":
@@ -120,7 +182,7 @@ class Kiro2AndroidGame(FloatLayout):
         self._shooting = bool(down)
 
     def on_touch_down(self, touch):
-        if self._game_mode == "game_over":
+        if self._game_mode in ("menu", "paused", "game_over"):
             return super().on_touch_down(touch)
         if self._game_mode == "upgrade":
             return super().on_touch_down(touch)
@@ -273,7 +335,15 @@ class Kiro2AndroidGame(FloatLayout):
     def _tick(self, dt: float) -> None:
         if not self.state or not self.player:
             return
-        if self._game_mode != "playing":
+        if self._game_mode == "menu":
+            self._shooting = False
+            self._update_ui()
+            return
+        if self._game_mode == "paused":
+            self._shooting = False
+            self._update_ui()
+            return
+        if self._game_mode in ("upgrade", "game_over"):
             self._shooting = False
             self._update_ui()
             return
@@ -491,12 +561,28 @@ class Kiro2AndroidGame(FloatLayout):
         ultra_charges = int(getattr(p, "ultra_charges", 0))
         ultra_cd = max(0.0, float(getattr(p, "ultra_cd_until", 0.0)) - s.time)
         ultra_txt = f"  Ultra:{ultra_charges}" + (f"({ultra_cd:.0f}s)" if ultra_cd > 0 else "") if ultra_charges > 0 else ""
+        laser_left = max(0.0, float(getattr(p, "laser_until", 0.0)) - s.time)
+        vortex_left = max(0.0, float(getattr(p, "vortex_until", 0.0)) - s.time)
+        laser_txt = f"  Laser:{laser_left:.0f}s" if laser_left > 0 else ""
+        vortex_txt = f"  Vortex:{vortex_left:.0f}s" if vortex_left > 0 else ""
+        boss = next((e for e in s.enemies if str(getattr(e, "behavior", "")).startswith("boss_")), None)
+        boss_txt = f"  BOSS:{boss.behavior[5:].replace('_', ' ').title()} {int(getattr(boss, 'hp', 0))}" if boss else ""
+        diff_txt = f"  Diff:{str(getattr(s, 'difficulty', 'normal')).capitalize()}"
+        state_txt = "  [PAUSED]" if self._game_mode == "paused" else ""
         self.overlay.hud.text = (
             f"HP:{int(p.hp)}/{hp_cap}  Shield:{int(p.shield)}  Wave:{int(s.wave)}  "
-            f"Enemies:{len(s.enemies)}  Weapon:{getattr(p.current_weapon, 'name', '??')}{ultra_txt}"
+            f"Enemies:{len(s.enemies)}  Weapon:{getattr(p.current_weapon, 'name', '??')}{laser_txt}{vortex_txt}{ultra_txt}{boss_txt}{diff_txt}{state_txt}"
         )
         self.overlay.set_ultra_enabled(ultra_charges > 0)
         self.overlay.set_fire_enabled(False)
+        if self._game_mode == "menu":
+            self.overlay.show_menu(self._difficulty)
+            self.overlay.set_pause_visible(False)
+            self.overlay.set_pause_state(False)
+        else:
+            self.overlay.hide_menu()
+            self.overlay.set_pause_visible(True)
+            self.overlay.set_pause_state(self._game_mode == "paused")
 
     def _redraw(self, _dt: float) -> None:
         if not self.state or not self.player:
@@ -518,6 +604,17 @@ class Kiro2AndroidGame(FloatLayout):
 
             # Arena outline
             r = float(config.ROOM_RADIUS) * 0.9
+            # Arena rings
+            for k, a in ((1.0, 0.20), (0.72, 0.14), (0.46, 0.09)):
+                pts_ring: list[float] = []
+                for i in range(56):
+                    ang = (i / 56) * (math.tau)
+                    wp = Vec2(math.cos(ang) * r * k, math.sin(ang) * r * k)
+                    sx, sy = to_iso(wp, shake)
+                    pts_ring.extend([sx, sy])
+                Color(0.27, 0.31, 0.42, a)
+                Line(points=pts_ring, close=True, width=dp(1.0))
+
             pts: list[float] = []
             n = 56
             for i in range(n):
@@ -540,8 +637,12 @@ class Kiro2AndroidGame(FloatLayout):
                 cr, cg, cb = rgb
 
                 def _fn():
+                    Color(0.0, 0.0, 0.0, min(0.32, float(alpha) * 0.38))
+                    Ellipse(pos=(sx - rr * 0.95, sy - rr * 0.22), size=(rr * 1.9, rr * 0.7))
                     Color(cr / 255.0, cg / 255.0, cb / 255.0, float(alpha))
                     Ellipse(pos=(sx - rr, sy - rr), size=(rr * 2.0, rr * 2.0))
+                    Color(min(1.0, cr / 255.0 + 0.14), min(1.0, cg / 255.0 + 0.14), min(1.0, cb / 255.0 + 0.14), min(1.0, alpha * 0.45))
+                    Ellipse(pos=(sx - rr * 0.55, sy - rr * 0.55), size=(rr * 0.7, rr * 0.7))
 
                 add_draw(sy, _fn)
 

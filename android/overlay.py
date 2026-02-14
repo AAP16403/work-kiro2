@@ -15,6 +15,9 @@ class GameOverlay(FloatLayout):
         *,
         on_ultra: Callable[[], None],
         on_restart: Callable[[], None],
+        on_pause_toggle: Callable[[], None],
+        on_menu_start: Callable[[], None],
+        on_menu_difficulty: Callable[[], None],
         on_shoot: Callable[[bool], None],
         on_upgrade_pick: Callable[[int], None],
         show_fire_button: bool = True,
@@ -24,6 +27,9 @@ class GameOverlay(FloatLayout):
 
         self._on_ultra = on_ultra
         self._on_restart = on_restart
+        self._on_pause_toggle = on_pause_toggle
+        self._on_menu_start = on_menu_start
+        self._on_menu_difficulty = on_menu_difficulty
         self._on_shoot = on_shoot
         self._on_upgrade_pick = on_upgrade_pick
 
@@ -64,6 +70,16 @@ class GameOverlay(FloatLayout):
         )
         self._ultra_btn.bind(on_release=lambda _btn: self._on_ultra())
         self.add_widget(self._ultra_btn)
+
+        self._pause_btn = Button(
+            text="PAUSE",
+            size_hint=(None, None),
+            width=dp(92),
+            height=dp(40),
+            pos_hint={"right": 0.99, "top": 0.985},
+        )
+        self._pause_btn.bind(on_release=lambda _btn: self._on_pause_toggle())
+        self.add_widget(self._pause_btn)
 
         # Restart button (game over)
         self._restart_btn = Button(
@@ -110,6 +126,37 @@ class GameOverlay(FloatLayout):
             self._upgrade_buttons.append(b)
             self._upgrade_overlay.add_widget(b)
         self.add_widget(self._upgrade_overlay)
+
+        self._menu_overlay = BoxLayout(
+            orientation="vertical",
+            size_hint=(0.84, None),
+            height=dp(280),
+            pos_hint={"center_x": 0.5, "center_y": 0.5},
+            spacing=dp(12),
+            padding=(dp(14), dp(14), dp(14), dp(14)),
+            opacity=0.0,
+            disabled=True,
+        )
+        self._menu_title = Label(
+            text="KIRO2",
+            size_hint=(1, None),
+            height=dp(44),
+            halign="center",
+            valign="middle",
+            color=(0.97, 0.97, 0.99, 1.0),
+        )
+        self._menu_title.bind(size=self._sync_label_text_size)
+        self._menu_overlay.add_widget(self._menu_title)
+
+        self._menu_start_btn = Button(text="START", size_hint=(1, None), height=dp(56))
+        self._menu_start_btn.bind(on_release=lambda _btn: self._on_menu_start())
+        self._menu_overlay.add_widget(self._menu_start_btn)
+
+        self._menu_difficulty_btn = Button(text="DIFFICULTY: NORMAL", size_hint=(1, None), height=dp(56))
+        self._menu_difficulty_btn.bind(on_release=lambda _btn: self._on_menu_difficulty())
+        self._menu_overlay.add_widget(self._menu_difficulty_btn)
+        self.add_widget(self._menu_overlay)
+
         self.bind(size=self._sync_layout)
         self._sync_layout()
 
@@ -130,6 +177,9 @@ class GameOverlay(FloatLayout):
         self._ultra_btn.width = side_btn_w
         self._ultra_btn.height = side_btn_h
         self._ultra_btn.font_size = max(dp(12), min(dp(16), short_side * 0.036))
+        self._pause_btn.width = side_btn_w
+        self._pause_btn.height = max(dp(34), min(dp(44), short_side * 0.085))
+        self._pause_btn.font_size = max(dp(11), min(dp(14), short_side * 0.03))
         if self._fire_btn is not None:
             self._fire_btn.width = side_btn_w
             self._fire_btn.height = side_btn_h
@@ -150,12 +200,32 @@ class GameOverlay(FloatLayout):
             b.font_size = btn_font
             self._sync_button_text_size(b, None)
 
+        self._menu_overlay.height = max(dp(250), min(dp(360), self.height * 0.7))
+        self._menu_title.height = max(dp(34), min(dp(56), short_side * 0.12))
+        self._menu_title.font_size = max(dp(18), min(dp(30), short_side * 0.065))
+        self._menu_start_btn.height = max(dp(50), min(dp(72), short_side * 0.14))
+        self._menu_difficulty_btn.height = self._menu_start_btn.height
+        self._menu_start_btn.font_size = max(dp(14), min(dp(22), short_side * 0.046))
+        self._menu_difficulty_btn.font_size = self._menu_start_btn.font_size
+
         self._sync_label_text_size(self._upgrade_title, None)
+        self._sync_label_text_size(self._menu_title, None)
 
     def reserved_widgets(self) -> list:
-        widgets = [self._ultra_btn, self._restart_btn, self._upgrade_overlay]
+        widgets = []
+        if self._pause_btn.opacity > 0.0 and not self._pause_btn.disabled:
+            widgets.append(self._pause_btn)
+        if self._ultra_btn.opacity > 0.0 and not self._ultra_btn.disabled:
+            widgets.append(self._ultra_btn)
+        if self._restart_btn.opacity > 0.0 and not self._restart_btn.disabled:
+            widgets.append(self._restart_btn)
+        if self._upgrade_overlay.opacity > 0.0 and not self._upgrade_overlay.disabled:
+            widgets.append(self._upgrade_overlay)
+        if self._menu_overlay.opacity > 0.0 and not self._menu_overlay.disabled:
+            widgets.append(self._menu_overlay)
         if self._fire_btn is not None:
-            widgets.insert(0, self._fire_btn)
+            if self._fire_btn.opacity > 0.0 and not self._fire_btn.disabled:
+                widgets.insert(0, self._fire_btn)
         return widgets
 
     def show_game_over(self) -> None:
@@ -191,3 +261,19 @@ class GameOverlay(FloatLayout):
             return
         self._fire_btn.disabled = not bool(enabled)
         self._fire_btn.opacity = 1.0 if enabled else 0.25
+
+    def set_pause_visible(self, visible: bool) -> None:
+        self._pause_btn.disabled = not bool(visible)
+        self._pause_btn.opacity = 1.0 if visible else 0.0
+
+    def set_pause_state(self, paused: bool) -> None:
+        self._pause_btn.text = "RESUME" if paused else "PAUSE"
+
+    def show_menu(self, difficulty_text: str) -> None:
+        self._menu_difficulty_btn.text = f"DIFFICULTY: {difficulty_text.upper()}"
+        self._menu_overlay.opacity = 1.0
+        self._menu_overlay.disabled = False
+
+    def hide_menu(self) -> None:
+        self._menu_overlay.opacity = 0.0
+        self._menu_overlay.disabled = True

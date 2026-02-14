@@ -35,6 +35,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildozer-
 
+      - name: Install native build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential autoconf automake libtool libtool-bin m4 pkg-config \
+            git zip unzip zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libtinfo6 cmake libffi-dev libssl-dev
+
       - name: Build debug APK
         run: |
           chmod +x android/build_apk.sh

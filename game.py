@@ -82,6 +82,7 @@ class Game(pyglet.window.Window):
 
         self.mouse_xy = (self.width / 2, self.height / 2)
         self.mouse_down = False
+        self._rmb_down = False
 
         # Cached UI labels to avoid per-frame allocations.
         self._pause_hint = pyglet.text.Label(
@@ -382,6 +383,8 @@ class Game(pyglet.window.Window):
         """Start the game."""
         self._init_game()
         self.game_state = "playing"
+        self.mouse_down = False
+        self._rmb_down = False
     
     def _open_settings(self):
         """Open settings menu."""
@@ -461,6 +464,8 @@ class Game(pyglet.window.Window):
     def _return_to_menu(self):
         """Return to main menu."""
         self.game_state = "menu"
+        self.mouse_down = False
+        self._rmb_down = False
         # Clean up game objects
         if self.batch:
             self.batch = None
@@ -486,6 +491,11 @@ class Game(pyglet.window.Window):
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         self.mouse_xy = (x, y)
+        if self.game_state == "playing":
+            rmb_pressed = bool(buttons & pyglet.window.mouse.RIGHT)
+            if rmb_pressed and not self._rmb_down:
+                self._use_ultra()
+            self._rmb_down = rmb_pressed
         if self.game_state == "settings":
             self.settings_menu.on_mouse_drag(x, y, dx, dy)
 
@@ -526,11 +536,14 @@ class Game(pyglet.window.Window):
             if button == pyglet.window.mouse.LEFT:
                 self.mouse_down = True
             elif button == pyglet.window.mouse.RIGHT:
+                self._rmb_down = True
                 self._use_ultra()
 
     def on_mouse_release(self, x, y, button, modifiers):
         if button == pyglet.window.mouse.LEFT:
             self.mouse_down = False
+        elif button == pyglet.window.mouse.RIGHT:
+            self._rmb_down = False
         if self.game_state == "settings":
             self.settings_menu.on_mouse_release(x, y, button)
     
@@ -539,10 +552,14 @@ class Game(pyglet.window.Window):
         if symbol == pyglet.window.key.ESCAPE:
             if self.game_state == "playing":
                 self.game_state = "paused"
+                self.mouse_down = False
+                self._rmb_down = False
             elif self.game_state == "paused":
                 self.game_state = "playing"
             elif self.game_state == "settings":
                 self.game_state = "menu"
+        elif symbol == pyglet.window.key.Q and self.game_state == "playing":
+            self._use_ultra()
 
     def on_close(self):
         """Handle window close event."""
@@ -809,6 +826,7 @@ class Game(pyglet.window.Window):
                 self._roll_upgrade_options()
                 self.game_state = "upgrade"
                 self.mouse_down = False
+                self._rmb_down = False
 
         # Shake decay
         if s.shake > 0:
@@ -836,6 +854,7 @@ class Game(pyglet.window.Window):
             self.game_state = "game_over"
             self.game_over_menu.set_wave(self.state.wave)
             self.mouse_down = False
+            self._rmb_down = False
 
     def on_draw(self):
         """Render the game."""

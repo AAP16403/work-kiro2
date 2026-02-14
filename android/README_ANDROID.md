@@ -1,5 +1,7 @@
 # Android shipping (APK) for this game
 
+For a full Git push -> APK workflow, see `android/GIT_PUSH_APK_GUIDE.md`.
+
 This repo’s main game uses **pyglet**, which is great on desktop, but it’s not a drop-in “export to Android” runtime.
 
 What’s included here is an **Android-friendly Kivy entrypoint** (`android/main.py`) that reuses the existing *pure-Python gameplay logic* (`enemy.py`, `level.py`, `weapons.py`, etc.) and provides:
@@ -66,9 +68,10 @@ This uses **WSL** to run Buildozer.
 ### Option C: Build in GitHub Actions (no local WSL needed)
 
 If local WSL is broken or you just want a cloud build:
-- Push the repo to GitHub
-- Run the workflow: `Build Android APK (Buildozer)`
-- Download the `kiro2-apk` artifact (APK)
+- Push the repo to GitHub, or run workflow manually from `Actions`
+- Workflow name: `Build Android APK`
+- For manual runs, choose `build_mode` (`debug` or `release`)
+- Download artifact `kiro2-apk-<mode>`
 
 ### Option B: Run directly inside Linux/WSL
 

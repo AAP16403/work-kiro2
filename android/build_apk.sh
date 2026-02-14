@@ -84,6 +84,26 @@ cd "$(dirname "$0")"
 
 VENV_DIR="${KIRO2_BUILDOZER_VENV:-.venv_buildozer}"
 BUILDOZER="$VENV_DIR/bin/buildozer"
+BUILDOZER_BUILD_DIR="${KIRO2_BUILDOZER_BUILD_DIR:-}"
+if [[ -z "$BUILDOZER_BUILD_DIR" ]] && [[ -f "buildozer.spec" ]]; then
+  BUILDOZER_BUILD_DIR="$(awk -F= '
+    /^[[:space:]]*build_dir[[:space:]]*=/ {
+      v=$2
+      sub(/^[[:space:]]+/, "", v)
+      sub(/[[:space:]]+$/, "", v)
+      print v
+      exit
+    }' buildozer.spec)"
+fi
+if [[ -z "$BUILDOZER_BUILD_DIR" ]]; then
+  BUILDOZER_BUILD_DIR="$HOME/.buildozer"
+fi
+if [[ "$BUILDOZER_BUILD_DIR" == "~/"* ]]; then
+  BUILDOZER_BUILD_DIR="$HOME/${BUILDOZER_BUILD_DIR#~/}"
+fi
+if [[ "$BUILDOZER_BUILD_DIR" != /* ]]; then
+  BUILDOZER_BUILD_DIR="$(pwd)/$BUILDOZER_BUILD_DIR"
+fi
 prog_step "Creating/Updating Python venv + Buildozer"
 if [[ ! -d "$VENV_DIR" ]]; then
   echo "Creating buildozer venv at: $(pwd)/$VENV_DIR" >&2
@@ -113,7 +133,7 @@ export TERM=dumb
 
 is_broken_hostpython_cache() {
   local pycfg
-  pycfg="$(find /tmp/kiro2_buildozer -type f -path "*/other_builds/hostpython3/desktop/hostpython3/native-build/pyconfig.h" 2>/dev/null | head -n 1 || true)"
+  pycfg="$(find "$BUILDOZER_BUILD_DIR" -type f -path "*/other_builds/hostpython3/desktop/hostpython3/native-build/pyconfig.h" 2>/dev/null | head -n 1 || true)"
   [[ -n "$pycfg" ]] || return 1
   grep -q '^/\* #undef SIZEOF_VOID_P \*/$' "$pycfg" || return 1
   grep -q '^/\* #undef HAVE_PTHREAD_H \*/$' "$pycfg" || return 1

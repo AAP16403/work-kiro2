@@ -2,6 +2,15 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      build_mode:
+        description: "Build mode"
+        required: true
+        default: "debug"
+        type: choice
+        options:
+          - debug
+          - release
   push:
     paths:
       - "android/**"
@@ -12,6 +21,13 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    env:
+      BUILD_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_mode || 'debug' }}
+      # CI compatibility profile:
+      # - arm64-v8a + armeabi-v7a covers most real Android phones/tablets.
+      # - minapi 21 broadens install base compared to 24.
+      CI_ANDROID_ARCHS: arm64-v8a,armeabi-v7a
+      CI_ANDROID_MINAPI: "21"
     steps:
       - uses: actions/checkout@v4
 
@@ -43,16 +59,41 @@ jobs:
             git zip unzip zlib1g-dev libncurses5-dev libncursesw5-dev \
             libtinfo6 cmake libffi-dev libssl-dev
 
-      - name: Build debug APK
+      - name: Apply CI Android compatibility settings
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          spec_path = Path("android/buildozer.spec")
+          lines = spec_path.read_text(encoding="utf-8").splitlines()
+          archs = os.environ["CI_ANDROID_ARCHS"]
+          minapi = os.environ["CI_ANDROID_MINAPI"]
+
+          def upsert(key: str, value: str) -> None:
+              prefix = f"{key} ="
+              for i, line in enumerate(lines):
+                  if line.strip().startswith(prefix):
+                      lines[i] = f"{key} = {value}"
+                      return
+              lines.append(f"{key} = {value}")
+
+          upsert("android.archs", archs)
+          upsert("android.minapi", minapi)
+          spec_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print("Updated android/buildozer.spec for CI compatibility profile")
+          PY
+
+      - name: Build APK
         run: |
           chmod +x android/build_apk.sh
           cd android
-          ./build_apk.sh debug 0
+          ./build_apk.sh "${BUILD_MODE}" 0
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: kiro2-apk
+          name: kiro2-apk-${{ env.BUILD_MODE }}
           path: android/bin/*.apk
           if-no-files-found: error
 

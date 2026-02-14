@@ -22,6 +22,7 @@ PROJECTILE_SPEED = 360.0
 # Wave settings
 WAVE_COOLDOWN = 2.0
 MAX_ENEMIES = 12  # Maximum concurrent enemies in a wave
+MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter
 
 # Ultra ability (special powerup -> right click)
 ULTRA_MAX_CHARGES = 2

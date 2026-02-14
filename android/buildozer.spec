@@ -2,6 +2,7 @@
 title = Kiro2
 package.name = kiro2
 package.domain = org.example
+version = 0.1
 
 # Point Buildozer at the repo root, but run this entrypoint.
 source.dir = ..

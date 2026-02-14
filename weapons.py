@@ -53,7 +53,7 @@ WEAPONS = {
     "heavy": Weapon(
         name="Heavy Cannon",
         damage=20,
-        fire_rate=0.6,
+        fire_rate=0.38,
         projectile_count=1,
         spread_angle=0,
         projectile_speed=280.0,

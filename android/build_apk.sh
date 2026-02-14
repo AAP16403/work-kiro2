@@ -63,9 +63,10 @@ ensure_apt_packages() {
   echo "Installing Buildozer prerequisites via apt (may prompt for sudo password)..." >&2
   sudo apt-get update
   sudo apt-get install -y \
-    python3 python3-pip python3-venv git zip unzip openjdk-17-jdk \
+    python3 python3-dev python3-pip python3-venv git zip unzip openjdk-17-jdk \
     build-essential autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
-    libtinfo6 cmake libffi-dev libssl-dev
+    libtinfo6 cmake libffi-dev libssl-dev \
+    libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev libavformat-dev libavcodec-dev
 }
 
 prog_step "Checking/Installing system prerequisites"
@@ -83,15 +84,13 @@ cd "$(dirname "$0")"
 
 VENV_DIR="${KIRO2_BUILDOZER_VENV:-.venv_buildozer}"
 BUILDOZER="$VENV_DIR/bin/buildozer"
-if [[ ! -x "$BUILDOZER" ]]; then
-  prog_step "Creating Python venv + installing Buildozer"
+prog_step "Creating/Updating Python venv + Buildozer"
+if [[ ! -d "$VENV_DIR" ]]; then
   echo "Creating buildozer venv at: $(pwd)/$VENV_DIR" >&2
   python3 -m venv "$VENV_DIR"
-  "$VENV_DIR/bin/python" -m pip install -U pip setuptools wheel
-  "$VENV_DIR/bin/python" -m pip install -U buildozer cython
-else
-  prog_step "Buildozer venv already present"
 fi
+"$VENV_DIR/bin/python" -m pip install -U pip setuptools wheel
+"$VENV_DIR/bin/python" -m pip install -U buildozer cython
 
 if [[ "$DO_CLEAN" == "1" ]]; then
   prog_step "Cleaning previous Android build"
@@ -101,9 +100,14 @@ else
 fi
 
 prog_step "Running Buildozer ($MODE)"
+
+# Activate the venv to ensure buildozer and its subprocesses find all dependencies.
+# shellcheck disable=SC1091
+source "$VENV_DIR/bin/activate"
+
 case "$MODE" in
-  debug)   "$BUILDOZER" -v android debug ;;
-  release) "$BUILDOZER" -v android release ;;
+  debug)   yes | buildozer -v android debug ;;
+  release) yes | buildozer -v android release ;;
   *)
     echo "Unknown mode: $MODE (use debug|release)" >&2
     exit 2

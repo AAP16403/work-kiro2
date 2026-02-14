@@ -319,11 +319,10 @@ call :prog_step "Running Android build (WSL/Buildozer)"
 
 echo Building Android %MODE% (clean=%CLEAN%)...
 echo NOTE: First build will download Android SDK/NDK and may take a while.
-"%WSL_EXE%" %WSL_D% -e bash -lc "cd \"%WSL_ANDROID_DIR%\" && chmod +x ./build_apk.sh ./setup_build_env.sh && ./build_apk.sh \"%MODE%\" \"%CLEAN%\"" >> "%LOG_FILE%" 2>&1
+"%WSL_EXE%" %WSL_D% -e bash -lc "cd \"%WSL_ANDROID_DIR%\" && chmod +x ./build_apk.sh ./setup_build_env.sh && ./build_apk.sh \"%MODE%\" \"%CLEAN%\""
 if errorlevel 1 (
-  echo ERROR: Build failed. In WSL, install Buildozer prerequisites. See android/README_ANDROID.md
+  echo ERROR: Build failed. The full log is available at: %LOG_FILE%
   echo ERROR: build command failed. >> "%LOG_FILE%"
-  echo See log: "%LOG_FILE%"
   exit /b 1
 )
 

@@ -708,8 +708,10 @@ class Game(pyglet.window.Window):
         # Collisions
         for p in list(s.projectiles):
             if p.owner == "player":
+                ptype = str(getattr(p, "projectile_type", "bullet"))
+                hit_r = 16.0 if ptype == "missile" else 12.0 if ptype == "plasma" else 11.0
                 for e in list(s.enemies):
-                    if dist(p.pos, e.pos) < 11:
+                    if dist(p.pos, e.pos) < hit_r:
                         e.hp -= p.damage
                         s.shake = max(s.shake, 4.0)
                         

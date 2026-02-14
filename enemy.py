@@ -64,6 +64,17 @@ def _rotate(v: Vec2, deg: float) -> Vec2:
     return Vec2(v.x * cos_a - v.y * sin_a, v.x * sin_a + v.y * cos_a)
 
 
+def _append_trap_capped(state, trap: Trap) -> bool:
+    """Append trap only if construction cap has room."""
+    if not hasattr(state, "traps"):
+        state.traps = []
+    cap = max(0, int(getattr(config, "MAX_ACTIVE_CONSTRUCTIONS", 14)))
+    if len(state.traps) >= cap:
+        return False
+    state.traps.append(trap)
+    return True
+
+
 def _fire_fan(
     state,
     origin: Vec2,
@@ -364,8 +375,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             # Keep within room bounds.
             if p.length() > config.ROOM_RADIUS * 0.86:
                 p = p.normalized() * (config.ROOM_RADIUS * 0.86)
-            state.traps.append(Trap(pos=p, radius=28.0, damage=16, ttl=10.0))
-            enemy.attack_cd = 2.2 + random.uniform(0.0, 0.4)
+            _append_trap_capped(state, Trap(pos=p, radius=28.0, damage=16, ttl=10.0))
+            enemy.attack_cd = 2.9 + random.uniform(0.0, 0.6)
         return
 
     # -----------------
@@ -488,7 +499,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             )
             if phase >= 1:
                 # Slightly offset follow-up beams for a "sweep" feel.
-                offsets = (-16, 16) if phase == 1 else (-22, 22)
+                offsets = (-24, 24) if phase == 1 else (-34, 34)
                 for off in offsets:
                     d2 = _rotate(dir_to, off)
                     state.lasers.append(
@@ -554,7 +565,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             for i in range(n):
                 ang = base_ang + (i / n) * math.tau
                 pos = player_pos + Vec2(math.cos(ang), math.sin(ang)) * r
-                state.traps.append(Trap(pos=pos, radius=30.0, damage=18, ttl=9.0, armed_delay=0.55, kind="spike"))
+                _append_trap_capped(state, Trap(pos=pos, radius=30.0, damage=18, ttl=9.0, armed_delay=0.55, kind="spike"))
 
             # Phases: add shrapnel bursts after trap placement (no swirl/ring spam).
             proj_speed = 200.0 + state.wave * 2.0
@@ -669,8 +680,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             if not hasattr(state, "traps"):
                 state.traps = []
             # Telegraph then strike.
-            state.traps.append(Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=80.0, damage=0, ttl=0.8, armed_delay=0.35, kind="slam_warn"))
-            state.traps.append(Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=70.0, damage=26, ttl=0.55, armed_delay=0.35, kind="slam"))
+            _append_trap_capped(state, Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=80.0, damage=0, ttl=0.8, armed_delay=0.35, kind="slam_warn"))
+            _append_trap_capped(state, Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=70.0, damage=26, ttl=0.55, armed_delay=0.35, kind="slam"))
             if phase_boss >= 1:
                 # Slam follow-up: heavy cone, not a full swirl ring.
                 proj_speed = 200.0 + state.wave * 1.8

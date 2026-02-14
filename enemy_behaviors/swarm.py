@@ -18,43 +18,42 @@ class Swarm(Behavior):
 
     def update(self, enemy, player_pos, state, dt, player_vel):
         """Update the enemy's state based on its behavior."""
+        if "slot_bias" not in enemy.ai:
+            enemy.ai["slot_bias"] = ((id(enemy) % 17) / 17.0) * math.tau
         
-        # For performance, we might not need to check all enemies, especially in later waves.
-        # A full Boids implementation would use a spatial hash grid. Here we simplify.
         neighbors = self._get_neighbors(enemy, state.enemies)
 
-        # --- Boids Rules ---
-        # 1. Separation: Steer to avoid crowding local flockmates.
         sep = self._separation(enemy, neighbors)
-        
-        # 2. Alignment: Steer towards the average heading of local flockmates.
         align = self._alignment(enemy, neighbors)
-        
-        # 3. Cohesion: Steer to move toward the average position of local flockmates.
         coh = self._cohesion(enemy, neighbors)
 
-        # --- Goal Seeking ---
-        # The primary goal is to move towards the player.
         dvec = player_pos - enemy.pos
         dist_to_player = dvec.length()
         to_player = dvec.normalized() if dist_to_player > 1e-6 else Vec2(1.0, 0.0)
 
-        # Add some slight random jitter to prevent perfect stacking and make movement organic
-        # The seed ensures each enemy has a different (but consistent) jitter pattern.
+        slot_ang = enemy.t * 0.55 + enemy.ai["slot_bias"]
+        pressure = max(0.0, min(1.0, (220.0 - dist_to_player) / 220.0))
+        ring_base = 135.0 + 25.0 * math.sin(enemy.t * 0.9 + enemy.seed)
+        ring_r = max(46.0, ring_base * (1.0 - pressure * 0.55))
+        ring_target = player_pos + Vec2(math.cos(slot_ang), math.sin(slot_ang)) * ring_r
+        to_ring = (ring_target - enemy.pos).normalized()
+
+        dodge = self._dodge_player_projectiles(enemy, getattr(state, "projectiles", []))
         jitter = Vec2(math.sin(enemy.t * 5.5 + enemy.seed), math.cos(enemy.t * 4.9 + enemy.seed)) * 0.25
 
-        # --- Combine Forces ---
-        # The final movement is a weighted sum of all forces.
-        # The swarm rules keep the group together, while the 'to_player' vector
-        # gives them a unified direction.
-        move_dir = (to_player * 1.0 + 
-                    sep * self.separation_weight + 
-                    align * self.align_weight + 
-                    coh * self.cohesion_weight +
-                    jitter
-                   ).normalized()
+        ring_weight = max(0.08, 0.42 - pressure * 0.28)
+        chase_weight = 0.92 + pressure * 0.42
+        move_dir = (
+            to_player * chase_weight
+            + to_ring * ring_weight
+            + sep * self.separation_weight
+            + align * self.align_weight
+            + coh * self.cohesion_weight
+            + dodge * 0.95
+            + jitter
+        ).normalized()
         
-        enemy.vel = move_dir * enemy.speed
+        enemy.vel = move_dir * enemy.speed * (1.0 + pressure * 0.15)
         enemy.pos += enemy.vel * dt
 
     def _get_neighbors(self, enemy, all_enemies):
@@ -112,6 +111,31 @@ class Swarm(Behavior):
 
         if count > 0:
             center_of_mass /= count
-            # Return a vector pointing from the enemy's position to the center of mass
             return (center_of_mass - enemy.pos).normalized()
         return Vec2(0,0)
+
+    def _dodge_player_projectiles(self, enemy, projectiles, danger_radius: float = 85.0) -> Vec2:
+        steer = Vec2(0.0, 0.0)
+        count = 0
+        for p in projectiles:
+            if getattr(p, "owner", "") != "player":
+                continue
+            rel = enemy.pos - p.pos
+            d2 = rel.length_squared()
+            if d2 > danger_radius * danger_radius:
+                continue
+            v = getattr(p, "vel", Vec2(0.0, 0.0))
+            if v.length_squared() <= 1e-6:
+                continue
+            toward = rel.dot(v.normalized())
+            if toward >= 0.0:
+                continue
+            ev = Vec2(-v.y, v.x).normalized()
+            sign = 1.0 if rel.dot(ev) >= 0.0 else -1.0
+            steer += ev * sign * (1.0 - (math.sqrt(d2) / danger_radius))
+            count += 1
+            if count >= 3:
+                break
+        if count == 0:
+            return Vec2(0.0, 0.0)
+        return (steer / count).normalized()

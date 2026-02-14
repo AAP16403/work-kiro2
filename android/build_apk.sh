@@ -90,7 +90,7 @@ if [[ ! -d "$VENV_DIR" ]]; then
   python3 -m venv "$VENV_DIR"
 fi
 "$VENV_DIR/bin/python" -m pip install -U pip setuptools wheel
-"$VENV_DIR/bin/python" -m pip install -U buildozer cython
+"$VENV_DIR/bin/python" -m pip install -U buildozer "cython<3"
 
 if [[ "$DO_CLEAN" == "1" ]]; then
   prog_step "Cleaning previous Android build"

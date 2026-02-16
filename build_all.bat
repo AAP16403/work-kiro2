@@ -51,10 +51,12 @@ echo Cleaning stale build outputs...
 if exist "build\kiro2_game" rmdir /s /q "build\kiro2_game"
 if exist "dist\Kiro2Game" rmdir /s /q "dist\Kiro2Game"
 if exist "dist\Kiro2Game.zip" del /f /q "dist\Kiro2Game.zip"
+if exist "dist\%APP_NAME%" rmdir /s /q "dist\%APP_NAME%"
+if exist "dist\%APP_NAME%.zip" del /f /q "dist\%APP_NAME%.zip"
 
 echo.
 echo Running quick syntax validation...
-"%PY_EXE%" -m py_compile main.py game.py enemy.py level.py rpg.py menu.py fonts.py
+"%PY_EXE%" -c "import pathlib, py_compile; [py_compile.compile(str(p), doraise=True) for p in pathlib.Path('.').rglob('*.py') if '.venv' not in p.parts and 'build' not in p.parts and 'dist' not in p.parts and '__pycache__' not in p.parts]"
 if errorlevel 1 goto :fail
 
 echo.

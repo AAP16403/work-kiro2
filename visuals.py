@@ -7,8 +7,8 @@ import pyglet
 from pyglet import shapes
 from pyglet.graphics import Group
 
-from config import ENEMY_COLORS
-from utils import to_iso, Vec2
+from config import ENEMY_COLORS, SCREEN_H
+from utils import to_iso, Vec2, enemy_behavior_name
 
 
 class GroupCache:
@@ -18,8 +18,6 @@ class GroupCache:
         self._cache: Dict[int, object] = {}
 
     def get(self, order: int):
-        if Group is None:
-            return None
         g = self._cache.get(order)
         if g is None:
             g = Group(order=order)
@@ -61,28 +59,8 @@ class Visuals:
         self._thunder_handles: Dict[int, RenderHandle] = {}
         self._player_handle: Optional[RenderHandle] = None
 
-    @staticmethod
-    def _behavior_name(enemy) -> str:
-        behavior = getattr(enemy, "behavior", "")
-        if isinstance(behavior, str):
-            return behavior
-        cls_name = behavior.__class__.__name__.lower()
-        aliases = {
-            "chase": "chaser",
-            "ranged": "ranged",
-            "swarm": "swarm",
-            "charger": "charger",
-            "tank": "tank",
-            "spitter": "spitter",
-            "flyer": "flyer",
-            "engineer": "engineer",
-            "thunderboss": "boss_thunder",
-            "laserboss": "boss_laser",
-            "trapmasterboss": "boss_trapmaster",
-            "swarmqueenboss": "boss_swarmqueen",
-            "bruteboss": "boss_brute",
-        }
-        return aliases.get(cls_name, cls_name)
+    def _set_depth(self, handle: RenderHandle, y: float) -> None:
+        handle.set_group(self.groups.get(int(SCREEN_H + 1000 - y)))
 
     def make_player(self):
         """Create player visual."""
@@ -199,13 +177,13 @@ class Visuals:
         else:
             laser_ring.opacity = 0
 
-        self._player_handle.set_group(self.groups.get(int(sy)))
+        self._set_depth(self._player_handle, sy)
 
     def ensure_enemy(self, enemy):
         """Ensure enemy visual exists."""
         if id(enemy) in self._enemy_handles:
             return
-        behavior = self._behavior_name(enemy)
+        behavior = enemy_behavior_name(enemy)
         base = ENEMY_COLORS.get(behavior, (200, 120, 120))
 
         sh = shapes.Ellipse(0, 0, 20, 7, color=(0, 0, 0), batch=self.batch)
@@ -252,6 +230,13 @@ class Visuals:
                 self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, horn, scar)
             else:
                 self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body)
+            return
+
+        if behavior == "bomber":
+            body = shapes.Circle(0, 0, 14, color=base, batch=self.batch)
+            core = shapes.Circle(0, 0, 8, color=(255, 255, 255), batch=self.batch)
+            core.opacity = 200
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, core)
             return
 
         if behavior == "tank":
@@ -364,7 +349,7 @@ class Visuals:
     def sync_enemy(self, enemy, shake: Vec2):
         """Update enemy visual position."""
         h = self._enemy_handles[id(enemy)]
-        behavior = self._behavior_name(enemy)
+        behavior = enemy_behavior_name(enemy)
         sx, sy = to_iso(enemy.pos, shake)
         bob = math.sin(enemy.t * 6.0) * 1.5
 
@@ -405,9 +390,24 @@ class Visuals:
                 horn.x2, horn.y2 = sx + 18, sy + bob + 16
                 horn.x3, horn.y3 = sx - 18, sy + bob + 16
                 scar.x, scar.y, scar.x2, scar.y2 = sx - 10, sy + bob + 2, sx + 10, sy + bob - 6
-
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
+
+        if behavior == "bomber":
+            sh, body, core = h.objs
+            sh.x, sh.y = sx, sy - 18
+            body.x, body.y = sx, sy + bob
+            core.x, core.y = sx, sy + bob
+            if bool(getattr(enemy, "ai", {}).get("bomber_exploding", False)):
+                pulse = 0.5 + 0.5 * math.sin(enemy.t * 30)
+                core.radius = 8 + 4 * pulse
+                core.opacity = 255
+            else:
+                core.radius = 8
+                core.opacity = 200
+            self._set_depth(h, sy)
+            return
+
         if behavior == "engineer":
             sh, body, backpack, visor, tool, tool2 = h.objs
             sh.x, sh.y = sx, sy - 18
@@ -416,7 +416,7 @@ class Visuals:
             visor.x, visor.y = sx + 1, sy + 2 + bob
             tool.x, tool.y, tool.x2, tool.y2 = sx + 10, sy + 6 + bob, sx + 16, sy + 0 + bob
             tool2.x, tool2.y, tool2.x2, tool2.y2 = sx + 10, sy + 6 + bob, sx + 16, sy + 12 + bob
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         if behavior == "tank":
@@ -426,7 +426,7 @@ class Visuals:
             armor.x, armor.y = sx, sy + bob * 0.4
             plate.x, plate.y = sx + 8, sy + 1 + bob * 0.4
             eye.x, eye.y = sx + 6, sy + 2 + bob * 0.4
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         if behavior == "ranged":
@@ -436,7 +436,7 @@ class Visuals:
             cannon.x, cannon.y = sx + 6, sy + 2 + bob
             muzzle.x, muzzle.y = sx + 18, sy + 2 + bob
             eye.x, eye.y = sx + 1, sy + 2 + bob
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         if behavior == "charger":
@@ -451,7 +451,7 @@ class Visuals:
             horn2.x2, horn2.y2 = sx - 12, sy + 10 + bob
             horn2.x3, horn2.y3 = sx - 6, sy + 4 + bob
             eye.x, eye.y = sx + 2, sy + 2 + bob
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         if behavior == "flyer":
@@ -467,7 +467,7 @@ class Visuals:
             wing2.x3, wing2.y3 = sx - 10, sy + bob - 2
             tail.x, tail.y, tail.x2, tail.y2 = sx - 3, sy + bob - 6, sx - 14, sy + bob - 14
             eye.x, eye.y = sx + 2, sy + bob + 2
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         if behavior == "spitter":
@@ -479,7 +479,7 @@ class Visuals:
             mouth.x, mouth.y = sx + 8, sy + bob
             mouth.x2, mouth.y2 = sx + 18, sy + 4 + bob
             mouth.x3, mouth.y3 = sx + 18, sy - 4 + bob
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         if behavior == "swarm":
@@ -490,7 +490,7 @@ class Visuals:
             dot1.x, dot1.y = sx + math.cos(enemy.t * 6.0) * r, sy + bob + math.sin(enemy.t * 6.0) * r
             dot2.x, dot2.y = sx + math.cos(enemy.t * 6.0 + 2.1) * r, sy + bob + math.sin(enemy.t * 6.0 + 2.1) * r
             dot3.x, dot3.y = sx + math.cos(enemy.t * 6.0 + 4.2) * r, sy + bob + math.sin(enemy.t * 6.0 + 4.2) * r
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         if behavior == "chaser":
@@ -509,7 +509,7 @@ class Visuals:
             spike3.x3, spike3.y3 = sx - 8, sy + bob - 8
             eye1.x, eye1.y = sx - 3, sy + bob + 2
             eye2.x, eye2.y = sx + 3, sy + bob + 2
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         sh, body, shine, eye1, eye2 = h.objs
@@ -518,7 +518,7 @@ class Visuals:
         shine.x, shine.y = sx - 3, sy + 3
         eye1.x, eye1.y = sx - 4, sy + 1
         eye2.x, eye2.y = sx + 2, sy + 1
-        h.set_group(self.groups.get(int(sy)))
+        self._set_depth(h, sy)
 
     def drop_enemy(self, enemy):
         """Remove enemy visual."""
@@ -534,7 +534,11 @@ class Visuals:
         # Different visuals for different projectile types
         projectile_type = getattr(proj, 'projectile_type', 'bullet')
         
-        if projectile_type == "missile":
+        if projectile_type == "bomb":
+            # Enemy bomb: heavy orange core with dark casing.
+            sh = shapes.Circle(0, 0, 7, color=(120, 70, 45), batch=self.batch)
+            core = shapes.Circle(0, 0, 4, color=(255, 145, 90), batch=self.batch)
+        elif projectile_type == "missile":
             # Larger red/orange missile
             sh = shapes.Circle(0, 0, 6, color=(200, 100, 50), batch=self.batch)
             core = shapes.Circle(0, 0, 3, color=(255, 150, 100), batch=self.batch)
@@ -560,7 +564,7 @@ class Visuals:
         sx, sy = to_iso(proj.pos, shake)
         sh.x, sh.y = sx, sy
         core.x, core.y = sx, sy
-        h.set_group(self.groups.get(int(sy)))
+        self._set_depth(h, sy)
 
     def drop_projectile(self, proj):
         """Remove projectile visual."""
@@ -624,7 +628,7 @@ class Visuals:
         orb.x, orb.y = sx, sy
         core.x, core.y = sx, sy
         label.x, label.y = sx, sy
-        h.set_group(self.groups.get(int(sy)))
+        self._set_depth(h, sy)
 
     def drop_powerup(self, p):
         """Remove powerup visual."""
@@ -693,7 +697,7 @@ class Visuals:
             shard2.x, shard2.y = sx + r * 0.25, sy + 2
             shard2.x2, shard2.y2 = sx + r * 0.9, sy + r * 1.25
             shard2.x3, shard2.y3 = sx + r * 0.55, sy + 2
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         if kind == "crate":
@@ -702,7 +706,7 @@ class Visuals:
             base.x, base.y = sx, sy + 4
             border.x, border.y = sx, sy + 4
             strap.x, strap.y, strap.x2, strap.y2 = sx - r * 0.9, sy + 4, sx + r * 0.9, sy + 4
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         shadow, base, top, ring = h.objs
@@ -711,7 +715,7 @@ class Visuals:
         top.x, top.y = sx, sy + 12
         ring.x, ring.y = sx, sy + 2
         ring.radius = r * (1.02 + 0.03 * math.sin(sy * 0.02))
-        h.set_group(self.groups.get(int(sy)))
+        self._set_depth(h, sy)
 
     def drop_obstacle(self, ob):
         h = self._obstacle_handles.pop(id(ob), None)
@@ -750,7 +754,7 @@ class Visuals:
             ring.opacity = int(110 + 110 * pulse)
             if getattr(tr, "kind", "") == "slam_warn":
                 base.opacity = int(40 + 60 * pulse)
-            h.set_group(self.groups.get(int(sy)))
+            self._set_depth(h, sy)
             return
 
         base, core, spike, spike2 = h.objs
@@ -771,7 +775,7 @@ class Visuals:
             core.opacity = 200
             spike.opacity = 220
             spike2.opacity = 220
-        h.set_group(self.groups.get(int(sy)))
+        self._set_depth(h, sy)
 
     def drop_trap(self, tr):
         h = self._trap_handles.pop(id(tr), None)
@@ -802,7 +806,7 @@ class Visuals:
         else:
             line.opacity = 200
             core.opacity = 180
-        h.set_group(self.groups.get(int(max(y1, y2))))
+        self._set_depth(h, max(y1, y2))
 
     def drop_laser(self, lb):
         h = self._laser_handles.pop(id(lb), None)
@@ -833,9 +837,10 @@ class Visuals:
         else:
             outer.opacity = int(140 + 70 * (0.5 + 0.5 * math.sin(th.t * 40.0)))
             core.opacity = int(200 + 40 * (0.5 + 0.5 * math.sin(th.t * 55.0)))
-        h.set_group(self.groups.get(int(max(y1, y2))))
+        self._set_depth(h, max(y1, y2))
 
     def drop_thunder(self, th):
         h = self._thunder_handles.pop(id(th), None)
         if h:
             h.delete()
+

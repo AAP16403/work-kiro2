@@ -110,6 +110,8 @@ def _get_weighted_behavior(wave: int) -> str:
 
     # Add new enemy types on later waves; keep their weights modest so waves don't
     # randomly become "all flyers" or "all engineers".
+    if wave >= 2:
+        pool.append(("bomber", 1.8))
     if wave >= 3:
         pool.append(("swarm", 2.0))
     if wave >= 4:
@@ -143,6 +145,8 @@ def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tu
 
     if behavior == "chaser":
         hp, speed, atk = (base_hp, base_speed * 1.32, 1.0)
+    elif behavior == "bomber":
+        hp, speed, atk = (base_hp - 8, base_speed * 1.2, 1.0)
     elif behavior == "ranged":
         hp, speed, atk = (base_hp - 5, base_speed * 0.85, 1.2)
     elif behavior == "charger":

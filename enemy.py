@@ -1,6 +1,7 @@
 """Enemy entity and related functionality."""
 
 from dataclasses import dataclass, field
+import inspect
 import math
 import random
 
@@ -18,8 +19,9 @@ try:
     from enemy_behaviors.spitter import Spitter
     from enemy_behaviors.flyer import Flyer
     from enemy_behaviors.engineer import Engineer
+    from enemy_behaviors.bomber import Bomber
 except Exception:
-    Chase = Ranged = Swarm = Charger = Tank = Spitter = Flyer = Engineer = None
+    Chase = Ranged = Swarm = Charger = Tank = Spitter = Flyer = Engineer = Bomber = None
 
 _BEHAVIOR_IMPLS = {
     "chaser": Chase() if Chase else None,
@@ -30,6 +32,7 @@ _BEHAVIOR_IMPLS = {
     "spitter": Spitter() if Spitter else None,
     "flyer": Flyer() if Flyer else None,
     "engineer": Engineer() if Engineer else None,
+    "bomber": Bomber() if Bomber else None,
 }
 
 
@@ -154,7 +157,7 @@ def _cycle_gun(enemy: Enemy, guns: list[str]) -> str:
     return str(guns[idx % len(guns)])
 
 
-def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: Vec2 | None = None):
+def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2 | None = None):
     """Update enemy AI behavior."""
     if player_vel is None:
         player_vel = Vec2(0.0, 0.0)
@@ -168,7 +171,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             behavior_impl = _BEHAVIOR_IMPLS.get(enemy.behavior)
             if behavior_impl is None:
                 return
-            behavior_impl.update(enemy, player_pos, state, dt, player_vel)
+            _dispatch_behavior_update(behavior_impl, enemy, player_pos, state, dt, game, player_vel)
             return
 
     if isinstance(enemy.behavior, str) and enemy.behavior.startswith("boss_"):
@@ -507,4 +510,50 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: V
             return
     else:
         if hasattr(enemy.behavior, "update"):
-            enemy.behavior.update(enemy, player_pos, state, dt, player_vel)
+            _dispatch_behavior_update(enemy.behavior, enemy, player_pos, state, dt, game, player_vel)
+
+
+def _dispatch_behavior_update(behavior_impl, enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
+    """Call behavior.update with backward-compatible argument mapping."""
+    updater = getattr(behavior_impl, "update", None)
+    if not callable(updater):
+        return
+
+    kwargs = {}
+    try:
+        params = inspect.signature(updater).parameters
+    except Exception:
+        params = {}
+
+    if "game" in params:
+        kwargs["game"] = game
+    if "player_vel" in params:
+        kwargs["player_vel"] = player_vel
+
+    try:
+        updater(enemy, player_pos, state, dt, **kwargs)
+        return
+    except TypeError as exc:
+        msg = str(exc)
+        arg_mismatch = (
+            "positional argument" in msg
+            or "unexpected keyword argument" in msg
+            or "required positional argument" in msg
+        )
+        if not arg_mismatch:
+            raise
+
+    # Legacy fallbacks for behavior modules with non-uniform signatures.
+    for args in (
+        (enemy, player_pos, state, dt, player_vel),
+        (enemy, player_pos, state, dt, game, player_vel),
+        (enemy, player_pos, state, dt),
+    ):
+        try:
+            updater(*args)
+            return
+        except TypeError:
+            continue
+
+    # Let the original updater error surface if all compatibility calls failed.
+    updater(enemy, player_pos, state, dt, **kwargs)

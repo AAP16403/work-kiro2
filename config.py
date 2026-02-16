@@ -60,6 +60,7 @@ POWERUP_COLORS = {
 
 # Enemy Colors
 ENEMY_COLORS = {
+    "bomber": (255, 160, 50),       # Vibrant Yellow-Orange
     "chaser": (255, 80, 80),        # Bright Red
     "ranged": (80, 150, 255),       # Bright Blue
     "charger": (255, 180, 80),      # Bright Orange

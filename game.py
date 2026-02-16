@@ -12,7 +12,7 @@ import config
 from config import SCREEN_W, SCREEN_H, FPS, WAVE_COOLDOWN, HUD_TEXT, ENEMY_COLORS, POWERUP_COLORS
 from player import Player
 from map import Room
-from level import GameState, spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death
+from level import GameState as GameStateData, spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death
 from enemy import update_enemy
 from powerup import apply_powerup
 from utils import (
@@ -24,6 +24,7 @@ from utils import (
     compute_room_radius,
     point_segment_distance,
     resolve_circle_obstacles,
+    enemy_behavior_name,
 )
 from visuals import Visuals, GroupCache
 from weapons import get_weapon_for_wave, spawn_weapon_projectiles, get_effective_fire_rate
@@ -31,6 +32,469 @@ from particles import ParticleSystem
 from menu import Menu, SettingsMenu, PauseMenu, GameOverMenu, UpgradeMenu
 from hazards import LaserBeam
 from layout import generate_obstacles
+from fsm import State, StateMachine
+
+
+def _draw_playing_scene(game) -> None:
+    game.fsm._states["PlayingState"].draw()
+
+
+class MenuState(State):
+    def enter(self):
+        self.game._reset_input_flags()
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        action = self.game.main_menu.on_mouse_press(x, y, button)
+        if action == "start_game":
+            self.game._init_game()
+            self.game.fsm.set_state("PlayingState")
+        elif action == "settings":
+            self.game.fsm.set_state("SettingsState")
+        elif action == "quit":
+            self.game._quit_game()
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.game.main_menu.on_mouse_motion(x, y)
+
+    def update(self, dt: float):
+        self.game.main_menu.update(dt)
+
+    def draw(self):
+        self.game.main_menu.draw()
+
+
+class SettingsState(State):
+    def on_mouse_press(self, x, y, button, modifiers):
+        action = self.game.settings_menu.on_mouse_press(x, y, button)
+        if action == "back":
+            self.game.fsm.set_state("MenuState")
+
+    def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+        self.game.settings_menu.on_mouse_drag(x, y, dx, dy)
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.game.settings_menu.on_mouse_motion(x, y)
+
+    def on_mouse_release(self, x, y, button, modifiers):
+        self.game.settings_menu.on_mouse_release(x, y, button)
+
+    def on_key_press(self, symbol, modifiers):
+        if symbol == pyglet.window.key.ESCAPE:
+            self.game.fsm.set_state("MenuState")
+
+    def update(self, dt: float):
+        self.game.settings_menu.update(dt)
+
+    def draw(self):
+        self.game.settings_menu.draw()
+
+
+class PlayingState(State):
+    def enter(self):
+        if not self.game.state:
+            self.game._init_game()
+        self.game._reset_input_flags()
+
+    def on_key_press(self, symbol, modifiers):
+        if symbol == pyglet.window.key.ESCAPE:
+            self.game.fsm.set_state("PausedState")
+        elif symbol == pyglet.window.key.Q:
+            self.game._use_ultra()
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        self.game.mouse_xy = (x, y)
+        if button == pyglet.window.mouse.LEFT:
+            self.game.mouse_down = True
+        elif button == pyglet.window.mouse.RIGHT:
+            self.game._rmb_down = True
+            self.game._use_ultra()
+
+    def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+        self.game.mouse_xy = (x, y)
+        rmb_pressed = bool(buttons & pyglet.window.mouse.RIGHT)
+        if rmb_pressed and not self.game._rmb_down:
+            self.game._use_ultra()
+        self.game._rmb_down = rmb_pressed
+
+    def on_mouse_release(self, x, y, button, modifiers):
+        if button == pyglet.window.mouse.LEFT:
+            self.game.mouse_down = False
+        elif button == pyglet.window.mouse.RIGHT:
+            self.game._rmb_down = False
+
+    def update(self, dt: float):
+        game = self.game
+        if not game.state:
+            return
+
+        s = game.state
+        s.time += dt
+
+        if not s.wave_active and (s.time - s.last_wave_clear) >= WAVE_COOLDOWN:
+            spawn_wave(s, Vec2(0.0, 0.0))
+
+        if s.time < game.player.vortex_until:
+            game.particle_system.add_vortex_swirl(game.player.pos, s.time, game.player.vortex_radius)
+            dps = game.player.vortex_dps
+            for e in list(s.enemies):
+                if dist(e.pos, game.player.pos) <= game.player.vortex_radius:
+                    acc = getattr(e, "_vortex_acc", 0.0) + dps * dt
+                    dmg = int(acc)
+                    e._vortex_acc = acc - dmg
+                    if dmg > 0:
+                        e.hp -= dmg
+                        s.shake = max(s.shake, 2.5)
+                        if e.hp <= 0:
+                            s.enemies.remove(e)
+                            game.visuals.drop_enemy(e)
+                            spawn_loot_on_enemy_death(s, enemy_behavior_name(e), e.pos)
+
+        for tr in list(getattr(s, "traps", [])):
+            tr.t += dt
+            tr.ttl -= dt
+            if tr.ttl <= 0:
+                s.traps.remove(tr)
+                game.visuals.drop_trap(tr)
+                continue
+            if tr.damage > 0 and tr.t >= tr.armed_delay and dist(tr.pos, game.player.pos) <= tr.radius:
+                game._damage_player(tr.damage)
+                s.shake = max(s.shake, 10.0)
+                s.traps.remove(tr)
+                game.visuals.drop_trap(tr)
+
+        for th in list(getattr(s, "thunders", [])):
+            th.t += dt
+            if th.t >= th.warn and not th.hit_done:
+                if point_segment_distance(game.player.pos, th.start, th.end) <= th.thickness * 0.6:
+                    th.hit_done = True
+                    game._damage_player(th.damage)
+                    s.shake = max(s.shake, 14.0)
+                    game.particle_system.add_laser_beam(th.start, th.end, color=th.color)
+            if th.t >= th.warn + th.ttl:
+                s.thunders.remove(th)
+                game.visuals.drop_thunder(th)
+
+        old_pos = Vec2(game.player.pos.x, game.player.pos.y)
+        idir = game._input_dir()
+        if idir.length() > 0:
+            nd = idir.normalized()
+            game.player.pos = game.player.pos + nd * game.player.speed * dt
+            game.particle_system.add_step_dust(game.player.pos, nd)
+        game.player.pos = clamp_to_room(game.player.pos, config.ROOM_RADIUS * 0.9)
+        if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
+            game.player.pos = resolve_circle_obstacles(game.player.pos, 14.0, s.obstacles)
+            game.player.pos = clamp_to_room(game.player.pos, config.ROOM_RADIUS * 0.9)
+        if dt > 1e-6:
+            player_vel = (game.player.pos - old_pos) * (1.0 / dt)
+        else:
+            player_vel = Vec2(0.0, 0.0)
+
+        weapon_cd = get_effective_fire_rate(game.player.current_weapon, game.player.fire_rate)
+        if game.mouse_down and (s.time - game.player.last_shot) >= weapon_cd:
+            world_mouse = iso_to_world(game.mouse_xy)
+            aim = (world_mouse - game.player.pos).normalized()
+            muzzle = game.player.pos + aim * 14.0
+
+            if s.time < game.player.laser_until:
+                beam_len = config.ROOM_RADIUS * 1.6
+                end = muzzle + aim * beam_len
+                dmg = int(game.player.damage * 0.9) + 14
+                beam = LaserBeam(start=muzzle, end=end, damage=dmg, thickness=12.0, ttl=0.08, owner="player")
+                s.lasers.append(beam)
+                game.particle_system.add_laser_beam(muzzle, end, color=beam.color)
+                for e in list(s.enemies):
+                    if point_segment_distance(e.pos, muzzle, end) <= 14:
+                        e.hp -= dmg
+                        s.shake = max(s.shake, 4.0)
+                        if e.hp <= 0:
+                            s.enemies.remove(e)
+                            game.visuals.drop_enemy(e)
+                            spawn_loot_on_enemy_death(s, enemy_behavior_name(e), e.pos)
+            else:
+                weapon = game.player.current_weapon
+                projectiles = spawn_weapon_projectiles(muzzle, aim, weapon, s.time, game.player.damage)
+                s.projectiles.extend(projectiles)
+
+            game.particle_system.add_muzzle_flash(muzzle, aim)
+            game.player.last_shot = s.time
+
+        for e in list(s.enemies):
+            update_enemy(e, game.player.pos, s, dt, game, player_vel=player_vel)
+            e.pos = clamp_to_room(e.pos, config.ROOM_RADIUS * 0.96)
+            if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
+                e.pos = resolve_circle_obstacles(e.pos, game._enemy_radius(e), s.obstacles)
+                e.pos = clamp_to_room(e.pos, config.ROOM_RADIUS * 0.96)
+            if dist(e.pos, game.player.pos) < 12:
+                game._damage_player(10)
+                s.enemies.remove(e)
+                game.visuals.drop_enemy(e)
+                s.shake = 9.0
+                spawn_loot_on_enemy_death(s, enemy_behavior_name(e), game.player.pos)
+
+        def _explode_enemy_bomb(p) -> None:
+            blast_r = 72.0
+            blast_dmg = max(10, int(getattr(p, "damage", 0)))
+            if game.particle_system:
+                game.particle_system.add_death_explosion(p.pos, (255, 145, 90), "bomber")
+            if dist(p.pos, game.player.pos) <= blast_r:
+                game._damage_player(blast_dmg)
+                s.shake = max(s.shake, 12.0)
+
+        for p in list(s.projectiles):
+            p.pos = p.pos + p.vel * dt
+            p.ttl -= dt
+            if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
+                blocked = False
+                for ob in s.obstacles:
+                    if dist(p.pos, ob.pos) <= ob.radius:
+                        blocked = True
+                        break
+                if blocked:
+                    if p.owner == "enemy" and str(getattr(p, "projectile_type", "bullet")) == "bomb":
+                        _explode_enemy_bomb(p)
+                    s.projectiles.remove(p)
+                    game.visuals.drop_projectile(p)
+                    game.particle_system.add_hit_particles(p.pos, (160, 160, 170))
+                    continue
+            if p.ttl <= 0:
+                if p.owner == "enemy" and str(getattr(p, "projectile_type", "bullet")) == "bomb":
+                    _explode_enemy_bomb(p)
+                s.projectiles.remove(p)
+                game.visuals.drop_projectile(p)
+                continue
+
+        for p in list(s.projectiles):
+            if p not in s.projectiles:
+                continue
+            if p.owner == "player":
+                ptype = str(getattr(p, "projectile_type", "bullet"))
+                hit_r = 16.0 if ptype == "missile" else 12.0 if ptype == "plasma" else 11.0
+                for e in list(s.enemies):
+                    if dist(p.pos, e.pos) < hit_r:
+                        e.hp -= p.damage
+                        s.shake = max(s.shake, 4.0)
+
+                        behavior_name = enemy_behavior_name(e)
+                        enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
+                        game.particle_system.add_hit_particles(e.pos, enemy_color)
+
+                        if e.hp <= 0:
+                            s.enemies.remove(e)
+                            game.visuals.drop_enemy(e)
+                            game.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
+                            if behavior_name == "tank" and dist(e.pos, game.player.pos) < 70:
+                                game._damage_player(15)
+                                s.shake = 15.0
+                            spawn_loot_on_enemy_death(s, behavior_name, e.pos)
+                        if p in s.projectiles:
+                            s.projectiles.remove(p)
+                            game.visuals.drop_projectile(p)
+                        break
+            else:
+                ptype = str(getattr(p, "projectile_type", "bullet"))
+                if ptype == "bomb":
+                    if dist(p.pos, game.player.pos) < 18:
+                        _explode_enemy_bomb(p)
+                        if p in s.projectiles:
+                            s.projectiles.remove(p)
+                            game.visuals.drop_projectile(p)
+                elif dist(p.pos, game.player.pos) < 12:
+                    game._damage_player(p.damage)
+                    s.shake = max(s.shake, 6.0)
+                    if p in s.projectiles:
+                        s.projectiles.remove(p)
+                        game.visuals.drop_projectile(p)
+
+        for pu in list(s.powerups):
+            dpu = dist(pu.pos, game.player.pos)
+            kind = getattr(pu, "kind", "")
+            is_special = kind in ("weapon", "ultra")
+            magnet_r = 190.0 if is_special else 150.0
+            if dpu < magnet_r and dpu > 1e-6:
+                pull = (game.player.pos - pu.pos).normalized()
+                pull_speed = 220.0 + (magnet_r - dpu) * 2.0
+                pu.pos = pu.pos + pull * pull_speed * dt
+                dpu = dist(pu.pos, game.player.pos)
+
+            pickup_r = 20.0 if is_special else 16.0
+            if dpu < pickup_r:
+                color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
+                game.particle_system.add_powerup_collection(pu.pos, color)
+                apply_powerup(game.player, pu, s.time)
+                s.powerups.remove(pu)
+                game.visuals.drop_powerup(pu)
+
+        if s.wave_active and not s.enemies:
+            cleared_wave = int(s.wave)
+            s.wave_active = False
+            s.last_wave_clear = s.time
+            s.wave += 1
+            new_segment = (s.wave - 1) // 5
+            if config.ENABLE_OBSTACLES and new_segment != getattr(s, "layout_segment", 0):
+                game._regen_layout(new_segment)
+            game.player.current_weapon = get_weapon_for_wave(s.wave)
+            maybe_spawn_powerup(s, Vec2(0.0, 0.0))
+
+            if cleared_wave % 3 == 0:
+                game._roll_upgrade_options()
+                game.fsm.set_state("UpgradeState")
+
+        if s.shake > 0:
+            s.shake = max(0.0, s.shake - dt * 20)
+
+        game.particle_system.update(dt)
+        if game.room:
+            game.room.update(dt)
+
+        for lb in list(getattr(s, "lasers", [])):
+            lb.t += dt
+            if lb.owner == "enemy" and lb.t >= lb.warn and not lb.hit_done:
+                if point_segment_distance(game.player.pos, lb.start, lb.end) <= lb.thickness * 0.55:
+                    lb.hit_done = True
+                    game._damage_player(lb.damage)
+                    s.shake = max(s.shake, 10.0)
+                    game.particle_system.add_laser_beam(lb.start, lb.end, color=lb.color)
+            if lb.t >= lb.warn + lb.ttl:
+                s.lasers.remove(lb)
+                game.visuals.drop_laser(lb)
+
+        if game.player.hp <= 0:
+            game.fsm.set_state("GameOverState")
+
+    def draw(self):
+        game = self.game
+        if not game.state:
+            return
+
+        s = game.state
+        shake = Vec2(0.0, 0.0)
+        if s.shake > 0:
+            shake = Vec2(random.uniform(-1, 1), random.uniform(-1, 1)) * s.shake
+
+        if config.ENABLE_OBSTACLES:
+            for ob in getattr(game.state, "obstacles", []):
+                game.visuals.ensure_obstacle(ob)
+                game.visuals.sync_obstacle(ob, shake)
+
+        aim_dir = (iso_to_world(game.mouse_xy) - game.player.pos).normalized()
+        game.visuals.sync_player(game.player, shake, t=s.time, aim_dir=aim_dir)
+
+        for e in game.state.enemies:
+            game.visuals.ensure_enemy(e)
+            game.visuals.sync_enemy(e, shake)
+
+        for p in game.state.projectiles:
+            game.visuals.ensure_projectile(p)
+            game.visuals.sync_projectile(p, shake)
+
+        for pu in game.state.powerups:
+            game.visuals.ensure_powerup(pu)
+            game.visuals.sync_powerup(pu, shake)
+
+        for tr in getattr(game.state, "traps", []):
+            game.visuals.ensure_trap(tr)
+            game.visuals.sync_trap(tr, shake)
+
+        for lb in getattr(game.state, "lasers", []):
+            game.visuals.ensure_laser(lb)
+            game.visuals.sync_laser(lb, shake)
+
+        for th in getattr(game.state, "thunders", []):
+            game.visuals.ensure_thunder(th)
+            game.visuals.sync_thunder(th, shake)
+
+        game.batch.draw()
+        game.particle_system.render(shake)
+
+        laser_left = max(0.0, game.player.laser_until - game.state.time)
+        laser_txt = f"   Laser: {laser_left:.0f}s" if laser_left > 0 else ""
+        vortex_left = max(0.0, game.player.vortex_until - game.state.time)
+        vortex_txt = f"   Vortex: {vortex_left:.0f}s" if vortex_left > 0 else ""
+        ultra_charges = int(getattr(game.player, "ultra_charges", 0))
+        ultra_cd = max(0.0, float(getattr(game.player, "ultra_cd_until", 0.0)) - game.state.time)
+        ultra_txt = ""
+        if ultra_charges > 0:
+            ultra_txt = f"   Ultra: {ultra_charges}"
+            if ultra_cd > 0:
+                ultra_txt += f" ({ultra_cd:.0f}s)"
+        boss = next((e for e in game.state.enemies if enemy_behavior_name(e).startswith("boss_")), None)
+        boss_txt = ""
+        if boss:
+            boss_name = enemy_behavior_name(boss)
+            boss_txt = f"   BOSS: {boss_name[5:].replace('_', ' ').title()} HP:{boss.hp}"
+        diff_txt = f"   Diff: {str(getattr(game.state, 'difficulty', 'normal')).capitalize()}"
+        hp_cap = int(getattr(game.player, "max_hp", game.player.hp))
+        game.hud.text = f"HP: {game.player.hp}/{hp_cap}   Shield: {game.player.shield}   Wave: {game.state.wave}   Enemies: {len(game.state.enemies)}   Weapon: {game.player.current_weapon.name.capitalize()}{laser_txt}{vortex_txt}{ultra_txt}{boss_txt}{diff_txt}"
+        game.hud.draw()
+
+        if game._pause_hint:
+            game._pause_hint.draw()
+
+
+class PausedState(State):
+    def enter(self):
+        self.game._reset_input_flags()
+
+    def on_key_press(self, symbol, modifiers):
+        if symbol == pyglet.window.key.ESCAPE:
+            self.game.fsm.set_state("PlayingState")
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        action = self.game.pause_menu.on_mouse_press(x, y, button)
+        if action == "resume":
+            self.game.fsm.set_state("PlayingState")
+        elif action == "quit_to_menu":
+            self.game._return_to_menu()
+            self.game.fsm.set_state("MenuState")
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.game.pause_menu.on_mouse_motion(x, y)
+
+    def draw(self):
+        _draw_playing_scene(self.game)
+        self.game.pause_menu.draw()
+
+
+class UpgradeState(State):
+    def enter(self):
+        self.game._reset_input_flags()
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        chosen = self.game.upgrade_menu.on_mouse_press(x, y, button)
+        if chosen:
+            self.game._apply_run_upgrade(chosen)
+            if self.game.state:
+                self.game.state.last_wave_clear = self.game.state.time - float(WAVE_COOLDOWN)
+            self.game.fsm.set_state("PlayingState")
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.game.upgrade_menu.on_mouse_motion(x, y)
+
+    def draw(self):
+        _draw_playing_scene(self.game)
+        self.game.upgrade_menu.draw()
+
+
+class GameOverState(State):
+    def enter(self):
+        self.game.game_over_menu.set_wave(self.game.state.wave)
+        self.game._reset_input_flags()
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        action = self.game.game_over_menu.on_mouse_press(x, y, button)
+        if action == "retry":
+            self.game._init_game()
+            self.game.fsm.set_state("PlayingState")
+        elif action == "quit_to_menu":
+            self.game._return_to_menu()
+            self.game.fsm.set_state("MenuState")
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.game.game_over_menu.on_mouse_motion(x, y)
+
+    def draw(self):
+        _draw_playing_scene(self.game)
+        self.game.game_over_menu.draw()
 
 
 # ============================
@@ -50,9 +514,7 @@ class Game(pyglet.window.Window):
             if self.width > dw or self.height > dh:
                 self.set_size(min(self.width, dw), min(self.height, dh))
         self._update_room_radius_from_view()
-
-        # Game state: "menu", "settings", "playing", "paused", "upgrade", "game_over"
-        self.game_state = "menu"
+        
         self.settings = {
             "difficulty": "normal",
             "window_size": (self.width, self.height),
@@ -98,6 +560,17 @@ class Game(pyglet.window.Window):
 
         pyglet.clock.schedule_interval(self.update, 1.0 / FPS)
 
+        self.fsm = StateMachine(MenuState(self))
+        self.fsm.add_state(SettingsState(self))
+        self.fsm.add_state(PlayingState(self))
+        self.fsm.add_state(PausedState(self))
+        self.fsm.add_state(UpgradeState(self))
+        self.fsm.add_state(GameOverState(self))
+
+    def _reset_input_flags(self) -> None:
+        self.mouse_down = False
+        self._rmb_down = False
+
     def _get_display_size(self):
         try:
             display = pyglet.canvas.get_display()
@@ -109,29 +582,6 @@ class Game(pyglet.window.Window):
     def _update_room_radius_from_view(self):
         margin = float(getattr(config, "ARENA_MARGIN", 0.92))
         config.ROOM_RADIUS = compute_room_radius(self.width, self.height, margin=margin)
-
-    @staticmethod
-    def _behavior_name(enemy) -> str:
-        behavior = getattr(enemy, "behavior", "")
-        if isinstance(behavior, str):
-            return behavior
-        cls_name = behavior.__class__.__name__.lower()
-        aliases = {
-            "chase": "chaser",
-            "ranged": "ranged",
-            "swarm": "swarm",
-            "charger": "charger",
-            "tank": "tank",
-            "spitter": "spitter",
-            "flyer": "flyer",
-            "engineer": "engineer",
-            "thunderboss": "boss_thunder",
-            "laserboss": "boss_laser",
-            "trapmasterboss": "boss_trapmaster",
-            "swarmqueenboss": "boss_swarmqueen",
-            "bruteboss": "boss_brute",
-        }
-        return aliases.get(cls_name, cls_name)
 
     def _prune_dead_weak_handlers(self) -> None:
         """Remove collected WeakMethod handlers to prevent pyglet assertions on dispatch."""
@@ -172,7 +622,7 @@ class Game(pyglet.window.Window):
         self.room = Room(self.batch, self.width, self.height)
 
         difficulty = str(self.settings.get("difficulty", "normal")).lower()
-        self.state = GameState(difficulty=difficulty)
+        self.state = GameStateData(difficulty=difficulty)
         if difficulty == "easy":
             self.state.max_enemies = 10
             self._incoming_damage_mult = 0.85
@@ -246,7 +696,7 @@ class Game(pyglet.window.Window):
             self.player.hp -= amount
 
     def _use_ultra(self):
-        if self.game_state != "playing" or not self.state or not self.player:
+        if not self.state or not self.player:
             return
 
         s = self.state
@@ -283,7 +733,7 @@ class Game(pyglet.window.Window):
         for e in list(s.enemies):
             if point_segment_distance(e.pos, muzzle, end) <= hit_r:
                 e.hp -= dmg
-                behavior_name = self._behavior_name(e)
+                behavior_name = enemy_behavior_name(e)
                 enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
                 if self.particle_system:
                     self.particle_system.add_hit_particles(e.pos, enemy_color)
@@ -299,7 +749,7 @@ class Game(pyglet.window.Window):
         self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN)
 
     def _enemy_radius(self, enemy) -> float:
-        b = self._behavior_name(enemy)
+        b = enemy_behavior_name(enemy)
         if b.startswith("boss_"):
             return 24.0
         return {
@@ -379,20 +829,12 @@ class Game(pyglet.window.Window):
         if self.state:
             self.state.shake = max(self.state.shake, 4.0)
     
-    def _start_game(self):
-        """Start the game."""
-        self._init_game()
-        self.game_state = "playing"
-        self.mouse_down = False
-        self._rmb_down = False
-    
-    def _open_settings(self):
-        """Open settings menu."""
-        self.game_state = "settings"
-    
     def _quit_game(self):
         """Quit the game."""
-        def _close(dt):
+        self._schedule_app_close()
+
+    def _schedule_app_close(self):
+        def _close(_dt):
             self.close()
             pyglet.app.exit()
         pyglet.clock.schedule_once(_close, 0)
@@ -438,7 +880,7 @@ class Game(pyglet.window.Window):
         super().on_resize(width, height)
         self.settings["window_size"] = (width, height)
         self.settings["fullscreen"] = bool(getattr(self, "fullscreen", False))
-        if self.game_state != "playing":
+        if not isinstance(self.fsm.current_state, PlayingState):
             self.mouse_xy = (width / 2, height / 2)
         set_view_size(width, height)
         self._update_room_radius_from_view()
@@ -463,9 +905,6 @@ class Game(pyglet.window.Window):
     
     def _return_to_menu(self):
         """Return to main menu."""
-        self.game_state = "menu"
-        self.mouse_down = False
-        self._rmb_down = False
         # Clean up game objects
         if self.batch:
             self.batch = None
@@ -478,95 +917,24 @@ class Game(pyglet.window.Window):
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.mouse_xy = (x, y)
-        if self.game_state == "menu":
-            self.main_menu.on_mouse_motion(x, y)
-        elif self.game_state == "settings":
-            self.settings_menu.on_mouse_motion(x, y)
-        elif self.game_state == "paused":
-            self.pause_menu.on_mouse_motion(x, y)
-        elif self.game_state == "upgrade":
-            self.upgrade_menu.on_mouse_motion(x, y)
-        elif self.game_state == "game_over":
-            self.game_over_menu.on_mouse_motion(x, y)
+        self.fsm.on_mouse_motion(x, y, dx, dy)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
-        self.mouse_xy = (x, y)
-        if self.game_state == "playing":
-            rmb_pressed = bool(buttons & pyglet.window.mouse.RIGHT)
-            if rmb_pressed and not self._rmb_down:
-                self._use_ultra()
-            self._rmb_down = rmb_pressed
-        if self.game_state == "settings":
-            self.settings_menu.on_mouse_drag(x, y, dx, dy)
+        self.fsm.on_mouse_drag(x, y, dx, dy, buttons, modifiers)
 
     def on_mouse_press(self, x, y, button, modifiers):
-        if self.game_state == "menu":
-            action = self.main_menu.on_mouse_press(x, y, button)
-            if action == "start_game":
-                self._start_game()
-            elif action == "settings":
-                self._open_settings()
-            elif action == "quit":
-                self._quit_game()
-        elif self.game_state == "upgrade":
-            chosen = self.upgrade_menu.on_mouse_press(x, y, button)
-            if chosen:
-                self._apply_run_upgrade(chosen)
-                if self.state:
-                    self.state.last_wave_clear = self.state.time - float(WAVE_COOLDOWN)
-                self.game_state = "playing"
-        elif self.game_state == "settings":
-            action = self.settings_menu.on_mouse_press(x, y, button)
-            if action == "back":
-                self.game_state = "menu"
-        elif self.game_state == "paused":
-            action = self.pause_menu.on_mouse_press(x, y, button)
-            if action == "resume":
-                self.game_state = "playing"
-            elif action == "quit_to_menu":
-                self._return_to_menu()
-        elif self.game_state == "game_over":
-            action = self.game_over_menu.on_mouse_press(x, y, button)
-            if action == "retry":
-                self._start_game()
-            elif action == "quit_to_menu":
-                self._return_to_menu()
-        elif self.game_state == "playing":
-            self.mouse_xy = (x, y)
-            if button == pyglet.window.mouse.LEFT:
-                self.mouse_down = True
-            elif button == pyglet.window.mouse.RIGHT:
-                self._rmb_down = True
-                self._use_ultra()
+        self.fsm.on_mouse_press(x, y, button, modifiers)
 
     def on_mouse_release(self, x, y, button, modifiers):
-        if button == pyglet.window.mouse.LEFT:
-            self.mouse_down = False
-        elif button == pyglet.window.mouse.RIGHT:
-            self._rmb_down = False
-        if self.game_state == "settings":
-            self.settings_menu.on_mouse_release(x, y, button)
+        self.fsm.on_mouse_release(x, y, button, modifiers)
     
     def on_key_press(self, symbol, modifiers):
         """Handle key presses."""
-        if symbol == pyglet.window.key.ESCAPE:
-            if self.game_state == "playing":
-                self.game_state = "paused"
-                self.mouse_down = False
-                self._rmb_down = False
-            elif self.game_state == "paused":
-                self.game_state = "playing"
-            elif self.game_state == "settings":
-                self.game_state = "menu"
-        elif symbol == pyglet.window.key.Q and self.game_state == "playing":
-            self._use_ultra()
+        self.fsm.on_key_press(symbol, modifiers)
 
     def on_close(self):
         """Handle window close event."""
-        def _close(dt):
-            self.close()
-            pyglet.app.exit()
-        pyglet.clock.schedule_once(_close, 0)
+        self._schedule_app_close()
         return True
 
     def _input_dir(self) -> Vec2:
@@ -597,348 +965,12 @@ class Game(pyglet.window.Window):
 
     def update(self, dt: float):
         """Update game logic."""
-        if self.game_state == "menu":
-            self.main_menu.update(dt)
-        elif self.game_state == "settings":
-            self.settings_menu.update(dt)
-        elif self.game_state == "upgrade":
-            # No game simulation while selecting an upgrade.
-            return
-
-        if self.game_state != "playing":
-            return
-        
-        if not self.state:
-            return
-        
-        s = self.state
-        s.time += dt
-
-        # Waves
-        if not s.wave_active and (s.time - s.last_wave_clear) >= WAVE_COOLDOWN:
-            spawn_wave(s, Vec2(0.0, 0.0))
-
-        # Vortex aura (rare powerup): damages nearby enemies and emits swirl particles.
-        if s.time < self.player.vortex_until:
-            self.particle_system.add_vortex_swirl(self.player.pos, s.time, self.player.vortex_radius)
-            dps = self.player.vortex_dps
-            for e in list(s.enemies):
-                if dist(e.pos, self.player.pos) <= self.player.vortex_radius:
-                    acc = getattr(e, "_vortex_acc", 0.0) + dps * dt
-                    dmg = int(acc)
-                    e._vortex_acc = acc - dmg
-                    if dmg > 0:
-                        e.hp -= dmg
-                        s.shake = max(s.shake, 2.5)
-                        if e.hp <= 0:
-                            s.enemies.remove(e)
-                            self.visuals.drop_enemy(e)
-                            spawn_loot_on_enemy_death(s, self._behavior_name(e), e.pos)
-
-        # Traps
-        for tr in list(getattr(s, "traps", [])):
-            tr.t += dt
-            tr.ttl -= dt
-            if tr.ttl <= 0:
-                s.traps.remove(tr)
-                self.visuals.drop_trap(tr)
-                continue
-            if tr.damage > 0 and tr.t >= tr.armed_delay and dist(tr.pos, self.player.pos) <= tr.radius:
-                self._damage_player(tr.damage)
-                s.shake = max(s.shake, 10.0)
-                s.traps.remove(tr)
-                self.visuals.drop_trap(tr)
-
-        # Thunder lines (boss hazard)
-        for th in list(getattr(s, "thunders", [])):
-            th.t += dt
-            if th.t >= th.warn and not th.hit_done:
-                if point_segment_distance(self.player.pos, th.start, th.end) <= th.thickness * 0.6:
-                    th.hit_done = True
-                    self._damage_player(th.damage)
-                    s.shake = max(s.shake, 14.0)
-                    self.particle_system.add_laser_beam(th.start, th.end, color=th.color)
-            if th.t >= th.warn + th.ttl:
-                s.thunders.remove(th)
-                self.visuals.drop_thunder(th)
-
-        # Player movement
-        old_pos = Vec2(self.player.pos.x, self.player.pos.y)
-        idir = self._input_dir()
-        if idir.length() > 0:
-            nd = idir.normalized()
-            self.player.pos = self.player.pos + nd * self.player.speed * dt
-            self.particle_system.add_step_dust(self.player.pos, nd)
-        self.player.pos = clamp_to_room(self.player.pos, config.ROOM_RADIUS * 0.9)
-        if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
-            self.player.pos = resolve_circle_obstacles(self.player.pos, 14.0, s.obstacles)
-            self.player.pos = clamp_to_room(self.player.pos, config.ROOM_RADIUS * 0.9)
-        if dt > 1e-6:
-            player_vel = (self.player.pos - old_pos) * (1.0 / dt)
-        else:
-            player_vel = Vec2(0.0, 0.0)
-
-        # Player shooting
-        weapon_cd = get_effective_fire_rate(self.player.current_weapon, self.player.fire_rate)
-        if self.mouse_down and (s.time - self.player.last_shot) >= weapon_cd:
-            world_mouse = iso_to_world(self.mouse_xy)
-            aim = (world_mouse - self.player.pos).normalized()
-            muzzle = self.player.pos + aim * 14.0
-            
-            if s.time < self.player.laser_until:
-                beam_len = config.ROOM_RADIUS * 1.6
-                end = muzzle + aim * beam_len
-                dmg = int(self.player.damage * 0.9) + 14
-                beam = LaserBeam(start=muzzle, end=end, damage=dmg, thickness=12.0, ttl=0.08, owner="player")
-                s.lasers.append(beam)
-                self.particle_system.add_laser_beam(muzzle, end, color=beam.color)
-                for e in list(s.enemies):
-                    if point_segment_distance(e.pos, muzzle, end) <= 14:
-                        e.hp -= dmg
-                        s.shake = max(s.shake, 4.0)
-                        if e.hp <= 0:
-                            s.enemies.remove(e)
-                            self.visuals.drop_enemy(e)
-                            spawn_loot_on_enemy_death(s, self._behavior_name(e), e.pos)
-            else:
-                # Use current weapon to spawn projectiles
-                weapon = self.player.current_weapon
-                projectiles = spawn_weapon_projectiles(muzzle, aim, weapon, s.time, self.player.damage)
-                s.projectiles.extend(projectiles)
-            
-            # Muzzle flash particle effect
-            self.particle_system.add_muzzle_flash(muzzle, aim)
-            
-            self.player.last_shot = s.time
-
-        # Enemies
-        for e in list(s.enemies):
-            update_enemy(e, self.player.pos, s, dt, player_vel=player_vel)
-            e.pos = clamp_to_room(e.pos, config.ROOM_RADIUS * 0.96)
-            if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
-                e.pos = resolve_circle_obstacles(e.pos, self._enemy_radius(e), s.obstacles)
-                e.pos = clamp_to_room(e.pos, config.ROOM_RADIUS * 0.96)
-            if dist(e.pos, self.player.pos) < 12:
-                self._damage_player(10)
-                s.enemies.remove(e)
-                self.visuals.drop_enemy(e)
-                s.shake = 9.0
-                # Chance to spawn powerup on kill
-                spawn_loot_on_enemy_death(s, self._behavior_name(e), self.player.pos)
-
-        # Projectiles
-        for p in list(s.projectiles):
-            p.pos = p.pos + p.vel * dt
-            p.ttl -= dt
-            if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
-                blocked = False
-                for ob in s.obstacles:
-                    if dist(p.pos, ob.pos) <= ob.radius:
-                        blocked = True
-                        break
-                if blocked:
-                    s.projectiles.remove(p)
-                    self.visuals.drop_projectile(p)
-                    self.particle_system.add_hit_particles(p.pos, (160, 160, 170))
-                    continue
-            if p.ttl <= 0:
-                s.projectiles.remove(p)
-                self.visuals.drop_projectile(p)
-                continue
-
-        # Collisions
-        for p in list(s.projectiles):
-            if p.owner == "player":
-                ptype = str(getattr(p, "projectile_type", "bullet"))
-                hit_r = 16.0 if ptype == "missile" else 12.0 if ptype == "plasma" else 11.0
-                for e in list(s.enemies):
-                    if dist(p.pos, e.pos) < hit_r:
-                        e.hp -= p.damage
-                        s.shake = max(s.shake, 4.0)
-                        
-                        # Hit particles
-                        behavior_name = self._behavior_name(e)
-                        enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
-                        self.particle_system.add_hit_particles(e.pos, enemy_color)
-                        
-                        if e.hp <= 0:
-                            s.enemies.remove(e)
-                            self.visuals.drop_enemy(e)
-                            
-                            # Death explosion
-                            self.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
-                            
-                            # Explosion damage (Tank enemies explode violently)
-                            if behavior_name == "tank":
-                                if dist(e.pos, self.player.pos) < 70:
-                                    self._damage_player(15)
-                                    s.shake = 15.0
-                            
-                            # Chance to spawn powerup on kill
-                            spawn_loot_on_enemy_death(s, behavior_name, e.pos)
-                        if p in s.projectiles:
-                            s.projectiles.remove(p)
-                            self.visuals.drop_projectile(p)
-                        break
-            else:
-                if dist(p.pos, self.player.pos) < 12:
-                    self._damage_player(p.damage)
-                    s.shake = max(s.shake, 6.0)
-                    if p in s.projectiles:
-                        s.projectiles.remove(p)
-                        self.visuals.drop_projectile(p)
-
-        # Powerups
-        for pu in list(s.powerups):
-            dpu = dist(pu.pos, self.player.pos)
-            kind = getattr(pu, "kind", "")
-            is_special = kind in ("weapon", "ultra")
-            magnet_r = 190.0 if is_special else 150.0
-            if dpu < magnet_r and dpu > 1e-6:
-                pull = (self.player.pos - pu.pos).normalized()
-                pull_speed = 220.0 + (magnet_r - dpu) * 2.0
-                pu.pos = pu.pos + pull * pull_speed * dt
-                dpu = dist(pu.pos, self.player.pos)
-
-            pickup_r = 20.0 if is_special else 16.0
-            if dpu < pickup_r:
-                # Particle effect for powerup collection
-                color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
-                self.particle_system.add_powerup_collection(pu.pos, color)
-                
-                apply_powerup(self.player, pu, s.time)
-                s.powerups.remove(pu)
-                self.visuals.drop_powerup(pu)
-
-        # Wave clear
-        if s.wave_active and not s.enemies:
-            cleared_wave = int(s.wave)
-            s.wave_active = False
-            s.last_wave_clear = s.time
-            s.wave += 1
-            new_segment = (s.wave - 1) // 5
-            if config.ENABLE_OBSTACLES and new_segment != getattr(s, "layout_segment", 0):
-                self._regen_layout(new_segment)
-            self.player.current_weapon = get_weapon_for_wave(s.wave)  # Update weapon for new wave
-            maybe_spawn_powerup(s, Vec2(0.0, 0.0))
-
-            if cleared_wave % 3 == 0:
-                self._roll_upgrade_options()
-                self.game_state = "upgrade"
-                self.mouse_down = False
-                self._rmb_down = False
-
-        # Shake decay
-        if s.shake > 0:
-            s.shake = max(0.0, s.shake - dt * 20)
-        
-        # Update particles
-        self.particle_system.update(dt)
-        if self.room:
-            self.room.update(dt)
-
-        # Laser beams
-        for lb in list(getattr(s, "lasers", [])):
-            lb.t += dt
-            if lb.owner == "enemy" and lb.t >= lb.warn and not lb.hit_done:
-                if point_segment_distance(self.player.pos, lb.start, lb.end) <= lb.thickness * 0.55:
-                    lb.hit_done = True
-                    self._damage_player(lb.damage)
-                    s.shake = max(s.shake, 10.0)
-                    self.particle_system.add_laser_beam(lb.start, lb.end, color=lb.color)
-            if lb.t >= lb.warn + lb.ttl:
-                s.lasers.remove(lb)
-                self.visuals.drop_laser(lb)
-
-        if self.player.hp <= 0:
-            self.game_state = "game_over"
-            self.game_over_menu.set_wave(self.state.wave)
-            self.mouse_down = False
-            self._rmb_down = False
+        self.fsm.update(dt)
 
     def on_draw(self):
         """Render the game."""
         self.clear()
-
-        if self.game_state == "menu":
-            self.main_menu.draw()
-        elif self.game_state == "settings":
-            self.settings_menu.draw()
-        elif self.game_state in ["playing", "paused", "upgrade", "game_over"]:
-            if not self.state:
-                return
-
-            # Compute shake offset once per frame.
-            s = self.state
-            shake = Vec2(0.0, 0.0)
-            if s.shake > 0:
-                shake = Vec2(random.uniform(-1, 1), random.uniform(-1, 1)) * s.shake
-
-            # Ensure visuals exist and update their positions.
-            if config.ENABLE_OBSTACLES:
-                for ob in getattr(self.state, "obstacles", []):
-                    self.visuals.ensure_obstacle(ob)
-                    self.visuals.sync_obstacle(ob, shake)
-
-            aim_dir = (iso_to_world(self.mouse_xy) - self.player.pos).normalized()
-            self.visuals.sync_player(self.player, shake, t=s.time, aim_dir=aim_dir)
-
-            for e in self.state.enemies:
-                self.visuals.ensure_enemy(e)
-                self.visuals.sync_enemy(e, shake)
-
-            for p in self.state.projectiles:
-                self.visuals.ensure_projectile(p)
-                self.visuals.sync_projectile(p, shake)
-
-            for pu in self.state.powerups:
-                self.visuals.ensure_powerup(pu)
-                self.visuals.sync_powerup(pu, shake)
-
-            for tr in getattr(self.state, "traps", []):
-                self.visuals.ensure_trap(tr)
-                self.visuals.sync_trap(tr, shake)
-
-            for lb in getattr(self.state, "lasers", []):
-                self.visuals.ensure_laser(lb)
-                self.visuals.sync_laser(lb, shake)
-
-            for th in getattr(self.state, "thunders", []):
-                self.visuals.ensure_thunder(th)
-                self.visuals.sync_thunder(th, shake)
-
-            self.batch.draw()
-            
-            # Render particles on top of batch
-            self.particle_system.render(shake)
-
-            laser_left = max(0.0, self.player.laser_until - self.state.time)
-            laser_txt = f"   Laser: {laser_left:.0f}s" if laser_left > 0 else ""
-            vortex_left = max(0.0, self.player.vortex_until - self.state.time)
-            vortex_txt = f"   Vortex: {vortex_left:.0f}s" if vortex_left > 0 else ""
-            ultra_charges = int(getattr(self.player, "ultra_charges", 0))
-            ultra_cd = max(0.0, float(getattr(self.player, "ultra_cd_until", 0.0)) - self.state.time)
-            ultra_txt = ""
-            if ultra_charges > 0:
-                ultra_txt = f"   Ultra: {ultra_charges}"
-                if ultra_cd > 0:
-                    ultra_txt += f" ({ultra_cd:.0f}s)"
-            boss = next((e for e in self.state.enemies if getattr(e, "behavior", "").startswith("boss_")), None)
-            boss_txt = f"   BOSS: {boss.behavior[5:].replace('_',' ').title()} HP:{boss.hp}" if boss else ""
-            diff_txt = f"   Diff: {str(getattr(self.state, 'difficulty', 'normal')).capitalize()}"
-            hp_cap = int(getattr(self.player, "max_hp", self.player.hp))
-            self.hud.text = f"HP: {self.player.hp}/{hp_cap}   Shield: {self.player.shield}   Wave: {self.state.wave}   Enemies: {len(self.state.enemies)}   Weapon: {self.player.current_weapon.name.capitalize()}{laser_txt}{vortex_txt}{ultra_txt}{boss_txt}{diff_txt}"
-            self.hud.draw()
-            
-            if self.game_state == "paused":
-                self.pause_menu.draw()
-            elif self.game_state == "upgrade":
-                self.upgrade_menu.draw()
-            elif self.game_state == "game_over":
-                self.game_over_menu.draw()
-            else:
-                if self._pause_hint:
-                    self._pause_hint.draw()
+        self.fsm.draw()
 
 
 def main():

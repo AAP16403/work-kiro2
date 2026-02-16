@@ -10,6 +10,23 @@ from config import ISO_SCALE_X, ISO_SCALE_Y, SCREEN_H, SCREEN_W
 VIEW_W = SCREEN_W
 VIEW_H = SCREEN_H
 
+ENEMY_BEHAVIOR_ALIASES = {
+    "bomber": "bomber",
+    "chase": "chaser",
+    "ranged": "ranged",
+    "swarm": "swarm",
+    "charger": "charger",
+    "tank": "tank",
+    "spitter": "spitter",
+    "flyer": "flyer",
+    "engineer": "engineer",
+    "thunderboss": "boss_thunder",
+    "laserboss": "boss_laser",
+    "trapmasterboss": "boss_trapmaster",
+    "swarmqueenboss": "boss_swarmqueen",
+    "bruteboss": "boss_brute",
+}
+
 
 def set_view_size(width: int, height: int) -> None:
     """Set the current viewport size used for world<->screen transforms."""
@@ -149,3 +166,12 @@ def resolve_circle_obstacles(pos: Vec2, radius: float, obstacles, iterations: in
         if not moved:
             break
     return p
+
+
+def enemy_behavior_name(enemy) -> str:
+    """Normalize enemy behavior into a stable string id."""
+    behavior = getattr(enemy, "behavior", "")
+    if isinstance(behavior, str):
+        return behavior
+    cls_name = behavior.__class__.__name__.lower()
+    return ENEMY_BEHAVIOR_ALIASES.get(cls_name, cls_name)

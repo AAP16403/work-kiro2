@@ -5,6 +5,7 @@ Fast-paced isometric wave survival built with `pyglet`.
 ## Current Highlights
 
 - Fullscreen startup and scaled modern menus
+- Bundled custom UI fonts (Orbitron + Rajdhani) packed into EXE
 - Enemy squad coordination and role-based formation behavior
 - Boss waves every 5 waves, with rebalanced boss patterns
 - Ultra system (right-click) with variant cycling and spawn pity rules

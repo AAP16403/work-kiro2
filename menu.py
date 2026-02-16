@@ -270,6 +270,7 @@ class Menu:
 
         self.buttons: List[MenuButton] = []
         self.buttons.append(MenuButton(0, 0, 160, 50, "Start Game", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)))
+        self.buttons.append(MenuButton(0, 0, 160, 50, "Guide", lambda: None, color=(120, 95, 220), hover_color=(162, 136, 255)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Settings", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Quit", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)))
 
@@ -393,6 +394,8 @@ class Menu:
                 btn.callback()
                 if btn.text == "Start Game":
                     return "start_game"
+                elif btn.text == "Guide":
+                    return "guide"
                 elif btn.text == "Settings":
                     return "settings"
                 elif btn.text == "Quit":
@@ -844,6 +847,310 @@ class SettingsMenu:
             btn.sync()
         self.arena_slider.sync()
         self.batch.draw()
+
+
+class GuideMenu:
+    """In-game encyclopedia for enemies and powerups."""
+
+    ENEMY_INFO = [
+        {"key": "chaser", "name": "Chaser", "icon": "CH", "what": "Rushes straight for impact.", "deal": "Strafe and burst it before contact.", "lore": "Mass-produced hound drone tuned for reckless pursuit."},
+        {"key": "ranged", "name": "Ranged", "icon": "RA", "what": "Keeps distance and fires aimed shots.", "deal": "Pressure diagonally and break line of fire.", "lore": "A perimeter sentry rebuilt for arena suppression."},
+        {"key": "charger", "name": "Charger", "icon": "CG", "what": "Telegraphs then commits to a hard dash.", "deal": "Sidestep late, punish recovery.", "lore": "Impact frame with overclocked thrusters and no brakes."},
+        {"key": "swarm", "name": "Swarm", "icon": "SW", "what": "Light units that collapse from flanks.", "deal": "Keep moving and clear packs with spread fire.", "lore": "Fragment drones sharing a low-latency hive link."},
+        {"key": "tank", "name": "Tank", "icon": "TK", "what": "Slow frontliner with high durability.", "deal": "Kite while focus-firing weak escorts first.", "lore": "Siege chassis repurposed as a living shield."},
+        {"key": "spitter", "name": "Spitter", "icon": "SP", "what": "Lobs medium-speed corrosive volleys.", "deal": "Approach from offsets, avoid standing still.", "lore": "Bio-mech mortar node seeded with toxic payloads."},
+        {"key": "flyer", "name": "Flyer", "icon": "FL", "what": "Fast skirmisher with erratic aerial arcs.", "deal": "Track movement lead and fire in front.", "lore": "Recon interceptor tuned for vector feints."},
+        {"key": "engineer", "name": "Engineer", "icon": "EN", "what": "Deploys hazards and supports enemy tempo.", "deal": "Prioritize early to stop area denial.", "lore": "Autonomous field tech that weaponizes terrain."},
+        {"key": "bomber", "name": "Bomber", "icon": "BM", "what": "Throws bombs that explode on timer/impact.", "deal": "Do not facetank; bait throws then disengage.", "lore": "A demolition core with unstable combustion cells."},
+        {"key": "boss_thunder", "name": "Boss: Thunder", "icon": "BT", "what": "Marks lines then detonates lightning paths.", "deal": "Respect warning lanes and rotate outward.", "lore": "Storm-routing sovereign running a cracked weather array."},
+        {"key": "boss_laser", "name": "Boss: Laser", "icon": "BL", "what": "Sweeping beams plus burst volleys.", "deal": "Play near beam edges, dash through gaps.", "lore": "An orbital cutter node dropped into close quarters."},
+        {"key": "boss_trapmaster", "name": "Boss: Trapmaster", "icon": "TM", "what": "Seeds the arena with lethal trap timings.", "deal": "Track safe tiles and avoid panic routing.", "lore": "Custodian AI that turned maintenance grids into snares."},
+        {"key": "boss_swarmqueen", "name": "Boss: Swarmqueen", "icon": "SQ", "what": "Floods field with coordinated adds.", "deal": "Cut adds quickly; deny snowball pressure.", "lore": "Hive-mother process commanding distributed micro-drones."},
+        {"key": "boss_brute", "name": "Boss: Brute", "icon": "BR", "what": "Close-range slams and brawler bursts.", "deal": "Stay mobile, punish after slam windows.", "lore": "Execution platform stripped to raw kinetic violence."},
+        {"key": "boss_abyss_gaze", "name": "Boss: Abyss Gaze", "icon": "AG", "what": "Dark pulse patterns and pressure rings.", "deal": "Keep spacing disciplined, avoid center traps.", "lore": "A deep-scan optic that learned predation."},
+        {"key": "boss_womb_core", "name": "Boss: Womb Core", "icon": "WC", "what": "Spawns pulses/adds and compresses safe zones.", "deal": "Clear adds fast; save burst for pulse gaps.", "lore": "A growth reactor that treats battle as incubation."},
+    ]
+    POWERUP_INFO = [
+        {"key": "heal", "name": "Heal (+)", "icon": "+", "what": "Restores HP instantly.", "deal": "Grab when low; avoid wasting near full HP.", "lore": "Nanite med-gel distilled from station triage kits."},
+        {"key": "damage", "name": "Damage (!)", "icon": "!", "what": "Permanent run damage increase.", "deal": "Best early pickup for faster clears.", "lore": "Illegal coil tuning for hotter impact loads."},
+        {"key": "speed", "name": "Speed (>)", "icon": ">", "what": "Permanent move speed increase.", "deal": "Helps dodging and formation repositioning.", "lore": "Servo firmware patch from courier exo-rigs."},
+        {"key": "firerate", "name": "Fire Rate (*)", "icon": "*", "what": "Shots come out faster.", "deal": "Scales best with precise tracking.", "lore": "Trigger logic rewrite with fewer safety checks."},
+        {"key": "shield", "name": "Shield (O)", "icon": "O", "what": "Adds shield buffer HP.", "deal": "Take before risky boss phases.", "lore": "Phase-shell capacitor from obsolete defense satellites."},
+        {"key": "laser", "name": "Laser (=)", "icon": "=", "what": "Temporary beam mode.", "deal": "Line enemies up for efficient burns.", "lore": "Prototype mining beam rerouted for combat duty."},
+        {"key": "vortex", "name": "Vortex (@)", "icon": "@", "what": "Temporary damaging aura around you.", "deal": "Play aggressively but keep exits open.", "lore": "Collapsed singularity shard in a containment ring."},
+        {"key": "weapon", "name": "Weapon (W)", "icon": "W", "what": "Switches current weapon pattern.", "deal": "Adapt playstyle to the new spread/tempo.", "lore": "Recovered armament cache from dead merc squads."},
+        {"key": "ultra", "name": "Ultra (U)", "icon": "U", "what": "Adds an Ultra charge for RMB/Q.", "deal": "Spend on boss spikes or dangerous swarms.", "lore": "A forbidden core spark meant for ship cannons."},
+    ]
+
+    def __init__(self, width: int, height: int):
+        self.screen_width = width
+        self.screen_height = height
+        self.batch = pyglet.graphics.Batch()
+        self.tab = "enemies"
+        self.page = 0
+        self.rows_per_page = 6
+
+        self._bg_a = shapes.Rectangle(0, 0, width, height, color=(8, 14, 24), batch=self.batch)
+        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
+        self._bg_b.opacity = 170
+        self._panel_border = shapes.Rectangle(0, 0, 1, 1, color=(160, 210, 255), batch=self.batch)
+        self._panel_border.opacity = 52
+        self._panel = shapes.Rectangle(0, 0, 1, 1, color=(10, 20, 34), batch=self.batch)
+        self._panel.opacity = 214
+        self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
+        self._panel_shine.opacity = 14
+
+        self.title = pyglet.text.Label(
+            "P L O U T O // FIELD GUIDE",
+            font_name=UI_FONT_HEAD,
+            font_size=30,
+            x=width // 2,
+            y=height - 70,
+            anchor_x="center",
+            anchor_y="center",
+            color=(228, 239, 255, 255),
+            batch=self.batch,
+        )
+        self.subtitle = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=12,
+            x=width // 2,
+            y=height - 102,
+            anchor_x="center",
+            anchor_y="center",
+            color=(165, 182, 203, 255),
+            batch=self.batch,
+        )
+
+        self.btn_enemies = MenuButton(0, 0, 180, 50, "Enemies", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
+        self.btn_powerups = MenuButton(0, 0, 180, 50, "Powerups", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
+        self.btn_prev = MenuButton(0, 0, 120, 44, "Prev", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
+        self.btn_next = MenuButton(0, 0, 120, 44, "Next", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
+        self.btn_back = MenuButton(0, 0, 200, 54, "Back to Menu", lambda: None, color=(110, 110, 150), hover_color=(145, 145, 195))
+        self._buttons = [self.btn_enemies, self.btn_powerups, self.btn_prev, self.btn_next, self.btn_back]
+        for b in self._buttons:
+            b.ensure(self.batch)
+
+        self._rows = []
+        for _ in range(self.rows_per_page):
+            bg = shapes.Rectangle(0, 0, 1, 1, color=(17, 33, 52), batch=self.batch)
+            bg.opacity = 150
+            icon_ring = shapes.Circle(0, 0, 14, color=(255, 255, 255), batch=self.batch)
+            icon_ring.opacity = 70
+            icon = shapes.Circle(0, 0, 11, color=(160, 160, 160), batch=self.batch)
+            icon.opacity = 255
+            glyph = pyglet.text.Label("", font_name=UI_FONT_HEAD, font_size=10, x=0, y=0, anchor_x="center", anchor_y="center", color=(255, 255, 255, 255), batch=self.batch)
+            name = pyglet.text.Label("", font_name=UI_FONT_BODY, font_size=15, x=0, y=0, anchor_x="left", anchor_y="center", color=(230, 238, 250, 255), batch=self.batch)
+            desc = pyglet.text.Label("", font_name=UI_FONT_META, font_size=11, x=0, y=0, anchor_x="left", anchor_y="center", color=(183, 197, 216, 255), batch=self.batch)
+            lore = pyglet.text.Label("", font_name=UI_FONT_META, font_size=10, x=0, y=0, anchor_x="left", anchor_y="center", color=(152, 170, 194, 255), batch=self.batch)
+            self._rows.append((bg, icon_ring, icon, glyph, name, desc, lore))
+
+        self.footer = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=11,
+            x=width // 2,
+            y=26,
+            anchor_x="center",
+            anchor_y="center",
+            color=(168, 186, 206, 255),
+            batch=self.batch,
+        )
+        self.resize(width, height)
+
+    def _entries(self) -> list[dict]:
+        return self.ENEMY_INFO if self.tab == "enemies" else self.POWERUP_INFO
+
+    def _total_pages(self) -> int:
+        n = len(self._entries())
+        return max(1, (n + self.rows_per_page - 1) // self.rows_per_page)
+
+    def _page_entries(self) -> list[dict]:
+        total = self._total_pages()
+        self.page = max(0, min(self.page, total - 1))
+        start = self.page * self.rows_per_page
+        return self._entries()[start:start + self.rows_per_page]
+
+    def _entry_color(self, e: dict) -> tuple:
+        key = str(e.get("key", ""))
+        if self.tab == "enemies":
+            return config.ENEMY_COLORS.get(key, (200, 200, 200))
+        return config.POWERUP_COLORS.get(key, (200, 200, 200))
+
+    def resize(self, width: int, height: int):
+        self.screen_width = width
+        self.screen_height = height
+        self._bg_a.width = width
+        self._bg_a.height = height
+        self._bg_b.width = width
+        self._bg_b.height = height
+        cx = width // 2
+        scale = min(_ui_scale(width, height), 1.25)
+
+        panel_w = min(int(width * 0.94), int(1220 * scale))
+        panel_h = min(int(height * 0.84), int(760 * scale))
+        panel_x = cx - panel_w // 2
+        panel_y = max(16, int(18 * scale))
+        self._panel_border.x = panel_x - 3
+        self._panel_border.y = panel_y - 3
+        self._panel_border.width = panel_w + 6
+        self._panel_border.height = panel_h + 6
+        self._panel.x = panel_x
+        self._panel.y = panel_y
+        self._panel.width = panel_w
+        self._panel.height = panel_h
+        self._panel_shine.x = panel_x + 4
+        self._panel_shine.y = panel_y + panel_h - max(8, int(20 * scale))
+        self._panel_shine.width = panel_w - 8
+        self._panel_shine.height = max(6, int(14 * scale))
+
+        self.title.x = cx
+        self.title.y = height - int(64 * scale)
+        self.title.font_size = max(20, int(34 * scale))
+        self.subtitle.x = cx
+        self.subtitle.y = self.title.y - int(30 * scale)
+        self.subtitle.font_size = max(10, int(13 * scale))
+
+        top_y = panel_y + panel_h - int(86 * scale)
+        self.btn_enemies.width = int(190 * scale)
+        self.btn_enemies.height = int(52 * scale)
+        self.btn_enemies.font_size = max(12, int(17 * scale))
+        self.btn_enemies.x = panel_x + int(28 * scale)
+        self.btn_enemies.y = top_y
+
+        self.btn_powerups.width = int(190 * scale)
+        self.btn_powerups.height = int(52 * scale)
+        self.btn_powerups.font_size = max(12, int(17 * scale))
+        self.btn_powerups.x = self.btn_enemies.x + self.btn_enemies.width + int(14 * scale)
+        self.btn_powerups.y = top_y
+
+        self.btn_back.width = int(220 * scale)
+        self.btn_back.height = int(52 * scale)
+        self.btn_back.font_size = max(11, int(16 * scale))
+        self.btn_back.x = panel_x + panel_w - self.btn_back.width - int(24 * scale)
+        self.btn_back.y = top_y
+
+        row_top = top_y - int(26 * scale)
+        row_h = int(88 * scale)
+        row_gap = int(10 * scale)
+        row_x = panel_x + int(24 * scale)
+        row_w = panel_w - int(48 * scale)
+        for i, (bg, icon_ring, icon, glyph, name, desc, lore) in enumerate(self._rows):
+            y = row_top - i * (row_h + row_gap) - row_h
+            bg.x = row_x
+            bg.y = y
+            bg.width = row_w
+            bg.height = row_h
+
+            icon_x = row_x + int(28 * scale)
+            icon_y = y + row_h // 2 + int(1 * scale)
+            icon_ring.x, icon_ring.y, icon_ring.radius = icon_x, icon_y, int(15 * scale)
+            icon.x, icon.y, icon.radius = icon_x, icon_y, int(12 * scale)
+            glyph.x, glyph.y = icon_x, icon_y
+            glyph.font_size = max(8, int(11 * scale))
+
+            text_x = row_x + int(56 * scale)
+            name.x = text_x
+            name.y = y + row_h - int(22 * scale)
+            name.font_size = max(11, int(16 * scale))
+
+            desc.x = text_x
+            desc.y = y + row_h - int(45 * scale)
+            desc.font_size = max(9, int(12 * scale))
+
+            lore.x = text_x
+            lore.y = y + row_h - int(66 * scale)
+            lore.font_size = max(8, int(11 * scale))
+
+        self.btn_prev.width = int(118 * scale)
+        self.btn_prev.height = int(44 * scale)
+        self.btn_prev.font_size = max(10, int(14 * scale))
+        self.btn_prev.x = panel_x + int(24 * scale)
+        self.btn_prev.y = panel_y + int(14 * scale)
+        self.btn_next.width = int(118 * scale)
+        self.btn_next.height = int(44 * scale)
+        self.btn_next.font_size = max(10, int(14 * scale))
+        self.btn_next.x = self.btn_prev.x + self.btn_prev.width + int(12 * scale)
+        self.btn_next.y = self.btn_prev.y
+
+        self.footer.x = cx
+        self.footer.y = panel_y + int(28 * scale)
+        self.footer.font_size = max(9, int(11 * scale))
+
+        for b in self._buttons:
+            b.sync()
+
+    def on_mouse_motion(self, x: float, y: float):
+        for b in self._buttons:
+            b.is_hovered = b.contains_point(x, y)
+            b.sync()
+
+    def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
+        if button != pyglet.window.mouse.LEFT:
+            return None
+        if self.btn_back.contains_point(x, y):
+            return "back"
+        if self.btn_enemies.contains_point(x, y):
+            self.tab = "enemies"
+            self.page = 0
+            return None
+        if self.btn_powerups.contains_point(x, y):
+            self.tab = "powerups"
+            self.page = 0
+            return None
+        total_pages = self._total_pages()
+        if self.btn_prev.contains_point(x, y):
+            self.page = (self.page - 1) % total_pages
+            return None
+        if self.btn_next.contains_point(x, y):
+            self.page = (self.page + 1) % total_pages
+            return None
+        return None
+
+    def on_key_press(self, symbol: int):
+        if symbol in (pyglet.window.key.LEFT, pyglet.window.key.A):
+            self.page = (self.page - 1) % self._total_pages()
+        elif symbol in (pyglet.window.key.RIGHT, pyglet.window.key.D):
+            self.page = (self.page + 1) % self._total_pages()
+
+    def draw(self):
+        self.btn_enemies.is_hovered = self.btn_enemies.is_hovered or self.tab == "enemies"
+        self.btn_powerups.is_hovered = self.btn_powerups.is_hovered or self.tab == "powerups"
+        self.btn_enemies.sync()
+        self.btn_powerups.sync()
+        entries = self._page_entries()
+        for i, row in enumerate(self._rows):
+            bg, icon_ring, icon, glyph, name, desc, lore = row
+            if i >= len(entries):
+                bg.opacity = 0
+                icon.opacity = 0
+                icon_ring.opacity = 0
+                glyph.text = ""
+                name.text = ""
+                desc.text = ""
+                lore.text = ""
+                continue
+            e = entries[i]
+            bg.opacity = 150
+            icon_ring.opacity = 75
+            icon.opacity = 255
+            icon.color = self._entry_color(e)
+            glyph.text = str(e.get("icon", "?"))
+            name.text = str(e.get("name", "Unknown"))
+            desc.text = f"What: {str(e.get('what', ''))}  |  Deal: {str(e.get('deal', ''))}"
+            lore.text = f"Lore: {str(e.get('lore', ''))}"
+
+        page_info = f"Page {self.page + 1}/{self._total_pages()}  |  Left/Right or buttons to browse"
+        if self.tab == "enemies":
+            self.subtitle.text = "Enemy dossiers, attack patterns, and counterplay."
+            self.footer.text = f"{page_info}  |  {len(self.ENEMY_INFO)} entries"
+        else:
+            self.subtitle.text = "Powerup effects, usage advice, and field notes."
+            self.footer.text = f"{page_info}  |  {len(self.POWERUP_INFO)} entries"
+        self.batch.draw()
+        self.btn_enemies.is_hovered = False
+        self.btn_powerups.is_hovered = False
 
 
 class PauseMenu:

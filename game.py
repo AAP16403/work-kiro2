@@ -33,6 +33,7 @@ from particles import ParticleSystem
 from menu import (
     Menu,
     SettingsMenu,
+    GuideMenu,
     PauseMenu,
     GameOverMenu,
     UI_FONT_HEAD,
@@ -58,6 +59,8 @@ class MenuState(State):
         if action == "start_game":
             self.game._init_game()
             self.game.fsm.set_state("PlayingState")
+        elif action == "guide":
+            self.game.fsm.set_state("GuideState")
         elif action == "settings":
             self.game.fsm.set_state("SettingsState")
         elif action == "quit":
@@ -97,6 +100,28 @@ class SettingsState(State):
 
     def draw(self):
         self.game.settings_menu.draw()
+
+
+class GuideState(State):
+    def enter(self):
+        self.game._reset_input_flags()
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        action = self.game.guide_menu.on_mouse_press(x, y, button)
+        if action == "back":
+            self.game.fsm.set_state("MenuState")
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.game.guide_menu.on_mouse_motion(x, y)
+
+    def on_key_press(self, symbol, modifiers):
+        if symbol == pyglet.window.key.ESCAPE:
+            self.game.fsm.set_state("MenuState")
+        else:
+            self.game.guide_menu.on_key_press(symbol)
+
+    def draw(self):
+        self.game.guide_menu.draw()
 
 
 class PlayingState(State):
@@ -547,6 +572,7 @@ class Game(pyglet.window.Window):
         # Menu system
         self.main_menu = Menu(self.width, self.height)
         self.settings_menu = SettingsMenu(self.width, self.height, self._on_settings_change, display_size=self._display_size)
+        self.guide_menu = GuideMenu(self.width, self.height)
         self.pause_menu = PauseMenu(self.width, self.height)
         self.rpg_menu = BossRewardMenu(self.width, self.height, self._apply_temp_reward, self._apply_perm_reward)
         self.game_over_menu = GameOverMenu(self.width, self.height)
@@ -585,6 +611,7 @@ class Game(pyglet.window.Window):
 
         self.fsm = StateMachine(MenuState(self))
         self.fsm.add_state(SettingsState(self))
+        self.fsm.add_state(GuideState(self))
         self.fsm.add_state(PlayingState(self))
         self.fsm.add_state(PausedState(self))
         self.fsm.add_state(BossRewardState(self))
@@ -1115,6 +1142,7 @@ class Game(pyglet.window.Window):
 
         self.main_menu.resize(width, height)
         self.settings_menu.resize(width, height)
+        self.guide_menu.resize(width, height)
         self.pause_menu.resize(width, height)
         self.rpg_menu.resize(width, height)
         self.game_over_menu.resize(width, height)

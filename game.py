@@ -3,6 +3,7 @@
 # Install: py -m pip install pyglet
 
 import random
+import math
 
 import pyglet
 
@@ -122,6 +123,25 @@ class PlayingState(State):
         elif button == pyglet.window.mouse.RIGHT:
             self.game._rmb_down = False
 
+    @staticmethod
+    def _remove_projectile(game, s, p) -> None:
+        if p in s.projectiles:
+            s.projectiles.remove(p)
+        game.visuals.drop_projectile(p)
+
+    @staticmethod
+    def _is_enemy_bomb(p) -> bool:
+        return p.owner == "enemy" and str(getattr(p, "projectile_type", "bullet")) == "bomb"
+
+    def _explode_enemy_bomb(self, game, s, p) -> None:
+        blast_r = 72.0
+        blast_dmg = max(10, int(getattr(p, "damage", 0)))
+        if game.particle_system:
+            game.particle_system.add_death_explosion(p.pos, (255, 145, 90), "bomber")
+        if dist(p.pos, game.player.pos) <= blast_r:
+            game._damage_player(blast_dmg)
+            s.shake = max(s.shake, 12.0)
+
     def update(self, dt: float):
         game = self.game
         if not game.state:
@@ -231,15 +251,6 @@ class PlayingState(State):
                 s.shake = 9.0
                 spawn_loot_on_enemy_death(s, enemy_behavior_name(e), game.player.pos)
 
-        def _explode_enemy_bomb(p) -> None:
-            blast_r = 72.0
-            blast_dmg = max(10, int(getattr(p, "damage", 0)))
-            if game.particle_system:
-                game.particle_system.add_death_explosion(p.pos, (255, 145, 90), "bomber")
-            if dist(p.pos, game.player.pos) <= blast_r:
-                game._damage_player(blast_dmg)
-                s.shake = max(s.shake, 12.0)
-
         for p in list(s.projectiles):
             p.pos = p.pos + p.vel * dt
             p.ttl -= dt
@@ -250,22 +261,18 @@ class PlayingState(State):
                         blocked = True
                         break
                 if blocked:
-                    if p.owner == "enemy" and str(getattr(p, "projectile_type", "bullet")) == "bomb":
-                        _explode_enemy_bomb(p)
-                    s.projectiles.remove(p)
-                    game.visuals.drop_projectile(p)
+                    if self._is_enemy_bomb(p):
+                        self._explode_enemy_bomb(game, s, p)
+                    self._remove_projectile(game, s, p)
                     game.particle_system.add_hit_particles(p.pos, (160, 160, 170))
                     continue
             if p.ttl <= 0:
-                if p.owner == "enemy" and str(getattr(p, "projectile_type", "bullet")) == "bomb":
-                    _explode_enemy_bomb(p)
-                s.projectiles.remove(p)
-                game.visuals.drop_projectile(p)
+                if self._is_enemy_bomb(p):
+                    self._explode_enemy_bomb(game, s, p)
+                self._remove_projectile(game, s, p)
                 continue
 
         for p in list(s.projectiles):
-            if p not in s.projectiles:
-                continue
             if p.owner == "player":
                 ptype = str(getattr(p, "projectile_type", "bullet"))
                 hit_r = 16.0 if ptype == "missile" else 12.0 if ptype == "plasma" else 11.0
@@ -286,24 +293,18 @@ class PlayingState(State):
                                 game._damage_player(15)
                                 s.shake = 15.0
                             spawn_loot_on_enemy_death(s, behavior_name, e.pos)
-                        if p in s.projectiles:
-                            s.projectiles.remove(p)
-                            game.visuals.drop_projectile(p)
+                        self._remove_projectile(game, s, p)
                         break
             else:
                 ptype = str(getattr(p, "projectile_type", "bullet"))
                 if ptype == "bomb":
                     if dist(p.pos, game.player.pos) < 18:
-                        _explode_enemy_bomb(p)
-                        if p in s.projectiles:
-                            s.projectiles.remove(p)
-                            game.visuals.drop_projectile(p)
+                        self._explode_enemy_bomb(game, s, p)
+                        self._remove_projectile(game, s, p)
                 elif dist(p.pos, game.player.pos) < 12:
                     game._damage_player(p.damage)
                     s.shake = max(s.shake, 6.0)
-                    if p in s.projectiles:
-                        s.projectiles.remove(p)
-                        game.visuals.drop_projectile(p)
+                    self._remove_projectile(game, s, p)
 
         for pu in list(s.powerups):
             dpu = dist(pu.pos, game.player.pos)
@@ -414,7 +415,7 @@ class PlayingState(State):
         ultra_cd = max(0.0, float(getattr(game.player, "ultra_cd_until", 0.0)) - game.state.time)
         ultra_txt = ""
         if ultra_charges > 0:
-            ultra_txt = f"   Ultra: {ultra_charges}"
+            ultra_txt = f"   Ultra: {ultra_charges} [{game._ultra_variant_name(game.player)}]"
             if ultra_cd > 0:
                 ultra_txt += f" ({ultra_cd:.0f}s)"
         boss = next((e for e in game.state.enemies if enemy_behavior_name(e).startswith("boss_")), None)
@@ -521,6 +522,7 @@ class Game(pyglet.window.Window):
             "fullscreen": False,
             "arena_margin": float(getattr(config, "ARENA_MARGIN", 0.97)),
         }
+        self._windowed_size = (self.width, self.height)
         
         # Menu system
         self.main_menu = Menu(self.width, self.height)
@@ -711,39 +713,92 @@ class Game(pyglet.window.Window):
             aim = Vec2(1.0, 0.0)
 
         muzzle = self.player.pos + aim * 14.0
-        beam_len = config.ROOM_RADIUS * 2.05
-        end = muzzle + aim * beam_len
         dmg = int(config.ULTRA_DAMAGE_BASE + self.player.damage * config.ULTRA_DAMAGE_MULT)
+        beam_thickness = float(config.ULTRA_BEAM_THICKNESS)
+        beam_ttl = float(config.ULTRA_BEAM_TTL)
 
-        beam = LaserBeam(
-            start=muzzle,
-            end=end,
-            damage=dmg,
-            thickness=float(config.ULTRA_BEAM_THICKNESS),
-            ttl=float(config.ULTRA_BEAM_TTL),
-            owner="player",
-            color=tuple(config.ULTRA_BEAM_COLOR),
-        )
-        s.lasers.append(beam)
-        if self.particle_system:
-            self.particle_system.add_laser_beam(muzzle, end, color=beam.color)
-        s.shake = max(s.shake, 12.0)
-
-        hit_r = float(config.ULTRA_BEAM_THICKNESS) * 0.75
-        for e in list(s.enemies):
-            if point_segment_distance(e.pos, muzzle, end) <= hit_r:
-                e.hp -= dmg
-                behavior_name = enemy_behavior_name(e)
-                enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
+        def _hit_enemy(e, amount: int):
+            e.hp -= int(amount)
+            behavior_name = enemy_behavior_name(e)
+            enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
+            if self.particle_system:
+                self.particle_system.add_hit_particles(e.pos, enemy_color)
+            if e.hp <= 0:
+                s.enemies.remove(e)
+                if self.visuals:
+                    self.visuals.drop_enemy(e)
                 if self.particle_system:
-                    self.particle_system.add_hit_particles(e.pos, enemy_color)
-                if e.hp <= 0:
-                    s.enemies.remove(e)
-                    if self.visuals:
-                        self.visuals.drop_enemy(e)
-                    if self.particle_system:
-                        self.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
-                    spawn_loot_on_enemy_death(s, behavior_name, e.pos)
+                    self.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
+                spawn_loot_on_enemy_death(s, behavior_name, e.pos)
+
+        def _spawn_player_beam(start: Vec2, direction: Vec2, length: float, damage: int, thickness: float, color):
+            end = start + direction * length
+            beam = LaserBeam(
+                start=start,
+                end=end,
+                damage=int(damage),
+                thickness=float(thickness),
+                ttl=beam_ttl,
+                owner="player",
+                color=tuple(color),
+            )
+            s.lasers.append(beam)
+            if self.particle_system:
+                self.particle_system.add_laser_beam(start, end, color=beam.color)
+            hit_r = float(thickness) * 0.75
+            for e in list(s.enemies):
+                if point_segment_distance(e.pos, start, end) <= hit_r:
+                    _hit_enemy(e, int(damage))
+
+        # Cycle variants for built-in variety while preserving predictable control.
+        variant = int(getattr(self.player, "ultra_variant_idx", 0)) % 3
+        self.player.ultra_variant_idx = variant + 1
+
+        if variant == 0:
+            # Classic piercing beam.
+            _spawn_player_beam(
+                muzzle,
+                aim,
+                length=config.ROOM_RADIUS * 2.05,
+                damage=dmg,
+                thickness=beam_thickness,
+                color=tuple(config.ULTRA_BEAM_COLOR),
+            )
+            s.shake = max(s.shake, 12.0)
+        elif variant == 1:
+            # Tri-beam spread for multi-target pressure.
+            for deg in (-16.0, 0.0, 16.0):
+                a = math.radians(deg)
+                c = math.cos(a)
+                si = math.sin(a)
+                d = Vec2(aim.x * c - aim.y * si, aim.x * si + aim.y * c).normalized()
+                _spawn_player_beam(
+                    muzzle,
+                    d,
+                    length=config.ROOM_RADIUS * 1.9,
+                    damage=int(dmg * 0.72),
+                    thickness=beam_thickness * 0.8,
+                    color=(255, 180, 180),
+                )
+            s.shake = max(s.shake, 14.0)
+        else:
+            # Shockwave + forward finisher beam.
+            blast_r = 160.0
+            blast_dmg = int(dmg * 0.58)
+            for e in list(s.enemies):
+                if dist(e.pos, self.player.pos) <= blast_r:
+                    _hit_enemy(e, blast_dmg)
+            if self.particle_system:
+                self.particle_system.add_powerup_collection(self.player.pos, (255, 220, 180))
+            _spawn_player_beam(
+                muzzle,
+                aim,
+                length=config.ROOM_RADIUS * 1.55,
+                damage=int(dmg * 0.62),
+                thickness=beam_thickness * 0.7,
+                color=(255, 210, 120),
+            )
+            s.shake = max(s.shake, 16.0)
 
         self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)
         self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN)
@@ -762,6 +817,12 @@ class Game(pyglet.window.Window):
             "ranged": 12.0,
             "chaser": 12.0,
         }.get(b, 12.0)
+
+    @staticmethod
+    def _ultra_variant_name(player) -> str:
+        names = ("Beam", "Tri-Beam", "Shockwave")
+        idx = int(getattr(player, "ultra_variant_idx", 0)) % len(names)
+        return names[idx]
 
     def _roll_upgrade_options(self) -> None:
         if not self.player:
@@ -867,6 +928,8 @@ class Game(pyglet.window.Window):
             self.set_fullscreen(False)
 
         size = value.get("window_size")
+        if size is None and not self.fullscreen:
+            size = self._windowed_size
         if size and isinstance(size, (tuple, list)) and len(size) == 2:
             w, h = int(size[0]), int(size[1])
             if self._display_size:
@@ -878,8 +941,11 @@ class Game(pyglet.window.Window):
 
     def on_resize(self, width, height):
         super().on_resize(width, height)
-        self.settings["window_size"] = (width, height)
-        self.settings["fullscreen"] = bool(getattr(self, "fullscreen", False))
+        is_fullscreen = bool(getattr(self, "fullscreen", False))
+        self.settings["fullscreen"] = is_fullscreen
+        if not is_fullscreen:
+            self.settings["window_size"] = (width, height)
+            self._windowed_size = (width, height)
         if not isinstance(self.fsm.current_state, PlayingState):
             self.mouse_xy = (width / 2, height / 2)
         set_view_size(width, height)

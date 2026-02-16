@@ -438,19 +438,17 @@ class SettingsMenu:
         self.arena_margin = float(getattr(config, "ARENA_MARGIN", 0.97))
         self.arena_pct = float(round(self.arena_margin * 100.0))
         self.window_size_idx = 0
-        self.window_sizes = [(800, 600), (1024, 768), (1280, 720), (1920, 1080)]
-        self.window_size_names = ["800x600", "1024x768", "1280x720", "1920x1080"]
-        if display_size:
-            dw, dh = int(display_size[0]), int(display_size[1])
-            if dw > 0 and dh > 0 and (dw, dh) not in self.window_sizes:
-                self.window_sizes.append((dw, dh))
-                self.window_size_names.append(f"Native ({dw}x{dh})")
+        self.window_sizes, self.window_size_names = self._build_window_size_options(display_size)
+        current_size = (int(width), int(height))
+        if current_size[0] > 0 and current_size[1] > 0 and current_size not in self.window_sizes:
+            self.window_sizes.append(current_size)
+            self.window_size_names.append(f"{current_size[0]}x{current_size[1]}")
         self.window_sizes.append(None)
         self.window_size_names.append("Fullscreen")
         try:
-            self.window_size_idx = self.window_sizes.index((width, height))
+            self.window_size_idx = self.window_sizes.index(current_size)
         except ValueError:
-            self.window_size_idx = 0
+            self.window_size_idx = self._nearest_window_size_idx(current_size)
         
         # Difficulty buttons
         self.difficulty_buttons = []
@@ -542,6 +540,82 @@ class SettingsMenu:
         self.arena_slider.ensure(self.batch)
 
         self.resize(width, height)
+
+    def _build_window_size_options(self, display_size: Optional[tuple[int, int]]) -> tuple[list[tuple[int, int]], list[str]]:
+        # Modern defaults focused on common desktop 16:9/16:10 resolutions.
+        common = [
+            (1280, 720),
+            (1366, 768),
+            (1600, 900),
+            (1920, 1080),
+            (2560, 1440),
+            (3440, 1440),
+            (3840, 2160),
+        ]
+
+        sizes: list[tuple[int, int]] = []
+        names: list[str] = []
+        seen = set()
+
+        native = None
+        if display_size:
+            dw, dh = int(display_size[0]), int(display_size[1])
+            if dw > 0 and dh > 0:
+                native = (dw, dh)
+
+        for w, h in common:
+            if native and (w > native[0] or h > native[1]):
+                continue
+            key = (w, h)
+            if key in seen:
+                continue
+            seen.add(key)
+            sizes.append(key)
+            names.append(f"{w}x{h} ({self._aspect_label(w, h)})")
+
+        if native and native not in seen:
+            sizes.append(native)
+            names.append(f"{native[0]}x{native[1]} ({self._aspect_label(native[0], native[1])}, Native)")
+
+        if not sizes:
+            sizes = [(1280, 720)]
+            names = ["1280x720 (16:9)"]
+
+        return sizes, names
+
+    def _nearest_window_size_idx(self, current_size: tuple[int, int]) -> int:
+        if not self.window_sizes:
+            return 0
+        cw, ch = int(current_size[0]), int(current_size[1])
+        if cw <= 0 or ch <= 0:
+            return 0
+        c_area = cw * ch
+        best_i = 0
+        best_score = None
+        for i, sz in enumerate(self.window_sizes):
+            if sz is None:
+                continue
+            w, h = int(sz[0]), int(sz[1])
+            score = abs((w * h) - c_area) + abs(w - cw) * 20 + abs(h - ch) * 20
+            if best_score is None or score < best_score:
+                best_score = score
+                best_i = i
+        return best_i
+
+    @staticmethod
+    def _aspect_label(w: int, h: int) -> str:
+        if h <= 0:
+            return "?"
+        r = float(w) / float(h)
+        if abs(r - (16 / 9)) < 0.03:
+            return "16:9"
+        if abs(r - (16 / 10)) < 0.03:
+            return "16:10"
+        if abs(r - (21 / 9)) < 0.05:
+            return "21:9"
+        if abs(r - (4 / 3)) < 0.03:
+            return "4:3"
+        return f"{r:.2f}:1"
 
     def update(self, dt: float):
         self._t += dt

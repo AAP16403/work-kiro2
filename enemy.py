@@ -157,6 +157,161 @@ def _cycle_gun(enemy: Enemy, guns: list[str]) -> str:
     return str(guns[idx % len(guns)])
 
 
+def _behavior_key(enemy: Enemy) -> str:
+    b = getattr(enemy, "behavior", "")
+    if isinstance(b, str):
+        return b
+    return b.__class__.__name__.lower()
+
+
+def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float) -> None:
+    """Apply same-type formation/cohesion pressure after per-type AI update.
+
+    This layer keeps allies coordinated while preserving each behavior's own
+    movement/attack logic. It also limits obvious backpedaling when the player
+    advances.
+    """
+    if dt <= 0.0:
+        return
+
+    key = _behavior_key(enemy)
+    if not key or key.startswith("boss_"):
+        return
+
+    enemies = getattr(state, "enemies", None)
+    if not enemies:
+        return
+
+    allies = [o for o in enemies if o is not enemy and _behavior_key(o) == key]
+    if not allies:
+        return
+
+    # Coordinate with nearby allies only; global coupling causes rubber-band motion.
+    coord_r = {
+        "ranged": 260.0,
+        "spitter": 230.0,
+        "engineer": 260.0,
+        "tank": 190.0,
+        "charger": 170.0,
+        "chaser": 170.0,
+        "swarm": 180.0,
+        "flyer": 210.0,
+        "bomber": 220.0,
+    }.get(key, 200.0)
+    nearby = []
+    r2 = coord_r * coord_r
+    for o in allies:
+        if (o.pos - enemy.pos).length_squared() <= r2:
+            nearby.append(o)
+    if not nearby:
+        return
+
+    to_player_vec = player_pos - enemy.pos
+    to_player = to_player_vec.normalized() if to_player_vec.length() > 1e-6 else Vec2(1.0, 0.0)
+
+    center = Vec2(enemy.pos.x, enemy.pos.y)
+    for a in nearby:
+        center = center + a.pos
+    center = center / float(len(nearby) + 1)
+    cohesion = (center - enemy.pos).normalized()
+
+    # Local separation keeps same-type allies from stacking.
+    separation = Vec2(0.0, 0.0)
+    sep_count = 0
+    for a in nearby:
+        dvec = enemy.pos - a.pos
+        d = dvec.length()
+        if d <= 1e-6:
+            continue
+        if d < coord_r * 0.45:
+            separation = separation + dvec.normalized() * (1.0 - d / (coord_r * 0.45))
+            sep_count += 1
+    if sep_count > 0:
+        separation = (separation / float(sep_count)).normalized()
+
+    # Role-aware formation radius.
+    ring_r = {
+        "ranged": 200.0,
+        "spitter": 180.0,
+        "engineer": 220.0,
+        "tank": 150.0,
+        "charger": 120.0,
+        "chaser": 115.0,
+        "swarm": 105.0,
+        "flyer": 130.0,
+        "bomber": 165.0,
+    }.get(key, 140.0)
+
+    if "form_bias" not in enemy.ai:
+        enemy.ai["form_bias"] = ((id(enemy) % 211) / 211.0) * math.tau
+    orbit_speed = {
+        "ranged": 0.35,
+        "spitter": 0.42,
+        "engineer": 0.28,
+        "tank": 0.22,
+        "charger": 0.5,
+        "chaser": 0.62,
+        "swarm": 0.75,
+        "flyer": 0.8,
+        "bomber": 0.46,
+    }.get(key, 0.45)
+
+    slot_ang = float(getattr(state, "time", 0.0)) * orbit_speed + float(enemy.ai["form_bias"])
+    slot_target = player_pos + Vec2(math.cos(slot_ang), math.sin(slot_ang)) * ring_r
+    to_slot = (slot_target - enemy.pos).normalized()
+
+    vel_dir = enemy.vel.normalized() if enemy.vel.length() > 1e-6 else to_player
+
+    # Keep roles, but ensure forward combat pressure.
+    min_forward = {
+        "ranged": -0.02,
+        "spitter": 0.04,
+        "engineer": -0.05,
+        "tank": 0.06,
+        "charger": 0.18,
+        "chaser": 0.22,
+        "swarm": 0.2,
+        "flyer": 0.12,
+        "bomber": 0.08,
+    }.get(key, 0.08)
+
+    desired_dir = (
+        vel_dir * 0.45
+        + to_slot * 0.68
+        + cohesion * 0.36
+        + separation * 0.72
+        + to_player * 0.52
+    ).normalized()
+
+    # Forward-pressure hysteresis avoids frame-to-frame retreat jitter.
+    fwd = desired_dir.dot(to_player)
+    lock_t = float(enemy.ai.get("forward_lock_t", 0.0))
+    if fwd < min_forward:
+        lock_t = min(0.35, lock_t + dt * 2.6)
+    else:
+        lock_t = max(0.0, lock_t - dt * 2.0)
+    enemy.ai["forward_lock_t"] = lock_t
+    if lock_t > 0.0 and fwd < min_forward:
+        desired_dir = (desired_dir + to_player * (0.28 + lock_t * 0.9)).normalized()
+
+    desired_speed = enemy.speed * (1.02 if key in ("chaser", "swarm", "charger") else 0.98)
+    desired_vel = desired_dir * desired_speed
+
+    # Reynolds-style bounded steering: smooth and continuous velocity changes.
+    steering = desired_vel - enemy.vel
+    max_force = enemy.speed * 3.2
+    max_step = max_force * dt
+    sl = steering.length()
+    if sl > max_step and sl > 1e-6:
+        steering = steering * (max_step / sl)
+
+    enemy.vel = enemy.vel + steering
+    max_speed = enemy.speed * 1.28
+    vl = enemy.vel.length()
+    if vl > max_speed and vl > 1e-6:
+        enemy.vel = enemy.vel * (max_speed / vl)
+
+
 def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2 | None = None):
     """Update enemy AI behavior."""
     if player_vel is None:
@@ -172,6 +327,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             if behavior_impl is None:
                 return
             _dispatch_behavior_update(behavior_impl, enemy, player_pos, state, dt, game, player_vel)
+            _apply_type_coordination(enemy, player_pos, state, dt)
             return
 
     if isinstance(enemy.behavior, str) and enemy.behavior.startswith("boss_"):

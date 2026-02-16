@@ -533,27 +533,44 @@ class Visuals:
         
         # Different visuals for different projectile types
         projectile_type = getattr(proj, 'projectile_type', 'bullet')
+        is_enemy = str(getattr(proj, "owner", "player")) == "enemy"
         
         if projectile_type == "bomb":
-            # Enemy bomb: heavy orange core with dark casing.
+            # Bomb: heavy orange core with dark casing.
             sh = shapes.Circle(0, 0, 7, color=(120, 70, 45), batch=self.batch)
             core = shapes.Circle(0, 0, 4, color=(255, 145, 90), batch=self.batch)
         elif projectile_type == "missile":
-            # Larger red/orange missile
-            sh = shapes.Circle(0, 0, 6, color=(200, 100, 50), batch=self.batch)
-            core = shapes.Circle(0, 0, 3, color=(255, 150, 100), batch=self.batch)
+            # Larger missile
+            if is_enemy:
+                sh = shapes.Circle(0, 0, 6, color=(170, 60, 60), batch=self.batch)
+                core = shapes.Circle(0, 0, 3, color=(255, 120, 120), batch=self.batch)
+            else:
+                sh = shapes.Circle(0, 0, 6, color=(200, 100, 50), batch=self.batch)
+                core = shapes.Circle(0, 0, 3, color=(255, 150, 100), batch=self.batch)
         elif projectile_type == "plasma":
-            # Purple plasma projectile
-            sh = shapes.Circle(0, 0, 4, color=(150, 100, 255), batch=self.batch)
-            core = shapes.Circle(0, 0, 2, color=(200, 150, 255), batch=self.batch)
+            # Plasma projectile
+            if is_enemy:
+                sh = shapes.Circle(0, 0, 4, color=(255, 90, 180), batch=self.batch)
+                core = shapes.Circle(0, 0, 2, color=(255, 180, 220), batch=self.batch)
+            else:
+                sh = shapes.Circle(0, 0, 4, color=(150, 100, 255), batch=self.batch)
+                core = shapes.Circle(0, 0, 2, color=(200, 150, 255), batch=self.batch)
         elif projectile_type == "spread":
-            # Orange spread pellets
-            sh = shapes.Circle(0, 0, 4, color=(255, 200, 100), batch=self.batch)
-            core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
+            # Spread pellets
+            if is_enemy:
+                sh = shapes.Circle(0, 0, 4, color=(255, 110, 90), batch=self.batch)
+                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch)
+            else:
+                sh = shapes.Circle(0, 0, 4, color=(255, 200, 100), batch=self.batch)
+                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
         else:  # bullet or default
-            # Standard yellow bullet
-            sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch)
-            core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
+            # Default bullet
+            if is_enemy:
+                sh = shapes.Circle(0, 0, 4, color=(255, 90, 90), batch=self.batch)
+                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch)
+            else:
+                sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch)
+                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
         
         self._proj_handles[id(proj)] = RenderHandle(sh, core)
 

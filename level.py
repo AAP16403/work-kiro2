@@ -129,9 +129,20 @@ def _get_weighted_behavior(wave: int) -> str:
 
 
 def get_boss_for_wave(wave: int) -> str:
-    bosses = ["boss_thunder", "boss_laser", "boss_trapmaster", "boss_swarmqueen", "boss_brute"]
-    idx = (wave // 5 - 1) % len(bosses)
-    return bosses[idx]
+    # Boss pacing:
+    # 1-5 boss waves introduce core archetypes.
+    # Later boss waves bias toward harder, bullet-heavier encounters.
+    intro = ["boss_thunder", "boss_laser", "boss_trapmaster", "boss_swarmqueen", "boss_brute"]
+    late = ["boss_abyss_gaze", "boss_womb_core"]
+
+    idx = max(0, wave // 5 - 1)
+    if idx < len(intro):
+        return intro[idx]
+
+    # Wave 30+ alternates late-game bosses with occasional old bosses as mixups.
+    if random.random() < 0.28:
+        return random.choice(intro[2:])  # tougher legacy bosses only
+    return late[(idx - len(intro)) % len(late)]
 
 
 def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tuple:
@@ -176,6 +187,12 @@ def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tu
         hp, speed, atk = (155 + wave * 26, base_speed * 0.95, 1.7)
     elif behavior == "boss_brute":
         hp, speed, atk = (190 + wave * 34, base_speed * 1.05, 1.9)
+    elif behavior == "boss_abyss_gaze":
+        # Inspired by Hush/Delirium style pressure: fast pattern-heavy bullet control.
+        hp, speed, atk = (210 + wave * 32, base_speed * 1.0, 2.05)
+    elif behavior == "boss_womb_core":
+        # Inspired by Mom's Heart style pulses and minion pressure.
+        hp, speed, atk = (240 + wave * 36, base_speed * 0.9, 2.15)
     else:
         hp, speed, atk = (base_hp, base_speed, 1.0)
 
@@ -192,41 +209,35 @@ def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tu
 
 def maybe_spawn_powerup(state: GameState, center: Vec2):
     """Randomly spawn a powerup."""
+    min_wave = int(getattr(config, "ULTRA_SPAWN_MIN_WAVE", 4))
+    gap = int(getattr(config, "ULTRA_GUARANTEE_WAVE_GAP", 4))
+    last_ultra_wave = int(getattr(state, "_last_ultra_wave", 0))
+    force_ultra = int(state.wave) >= min_wave and (int(state.wave) - last_ultra_wave) >= max(1, gap)
     mods = get_difficulty_mods(state.difficulty)
     chance = 0.33 * mods["powerup"]
-    if random.random() < chance:
-        kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
-        if random.random() < 0.06:
-            kind = "vortex"
-        elif state.wave >= 4 and random.random() < 0.03:
-            kind = "ultra"
-        elif state.wave >= 3 and random.random() < 0.05:
-            kind = "weapon"
+    if force_ultra or random.random() < chance:
+        kind = "ultra" if force_ultra else _pick_powerup_kind_for_wave(state, source="wave")
         pos = random_spawn_edge(center, config.ROOM_RADIUS * 0.6)
-        if kind == "weapon":
-            state.powerups.append(PowerUp(pos, kind, data=get_weapon_key_for_wave(state.wave)))
-        else:
-            state.powerups.append(PowerUp(pos, kind))
+        _append_powerup(state, pos, kind)
+        if kind == "ultra":
+            state._last_ultra_wave = int(state.wave)
+            state._kills_since_ultra = 0
 
 
 def spawn_powerup_on_kill(state: GameState, center: Vec2):
     """Spawn a powerup when an enemy dies."""
+    state._kills_since_ultra = int(getattr(state, "_kills_since_ultra", 0)) + 1
+    pity_threshold = int(getattr(config, "ULTRA_KILL_PITY_THRESHOLD", 30))
+    force_ultra = int(state.wave) >= int(getattr(config, "ULTRA_SPAWN_MIN_WAVE", 4)) and int(getattr(state, "_kills_since_ultra", 0)) >= max(8, pity_threshold)
     mods = get_difficulty_mods(state.difficulty)
     chance = 0.15 * mods["powerup"]
-    if random.random() < chance:  # base 15% chance per kill
-        kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
-        if random.random() < 0.03:
-            kind = "vortex"
-        elif state.wave >= 4 and random.random() < 0.015:
-            kind = "ultra"
-        elif state.wave >= 4 and random.random() < 0.02:
-            kind = "weapon"
-        # Spawn near center
+    if force_ultra or random.random() < chance:  # base 15% chance per kill (+ pity force)
+        kind = "ultra" if force_ultra else _pick_powerup_kind_for_wave(state, source="kill")
         pos = center + Vec2(random.uniform(-50, 50), random.uniform(-50, 50))
-        if kind == "weapon":
-            state.powerups.append(PowerUp(pos, kind, data=get_weapon_key_for_wave(state.wave)))
-        else:
-            state.powerups.append(PowerUp(pos, kind))
+        _append_powerup(state, pos, kind)
+        if kind == "ultra":
+            state._last_ultra_wave = int(state.wave)
+            state._kills_since_ultra = 0
 
 
 def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2):
@@ -238,6 +249,14 @@ def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2):
         # One guaranteed sustain/utility drop.
         kind = random.choice(["heal", "shield", "laser"])
         state.powerups.append(PowerUp(center + Vec2(random.uniform(-35, 35), random.uniform(-35, 35)), kind))
+        # Guaranteed ultra in later boss waves if starved for several waves.
+        if int(state.wave) >= int(getattr(config, "ULTRA_SPAWN_MIN_WAVE", 4)):
+            last_ultra_wave = int(getattr(state, "_last_ultra_wave", 0))
+            gap = int(getattr(config, "ULTRA_GUARANTEE_WAVE_GAP", 4))
+            if state.wave - last_ultra_wave >= max(2, gap):
+                state.powerups.append(PowerUp(center + Vec2(random.uniform(-30, 30), random.uniform(-30, 30)), "ultra"))
+                state._last_ultra_wave = int(state.wave)
+                state._kills_since_ultra = 0
         # Small bonus chance for a second drop.
         if random.random() < 0.35:
             kind2 = random.choice(["damage", "speed", "firerate"])
@@ -250,3 +269,56 @@ def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2):
         return
 
     spawn_powerup_on_kill(state, center)
+
+
+def _append_powerup(state: GameState, pos: Vec2, kind: str) -> None:
+    k = str(kind or "")
+    if k == "weapon":
+        state.powerups.append(PowerUp(pos, k, data=get_weapon_key_for_wave(state.wave)))
+    else:
+        state.powerups.append(PowerUp(pos, k))
+
+
+def _pick_powerup_kind_for_wave(state: GameState, source: str) -> str:
+    # Base pool.
+    kind = random.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
+    r = random.random()
+    if r < 0.06:
+        kind = "vortex"
+    elif state.wave >= 3 and r < 0.11:
+        kind = "weapon"
+
+    min_wave = int(getattr(config, "ULTRA_SPAWN_MIN_WAVE", 4))
+    if int(state.wave) < min_wave:
+        return kind
+
+    last_ultra_wave = int(getattr(state, "_last_ultra_wave", 0))
+    gap = int(getattr(config, "ULTRA_GUARANTEE_WAVE_GAP", 4))
+
+    # Wave-clear pity: guaranteed ultra if too many waves without one.
+    if source == "wave" and (int(state.wave) - last_ultra_wave) >= max(1, gap):
+        state._last_ultra_wave = int(state.wave)
+        state._kills_since_ultra = 0
+        return "ultra"
+
+    # Kill pity: if many kills since last ultra, force one on the next powerup drop.
+    kills_since_ultra = int(getattr(state, "_kills_since_ultra", 0))
+    pity_threshold = int(getattr(config, "ULTRA_KILL_PITY_THRESHOLD", 30))
+    if source == "kill" and kills_since_ultra >= max(8, pity_threshold):
+        state._last_ultra_wave = int(state.wave)
+        state._kills_since_ultra = 0
+        return "ultra"
+
+    if source == "wave":
+        base = float(getattr(config, "ULTRA_WAVE_SPAWN_BASE", 0.03))
+        per = float(getattr(config, "ULTRA_WAVE_SPAWN_PER_WAVE", 0.004))
+        mx = float(getattr(config, "ULTRA_WAVE_SPAWN_MAX", 0.2))
+        ultra_chance = min(mx, base + max(0.0, state.wave - min_wave) * per)
+    else:
+        ultra_chance = float(getattr(config, "ULTRA_KILL_BASE_CHANCE", 0.015))
+
+    if random.random() < ultra_chance:
+        state._last_ultra_wave = int(state.wave)
+        state._kills_since_ultra = 0
+        return "ultra"
+    return kind

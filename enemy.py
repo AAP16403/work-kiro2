@@ -164,13 +164,156 @@ def _behavior_key(enemy: Enemy) -> str:
     return b.__class__.__name__.lower()
 
 
-def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float) -> None:
-    """Apply same-type formation/cohesion pressure after per-type AI update.
+def _formation_profile(state) -> dict:
+    d = str(getattr(state, "difficulty", "normal")).lower()
+    if d == "easy":
+        return {
+            "lead_time": 0.09,
+            "front_arc_deg": 104.0,
+            "back_arc_deg": 120.0,
+            "steer_mult": 0.78,
+            "pressure_mult": 0.86,
+            "flank_offset_deg": 88.0,
+        }
+    if d == "hard":
+        return {
+            "lead_time": 0.18,
+            "front_arc_deg": 84.0,
+            "back_arc_deg": 98.0,
+            "steer_mult": 1.08,
+            "pressure_mult": 1.16,
+            "flank_offset_deg": 78.0,
+        }
+    return {
+        "lead_time": 0.13,
+        "front_arc_deg": 94.0,
+        "back_arc_deg": 108.0,
+        "steer_mult": 0.95,
+        "pressure_mult": 1.0,
+        "flank_offset_deg": 82.0,
+    }
 
-    This layer keeps allies coordinated while preserving each behavior's own
-    movement/attack logic. It also limits obvious backpedaling when the player
-    advances.
-    """
+
+def _role_for_behavior(key: str) -> str:
+    return {
+        "tank": "front_heavy",
+        "charger": "front_dive",
+        "chaser": "front",
+        "swarm": "flank",
+        "flyer": "flank",
+        "bomber": "mid_lob",
+        "ranged": "backline",
+        "spitter": "backline",
+        "engineer": "support",
+    }.get(key, "front")
+
+
+def _slot_radius(key: str) -> float:
+    return {
+        "tank": 110.0,
+        "charger": 118.0,
+        "chaser": 128.0,
+        "swarm": 124.0,
+        "flyer": 134.0,
+        "bomber": 152.0,
+        "ranged": 186.0,
+        "spitter": 174.0,
+        "engineer": 204.0,
+    }.get(key, 140.0)
+
+
+def _unit_order_bias(enemy: Enemy) -> float:
+    if "formation_bias" not in enemy.ai:
+        enemy.ai["formation_bias"] = (float((id(enemy) % 997)) / 997.0)
+    return float(enemy.ai["formation_bias"])
+
+
+def _build_role_formation(state, player_pos: Vec2, player_vel: Vec2) -> dict:
+    now = float(getattr(state, "time", 0.0))
+    cached = getattr(state, "_role_formation", None)
+    if cached and abs(float(cached.get("t", -999.0)) - now) <= 1e-8:
+        return cached
+
+    enemies = [e for e in getattr(state, "enemies", []) if not _behavior_key(e).startswith("boss_")]
+    prof = _formation_profile(state)
+    slot_targets: dict[int, Vec2] = {}
+    roles: dict[int, str] = {}
+    keys: dict[int, str] = {}
+
+    if not enemies:
+        out = {"t": now, "slot_targets": slot_targets, "roles": roles, "keys": keys, "profile": prof}
+        state._role_formation = out
+        return out
+
+    center = Vec2(0.0, 0.0)
+    for e in enemies:
+        center = center + e.pos
+    center = center / float(len(enemies))
+    to_player = player_pos - center
+    front_dir = to_player.normalized() if to_player.length() > 1e-6 else Vec2(1.0, 0.0)
+    base_ang = math.atan2(front_dir.y, front_dir.x)
+    flank_offset = math.radians(float(prof["flank_offset_deg"]))
+    anchor = player_pos + player_vel * float(prof["lead_time"])
+
+    groups: dict[str, list[Enemy]] = {
+        "front_heavy": [],
+        "front_dive": [],
+        "front": [],
+        "flank_left": [],
+        "flank_right": [],
+        "mid_lob": [],
+        "backline": [],
+        "support": [],
+    }
+
+    for e in enemies:
+        key = _behavior_key(e)
+        role = _role_for_behavior(key)
+        eid = id(e)
+        roles[eid] = role
+        keys[eid] = key
+        if role == "flank":
+            # Stable flank-side assignment keeps wings coherent.
+            if _unit_order_bias(e) < 0.5:
+                groups["flank_left"].append(e)
+            else:
+                groups["flank_right"].append(e)
+        else:
+            groups[role].append(e)
+
+    def _assign_arc(units: list[Enemy], center_angle: float, arc_deg: float, base_radius: float, radius_step: float = 12.0):
+        if not units:
+            return
+        ordered = sorted(units, key=lambda u: (_unit_order_bias(u), u.seed))
+        n = len(ordered)
+        arc = math.radians(arc_deg)
+        for i, e in enumerate(ordered):
+            if n == 1:
+                frac = 0.0
+            else:
+                frac = (i / float(n - 1)) - 0.5
+            ang = center_angle + frac * arc
+            r = base_radius + (i % 2) * radius_step
+            key = keys[id(e)]
+            r = 0.6 * r + 0.4 * _slot_radius(key)
+            slot_targets[id(e)] = anchor + Vec2(math.cos(ang), math.sin(ang)) * r
+
+    _assign_arc(groups["front_heavy"], base_ang, arc_deg=48.0, base_radius=108.0, radius_step=8.0)
+    _assign_arc(groups["front_dive"], base_ang, arc_deg=68.0, base_radius=120.0, radius_step=10.0)
+    _assign_arc(groups["front"], base_ang, arc_deg=float(prof["front_arc_deg"]), base_radius=132.0, radius_step=12.0)
+    _assign_arc(groups["flank_left"], base_ang + flank_offset, arc_deg=62.0, base_radius=138.0, radius_step=10.0)
+    _assign_arc(groups["flank_right"], base_ang - flank_offset, arc_deg=62.0, base_radius=138.0, radius_step=10.0)
+    _assign_arc(groups["mid_lob"], base_ang + math.radians(28.0), arc_deg=86.0, base_radius=152.0, radius_step=12.0)
+    _assign_arc(groups["backline"], base_ang + math.pi, arc_deg=float(prof["back_arc_deg"]), base_radius=182.0, radius_step=14.0)
+    _assign_arc(groups["support"], base_ang + math.pi, arc_deg=74.0, base_radius=212.0, radius_step=16.0)
+
+    out = {"t": now, "slot_targets": slot_targets, "roles": roles, "keys": keys, "profile": prof}
+    state._role_formation = out
+    return out
+
+
+def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: Vec2) -> None:
+    """Apply role-based formation/cohesion pressure after per-type behavior update."""
     if dt <= 0.0:
         return
 
@@ -182,11 +325,13 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float) -
     if not enemies:
         return
 
-    allies = [o for o in enemies if o is not enemy and _behavior_key(o) == key]
-    if not allies:
-        return
+    formation = _build_role_formation(state, player_pos, player_vel)
+    slot_targets = formation["slot_targets"]
+    role_map = formation["roles"]
+    prof = formation["profile"]
+    role = role_map.get(id(enemy), _role_for_behavior(key))
 
-    # Coordinate with nearby allies only; global coupling causes rubber-band motion.
+    # Coordinate with nearby allies only; global coupling causes rubber-band jitter.
     coord_r = {
         "ranged": 260.0,
         "spitter": 230.0,
@@ -198,89 +343,92 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float) -
         "flyer": 210.0,
         "bomber": 220.0,
     }.get(key, 200.0)
-    nearby = []
+    nearby_all = []
+    nearby_same = []
     r2 = coord_r * coord_r
-    for o in allies:
-        if (o.pos - enemy.pos).length_squared() <= r2:
-            nearby.append(o)
-    if not nearby:
-        return
+    for o in enemies:
+        if o is enemy:
+            continue
+        ok = _behavior_key(o)
+        if ok.startswith("boss_"):
+            continue
+        if (o.pos - enemy.pos).length_squared() > r2:
+            continue
+        nearby_all.append(o)
+        if ok == key:
+            nearby_same.append(o)
 
     to_player_vec = player_pos - enemy.pos
     to_player = to_player_vec.normalized() if to_player_vec.length() > 1e-6 else Vec2(1.0, 0.0)
 
     center = Vec2(enemy.pos.x, enemy.pos.y)
-    for a in nearby:
+    for a in nearby_all:
         center = center + a.pos
-    center = center / float(len(nearby) + 1)
+    center = center / float(len(nearby_all) + 1)
     cohesion = (center - enemy.pos).normalized()
 
-    # Local separation keeps same-type allies from stacking.
+    # Local separation keeps allies from stacking (stronger for same-type).
     separation = Vec2(0.0, 0.0)
     sep_count = 0
-    for a in nearby:
+    for a in nearby_all:
         dvec = enemy.pos - a.pos
         d = dvec.length()
         if d <= 1e-6:
             continue
         if d < coord_r * 0.45:
-            separation = separation + dvec.normalized() * (1.0 - d / (coord_r * 0.45))
+            wt = 1.0 if a in nearby_same else 0.55
+            separation = separation + dvec.normalized() * (1.0 - d / (coord_r * 0.45)) * wt
             sep_count += 1
     if sep_count > 0:
         separation = (separation / float(sep_count)).normalized()
 
-    # Role-aware formation radius.
-    ring_r = {
-        "ranged": 200.0,
-        "spitter": 180.0,
-        "engineer": 220.0,
-        "tank": 150.0,
-        "charger": 120.0,
-        "chaser": 115.0,
-        "swarm": 105.0,
-        "flyer": 130.0,
-        "bomber": 165.0,
-    }.get(key, 140.0)
-
-    if "form_bias" not in enemy.ai:
-        enemy.ai["form_bias"] = ((id(enemy) % 211) / 211.0) * math.tau
-    orbit_speed = {
-        "ranged": 0.35,
-        "spitter": 0.42,
-        "engineer": 0.28,
-        "tank": 0.22,
-        "charger": 0.5,
-        "chaser": 0.62,
-        "swarm": 0.75,
-        "flyer": 0.8,
-        "bomber": 0.46,
-    }.get(key, 0.45)
-
-    slot_ang = float(getattr(state, "time", 0.0)) * orbit_speed + float(enemy.ai["form_bias"])
-    slot_target = player_pos + Vec2(math.cos(slot_ang), math.sin(slot_ang)) * ring_r
+    slot_target = slot_targets.get(id(enemy))
+    if slot_target is None:
+        slot_target = player_pos + to_player * _slot_radius(key)
     to_slot = (slot_target - enemy.pos).normalized()
 
     vel_dir = enemy.vel.normalized() if enemy.vel.length() > 1e-6 else to_player
 
-    # Keep roles, but ensure forward combat pressure.
+    # Keep role identity, but ensure forward combat pressure.
     min_forward = {
-        "ranged": -0.02,
+        "ranged": -0.05,
         "spitter": 0.04,
-        "engineer": -0.05,
+        "engineer": -0.08,
         "tank": 0.06,
-        "charger": 0.18,
-        "chaser": 0.22,
-        "swarm": 0.2,
-        "flyer": 0.12,
+        "charger": 0.2,
+        "chaser": 0.24,
+        "swarm": 0.22,
+        "flyer": 0.13,
         "bomber": 0.08,
     }.get(key, 0.08)
+    min_forward *= float(prof["pressure_mult"])
+
+    role_slot_weight = {
+        "front_heavy": 0.62,
+        "front_dive": 0.66,
+        "front": 0.63,
+        "flank": 0.7,
+        "mid_lob": 0.74,
+        "backline": 0.84,
+        "support": 0.86,
+    }.get(role, 0.66)
+
+    role_player_weight = {
+        "front_heavy": 0.66,
+        "front_dive": 0.7,
+        "front": 0.62,
+        "flank": 0.56,
+        "mid_lob": 0.44,
+        "backline": 0.36,
+        "support": 0.24,
+    }.get(role, 0.52)
 
     desired_dir = (
         vel_dir * 0.45
-        + to_slot * 0.68
+        + to_slot * role_slot_weight
         + cohesion * 0.36
         + separation * 0.72
-        + to_player * 0.52
+        + to_player * role_player_weight
     ).normalized()
 
     # Forward-pressure hysteresis avoids frame-to-frame retreat jitter.
@@ -294,12 +442,12 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float) -
     if lock_t > 0.0 and fwd < min_forward:
         desired_dir = (desired_dir + to_player * (0.28 + lock_t * 0.9)).normalized()
 
-    desired_speed = enemy.speed * (1.02 if key in ("chaser", "swarm", "charger") else 0.98)
+    desired_speed = enemy.speed * (1.02 if key in ("chaser", "swarm", "charger") else 0.98) * float(prof["pressure_mult"])
     desired_vel = desired_dir * desired_speed
 
     # Reynolds-style bounded steering: smooth and continuous velocity changes.
     steering = desired_vel - enemy.vel
-    max_force = enemy.speed * 3.2
+    max_force = enemy.speed * 3.2 * float(prof["steer_mult"])
     max_step = max_force * dt
     sl = steering.length()
     if sl > max_step and sl > 1e-6:
@@ -327,7 +475,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             if behavior_impl is None:
                 return
             _dispatch_behavior_update(behavior_impl, enemy, player_pos, state, dt, game, player_vel)
-            _apply_type_coordination(enemy, player_pos, state, dt)
+            _apply_type_coordination(enemy, player_pos, state, dt, player_vel)
             return
 
     if isinstance(enemy.behavior, str) and enemy.behavior.startswith("boss_"):
@@ -663,6 +811,147 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 if persona == "aggressive":
                     base_cd *= 0.92
                 enemy.attack_cd = max(0.95, base_cd)
+            return
+
+        if enemy.behavior == "boss_abyss_gaze":
+            # Inspired by Isaac's late bullet-hell fights: tracking curtains + beam checks.
+            dvec = player_pos - enemy.pos
+            d = dvec.length()
+            dir_to = dvec.normalized() if d > 1e-6 else Vec2(1, 0)
+            phase = int(enemy.ai.get("phase", 0))
+            persona = str(enemy.ai.get("persona", "aggressive"))
+            strafe = Vec2(-dir_to.y, dir_to.x)
+
+            desired = 240.0 if phase == 0 else 220.0 if phase == 1 else 205.0
+            if d > desired + 20.0:
+                move = (dir_to * 0.88 + strafe * 0.36).normalized()
+            elif d < desired - 20.0:
+                move = ((dir_to * -1.0) * 0.7 + strafe * 0.62).normalized()
+            else:
+                move = (strafe * 0.92 + dir_to * 0.2).normalized()
+            enemy.pos = enemy.pos + move * enemy.speed * dt * (0.9 + 0.12 * math.sin(enemy.t * 2.2))
+
+            enemy.attack_cd -= dt
+            if enemy.attack_cd <= 0.0:
+                if not hasattr(state, "lasers"):
+                    state.lasers = []
+
+                proj_speed = 235.0 + state.wave * 2.3
+                dmg = 9 + state.wave // 3
+                aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.72)
+
+                # Main curtain/fan pattern.
+                if phase == 0:
+                    _fire_fan(state, enemy.pos, aim, count=7, spread_deg=78.0, speed=proj_speed, damage=dmg, ttl=2.65, projectile_type="plasma")
+                elif phase == 1:
+                    _fire_fan(state, enemy.pos, aim, count=9, spread_deg=92.0, speed=proj_speed, damage=dmg + 1, ttl=2.7, projectile_type="plasma")
+                    _fire_ring(state, enemy.pos, count=10, speed=proj_speed * 0.84, damage=max(1, dmg - 1), ttl=2.5, start_deg=enemy.t * 30.0, projectile_type="bullet")
+                else:
+                    # Dense forward curtain: multiple narrow fans to force lane changes.
+                    for off in (-20.0, -8.0, 8.0, 20.0):
+                        a = _rotate(aim, off)
+                        _fire_fan(state, enemy.pos, a, count=5, spread_deg=30.0, speed=proj_speed * 1.02, damage=dmg + 1, ttl=2.55, projectile_type="plasma")
+                    _fire_ring(state, enemy.pos, count=12, speed=proj_speed * 0.86, damage=dmg, ttl=2.6, start_deg=enemy.t * 38.0, projectile_type="bullet")
+
+                # Beam checks to punish straight-line movement.
+                beam_len = config.ROOM_RADIUS * 2.0
+                if phase >= 1:
+                    offsets = (-22.0, 22.0) if phase == 1 else (-34.0, 0.0, 34.0)
+                    for off in offsets:
+                        d2 = _rotate(aim, off)
+                        state.lasers.append(
+                            LaserBeam(
+                                start=Vec2(enemy.pos.x, enemy.pos.y),
+                                end=enemy.pos + d2 * beam_len,
+                                damage=14 + state.wave // 3 + (1 if phase == 2 else 0),
+                                thickness=8.5 if phase == 1 else 9.5,
+                                warn=0.5 if phase == 1 else 0.42,
+                                ttl=0.11,
+                                color=(190, 210, 255),
+                                owner="enemy",
+                            )
+                        )
+
+                # Minion support.
+                adds_cap = getattr(state, "max_enemies", 12) + 5
+                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < (0.22 if phase == 2 else 0.15):
+                    pos = enemy.pos + Vec2(random.uniform(-85, 85), random.uniform(-85, 85))
+                    add_behavior = "flyer" if random.random() < 0.6 else "ranged"
+                    state.enemies.append(Enemy(pos=pos, hp=16 + state.wave * 2, speed=74 + state.wave * 1.8, behavior=add_behavior))
+
+                base_cd = 1.45 - state.wave * 0.012
+                if phase == 2:
+                    base_cd *= 0.82
+                elif phase == 1:
+                    base_cd *= 0.92
+                if persona == "aggressive":
+                    base_cd *= 0.93
+                enemy.attack_cd = max(0.62, base_cd)
+            return
+
+        if enemy.behavior == "boss_womb_core":
+            # Inspired by Mom's Heart style: pulse slams + organic projectile bursts.
+            dvec = player_pos - enemy.pos
+            d = dvec.length()
+            dir_to = dvec.normalized() if d > 1e-6 else Vec2(1, 0)
+            phase = int(enemy.ai.get("phase", 0))
+            persona = str(enemy.ai.get("persona", "aggressive"))
+
+            desired = 235.0 if phase == 0 else 218.0 if phase == 1 else 200.0
+            wobble = Vec2(math.sin(enemy.t * 1.5), math.cos(enemy.t * 1.9)) * 0.3
+            if d > desired + 15.0:
+                move = (dir_to * 0.82 + wobble).normalized()
+            elif d < desired - 15.0:
+                move = ((dir_to * -1.0) * 0.72 + wobble).normalized()
+            else:
+                move = (Vec2(-dir_to.y, dir_to.x) * 0.82 + wobble).normalized()
+            enemy.pos = enemy.pos + move * enemy.speed * dt * 0.88
+
+            enemy.attack_cd -= dt
+            if enemy.attack_cd <= 0.0:
+                if not hasattr(state, "traps"):
+                    state.traps = []
+
+                # Telegraph pulse around player then strike.
+                pulse_r = 95.0 if phase < 2 else 110.0
+                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r + 16.0, damage=0, ttl=0.75, armed_delay=0.34, kind="womb_warn"))
+                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r, damage=18 + state.wave // 3, ttl=0.52, armed_delay=0.34, kind="womb_pulse"))
+
+                proj_speed = 220.0 + state.wave * 2.4
+                dmg = 9 + state.wave // 3
+                aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.78)
+                gun = _cycle_gun(enemy, ["spread", "bullet", "plasma"])
+
+                # Main blood-burst patterns.
+                if phase == 0:
+                    _fire_fan(state, enemy.pos, aim, count=6, spread_deg=72.0, speed=proj_speed, damage=dmg, ttl=2.65, projectile_type=gun)
+                elif phase == 1:
+                    _fire_fan(state, enemy.pos, aim, count=8, spread_deg=88.0, speed=proj_speed, damage=dmg + 1, ttl=2.7, projectile_type=gun)
+                    _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.82, damage=max(1, dmg - 1), ttl=2.55, start_deg=enemy.t * 24.0, projectile_type="bullet")
+                else:
+                    _fire_fan(state, enemy.pos, aim, count=10, spread_deg=102.0, speed=proj_speed, damage=dmg + 2, ttl=2.7, projectile_type=gun)
+                    _fire_fan(state, enemy.pos, _perp(aim), count=6, spread_deg=44.0, speed=proj_speed * 0.96, damage=dmg + 1, ttl=2.55, projectile_type="spread")
+                    _fire_ring(state, enemy.pos, count=10, speed=proj_speed * 0.86, damage=dmg, ttl=2.6, start_deg=enemy.t * 32.0, projectile_type="plasma")
+
+                # Summon mixed rushers to keep pressure.
+                adds_cap = getattr(state, "max_enemies", 12) + 6
+                if len(getattr(state, "enemies", [])) < adds_cap:
+                    summon_n = 1 if phase == 0 else 2
+                    for _ in range(summon_n):
+                        if len(getattr(state, "enemies", [])) >= adds_cap:
+                            break
+                        pos = enemy.pos + Vec2(random.uniform(-70, 70), random.uniform(-70, 70))
+                        add_behavior = "swarm" if random.random() < 0.7 else "charger"
+                        state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=86 + state.wave * 1.6, behavior=add_behavior))
+
+                base_cd = 1.9 - state.wave * 0.015
+                if phase == 2:
+                    base_cd *= 0.8
+                elif phase == 1:
+                    base_cd *= 0.9
+                if persona == "aggressive":
+                    base_cd *= 0.94
+                enemy.attack_cd = max(0.74, base_cd)
             return
     else:
         if hasattr(enemy.behavior, "update"):

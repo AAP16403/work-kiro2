@@ -32,6 +32,13 @@ ULTRA_DAMAGE_MULT = 2.7
 ULTRA_BEAM_THICKNESS = 16.0
 ULTRA_BEAM_TTL = 0.12
 ULTRA_BEAM_COLOR = (255, 230, 170)
+ULTRA_SPAWN_MIN_WAVE = 4
+ULTRA_GUARANTEE_WAVE_GAP = 4
+ULTRA_WAVE_SPAWN_BASE = 0.03
+ULTRA_WAVE_SPAWN_PER_WAVE = 0.004
+ULTRA_WAVE_SPAWN_MAX = 0.2
+ULTRA_KILL_BASE_CHANCE = 0.015
+ULTRA_KILL_PITY_THRESHOLD = 30
 
 # Isometric projection
 ISO_SCALE_X = 1.0
@@ -74,4 +81,6 @@ ENEMY_COLORS = {
     "boss_trapmaster": (255, 180, 100),
     "boss_swarmqueen": (230, 140, 255),
     "boss_brute": (255, 100, 100),
+    "boss_abyss_gaze": (185, 220, 255),
+    "boss_womb_core": (255, 105, 135),
 }

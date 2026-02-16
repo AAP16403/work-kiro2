@@ -507,7 +507,7 @@ class SettingsMenu:
         )
         
         self.difficulty_label = pyglet.text.Label(
-            "Difficulty:",
+            "Difficulty",
             font_name="Segoe UI",
             font_size=16,
             x=150,
@@ -519,7 +519,7 @@ class SettingsMenu:
         )
         
         self.window_label = pyglet.text.Label(
-            "Window Size:",
+            "Display Mode",
             font_name="Segoe UI",
             font_size=16,
             x=0,
@@ -527,6 +527,17 @@ class SettingsMenu:
             anchor_x="left",
             anchor_y="center",
             color=(255, 255, 255, 255),
+            batch=self.batch,
+        )
+        self.menu_note = pyglet.text.Label(
+            "Resolution and arena scale update instantly.",
+            font_name="Segoe UI",
+            font_size=11,
+            x=width // 2,
+            y=height - 72,
+            anchor_x="center",
+            anchor_y="center",
+            color=(165, 175, 195, 255),
             batch=self.batch,
         )
 
@@ -638,28 +649,13 @@ class SettingsMenu:
         self.screen_width = width
         self.screen_height = height
         cx = width // 2
-        # Settings has more content than the main menu; cap scale so it stays usable.
-        scale = min(_ui_scale(width, height), 1.55)
+        # Settings has denser content than other menus; cap scale to avoid crowding.
+        scale = min(_ui_scale(width, height), 1.26)
 
-        gap = int(18 * scale)
-        button_h = int(56 * scale)
-        button_w = int(175 * scale)
-        max_row3 = int((width * 0.88 - 2 * gap) / 3)
-        max_col2 = int((width * 0.88 - gap) / 2)
-        button_w = max(int(120 * scale), min(button_w, max_row3, max_col2))
-
-        btn_font = max(12, int(16 * scale))
-        for btn in self.difficulty_buttons + self.size_buttons + [self.back_button]:
-            btn.width = button_w
-            btn.height = button_h
-            btn.font_size = btn_font
-
-        # Content panel.
-        title_pad = int(85 * scale)
-        panel_top = height - title_pad
-        panel_y = max(16, int(22 * scale))
-        panel_w = min(int(width * 0.88), int((button_w * 3) + (gap * 2) + (160 * scale)))
-        panel_h = max(260, int(panel_top - panel_y))
+        panel_top_pad = int(96 * scale)
+        panel_y = max(14, int(18 * scale))
+        panel_w = min(int(width * 0.92), int(1100 * scale))
+        panel_h = max(280, int(height - panel_top_pad - panel_y))
         panel_x = cx - panel_w // 2
         self._panel_border.x = panel_x - 3
         self._panel_border.y = panel_y - 3
@@ -674,50 +670,67 @@ class SettingsMenu:
         self._panel_shine.width = panel_w - 8
         self._panel_shine.height = max(6, int(14 * scale))
 
-        left_x = panel_x + int(30 * scale)
-        content_top = panel_y + panel_h - int(46 * scale)
+        content_pad_x = int(32 * scale)
+        content_left = panel_x + content_pad_x
+        content_right = panel_x + panel_w - content_pad_x
+        content_w = max(240, content_right - content_left)
+        content_top = panel_y + panel_h - int(44 * scale)
 
-        # Difficulty row
-        total_w = 3 * button_w + 2 * gap
-        start_x = cx - total_w // 2
-        y = content_top - int(64 * scale)
-        for i, btn in enumerate(self.difficulty_buttons):
-            btn.x = start_x + i * (button_w + gap)
-            btn.y = y
+        button_h = int(52 * scale)
+        base_btn_w = int(180 * scale)
+        btn_font = max(11, int(15 * scale))
+        gap_x = max(10, int(14 * scale))
+        gap_y = max(8, int(12 * scale))
 
-        # Window sizes (2 columns)
-        grid_total_w = 2 * button_w + gap
-        grid_start_x = cx - grid_total_w // 2
-        rows = (len(self.size_buttons) + 1) // 2
-        row_gap = max(8, int(12 * scale))
-        base_y = y - button_h - int(86 * scale)
-        for i, btn in enumerate(self.size_buttons):
-            col = i % 2
-            row = i // 2
-            btn.x = grid_start_x + col * (button_w + gap)
-            btn.y = base_y - row * (button_h + row_gap)
-
-        # Labels & slider aligned to left edge of the panel content.
+        # Difficulty row aligned to the content grid.
+        diff_btn_w = max(int(120 * scale), min(base_btn_w, int((content_w - gap_x * 2) / 3)))
+        for btn in self.difficulty_buttons:
+            btn.width = diff_btn_w
+            btn.height = button_h
+            btn.font_size = btn_font
         self.difficulty_label.font_size = max(12, int(17 * scale))
-        self.window_label.font_size = max(12, int(17 * scale))
-        self.difficulty_label.x = left_x
-        self.difficulty_label.y = min(
-            int(content_top - int(8 * scale)),
-            int(y + button_h + int(26 * scale)),
-        )
-        self.window_label.x = left_x
-        self.window_label.y = int(base_y + button_h + int(26 * scale))
+        self.difficulty_label.x = content_left
+        self.difficulty_label.y = content_top
 
+        diff_y = self.difficulty_label.y - int(18 * scale) - button_h
+        diff_total_w = 3 * diff_btn_w + 2 * gap_x
+        diff_start_x = content_left + max(0, (content_w - diff_total_w) // 2)
+        for i, btn in enumerate(self.difficulty_buttons):
+            btn.x = diff_start_x + i * (diff_btn_w + gap_x)
+            btn.y = diff_y
+
+        # Display options in an adaptive grid to keep spacing stable across resolutions.
+        size_cols = 3 if content_w >= int(640 * scale) else 2 if content_w >= int(430 * scale) else 1
+        size_btn_w = max(int(120 * scale), min(int((content_w - gap_x * (size_cols - 1)) / size_cols), int(280 * scale)))
+        for btn in self.size_buttons:
+            btn.width = size_btn_w
+            btn.height = button_h
+            btn.font_size = btn_font
+
+        self.window_label.font_size = max(12, int(17 * scale))
+        self.window_label.x = content_left
+        self.window_label.y = diff_y - int(58 * scale)
+
+        size_top_y = self.window_label.y - int(18 * scale) - button_h
+        for i, btn in enumerate(self.size_buttons):
+            col = i % size_cols
+            row = i // size_cols
+            btn.x = content_left + col * (size_btn_w + gap_x)
+            btn.y = size_top_y - row * (button_h + gap_y)
+
+        self.back_button.width = max(int(180 * scale), int(min(300 * scale, content_w * 0.42)))
+        self.back_button.height = button_h
+        self.back_button.font_size = btn_font
         self.back_button.x = cx - self.back_button.width // 2
         self.back_button.y = panel_y + int(18 * scale)
 
-        grid_bottom = base_y - (rows - 1) * (button_h + row_gap)
-        slider_pref_y = grid_bottom - int(74 * scale)
-        slider_min_y = self.back_button.y + self.back_button.height + int(34 * scale)
-        slider_max_y = grid_bottom - int(42 * scale)
-        self.arena_slider.x = left_x
-        self.arena_slider.y = max(int(slider_min_y), min(int(slider_pref_y), int(slider_max_y)))
-        self.arena_slider.width = min(int(380 * scale), int(panel_w - (left_x - panel_x) * 2))
+        rows = max(1, (len(self.size_buttons) + size_cols - 1) // size_cols)
+        grid_bottom = size_top_y - (rows - 1) * (button_h + gap_y)
+        slider_floor_y = self.back_button.y + self.back_button.height + int(26 * scale)
+        slider_pref_y = grid_bottom - int(68 * scale)
+        self.arena_slider.x = content_left
+        self.arena_slider.y = max(int(slider_floor_y), int(slider_pref_y))
+        self.arena_slider.width = min(int(500 * scale), content_w)
         self.arena_slider.font_size = max(11, int(14 * scale))
         self.arena_slider.knob_radius = max(6.0, 9.0 * scale)
         self.arena_slider.track_thickness = max(2.0, 3.0 * scale)
@@ -725,6 +738,9 @@ class SettingsMenu:
         self.title.x = cx
         self.title.font_size = max(18, int(32 * scale))
         self.title.y = height - int(60 * scale)
+        self.menu_note.x = cx
+        self.menu_note.y = self.title.y - int(26 * scale)
+        self.menu_note.font_size = max(9, int(11 * scale))
 
         self._bg_a.width = width
         self._bg_a.height = height

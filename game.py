@@ -415,7 +415,7 @@ class PlayingState(State):
         ultra_cd = max(0.0, float(getattr(game.player, "ultra_cd_until", 0.0)) - game.state.time)
         ultra_txt = ""
         if ultra_charges > 0:
-            ultra_txt = f"   Ultra: {ultra_charges} [{game._ultra_variant_name(game.player)}]"
+            ultra_txt = f"   Ultra: {ultra_charges} [Next: {game._ultra_variant_name(game.player)}]"
             if ultra_cd > 0:
                 ultra_txt += f" ({ultra_cd:.0f}s)"
         boss = next((e for e in game.state.enemies if enemy_behavior_name(e).startswith("boss_")), None)
@@ -519,7 +519,7 @@ class Game(pyglet.window.Window):
         self.settings = {
             "difficulty": "normal",
             "window_size": (self.width, self.height),
-            "fullscreen": False,
+            "fullscreen": True,
             "arena_margin": float(getattr(config, "ARENA_MARGIN", 0.97)),
         }
         self._windowed_size = (self.width, self.height)
@@ -568,6 +568,17 @@ class Game(pyglet.window.Window):
         self.fsm.add_state(PausedState(self))
         self.fsm.add_state(UpgradeState(self))
         self.fsm.add_state(GameOverState(self))
+        self._enable_startup_fullscreen()
+
+    def _enable_startup_fullscreen(self) -> None:
+        """Start in fullscreen while preserving the current windowed size."""
+        self.settings["window_size"] = (self.width, self.height)
+        self._windowed_size = (self.width, self.height)
+        try:
+            self.settings_menu.window_size_idx = len(self.settings_menu.window_sizes) - 1
+            self._on_settings_change({"fullscreen": True, "window_size": self._windowed_size})
+        except Exception:
+            self.settings["fullscreen"] = False
 
     def _reset_input_flags(self) -> None:
         self.mouse_down = False
@@ -752,7 +763,7 @@ class Game(pyglet.window.Window):
 
         # Cycle variants for built-in variety while preserving predictable control.
         variant = int(getattr(self.player, "ultra_variant_idx", 0)) % 3
-        self.player.ultra_variant_idx = variant + 1
+        self.player.ultra_variant_idx = (variant + 1) % 3
 
         if variant == 0:
             # Classic piercing beam.

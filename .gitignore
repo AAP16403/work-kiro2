@@ -11,6 +11,7 @@ dist/
 .ruff_cache/
 
 *.log
+_run*.log
 
 # Android / Buildozer (kept in-repo scripts, ignore generated env/artifacts)
 android/.venv_buildozer/

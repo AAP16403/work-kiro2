@@ -4,7 +4,6 @@ import math
 import random
 from typing import List
 
-import pyglet
 from pyglet import shapes
 
 import config

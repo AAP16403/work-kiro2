@@ -7,6 +7,13 @@ import random
 import pyglet
 from pyglet import shapes
 import config
+from fonts import register_ui_fonts
+
+register_ui_fonts()
+
+UI_FONT_HEAD = "Orbitron"
+UI_FONT_BODY = "Rajdhani"
+UI_FONT_META = "Rajdhani"
 
 
 def _ui_scale(width: int, height: int) -> float:
@@ -27,7 +34,7 @@ class MenuButton:
     callback: Callable
     color: tuple = (100, 150, 200)
     hover_color: tuple = (150, 200, 255)
-    font_name: str = "Segoe UI"
+    font_name: str = UI_FONT_BODY
     font_size: int = 16
     text_color: tuple = (255, 255, 255, 255)
     is_hovered: bool = False
@@ -48,8 +55,8 @@ class MenuButton:
             return
         self._batch = batch
         self._shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=batch)
-        self._shadow.opacity = 85
-        self._border = shapes.Rectangle(0, 0, 1, 1, color=(220, 235, 255), batch=batch)
+        self._shadow.opacity = 72
+        self._border = shapes.Rectangle(0, 0, 1, 1, color=(185, 220, 255), batch=batch)
         self._bg = shapes.Rectangle(0, 0, 1, 1, color=self.color, batch=batch)
         self._shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=batch)
         self._label = pyglet.text.Label(
@@ -69,9 +76,9 @@ class MenuButton:
         if self._bg is None:
             return
         color = self.hover_color if self.is_hovered else self.color
-        shadow_off = max(2, int(self.height * 0.08))
+        shadow_off = max(2, int(self.height * 0.07))
         border_pad = max(2, int(self.height * 0.06))
-        shine_h = max(3, int(self.height * 0.16))
+        shine_h = max(3, int(self.height * 0.14))
 
         self._shadow.x = self.x + shadow_off
         self._shadow.y = self.y - shadow_off
@@ -82,20 +89,20 @@ class MenuButton:
         self._border.y = self.y - border_pad
         self._border.width = self.width + border_pad * 2
         self._border.height = self.height + border_pad * 2
-        self._border.opacity = 70 if self.is_hovered else 35
+        self._border.opacity = 86 if self.is_hovered else 32
 
         self._bg.x = self.x
         self._bg.y = self.y
         self._bg.width = self.width
         self._bg.height = self.height
         self._bg.color = color
-        self._bg.opacity = 235 if self.is_hovered else 210
+        self._bg.opacity = 245 if self.is_hovered else 214
 
         self._shine.x = self.x + 2
         self._shine.y = self.y + self.height - shine_h - 2
         self._shine.width = max(1, self.width - 4)
         self._shine.height = shine_h
-        self._shine.opacity = 55 if self.is_hovered else 32
+        self._shine.opacity = 70 if self.is_hovered else 24
 
         self._label.text = self.text
         self._label.font_name = self.font_name
@@ -129,7 +136,7 @@ class MenuSlider:
     current_val: float
     callback: Callable
     is_dragging: bool = False
-    font_name: str = "Segoe UI"
+    font_name: str = UI_FONT_BODY
     font_size: int = 14
     knob_radius: float = 8.0
     track_thickness: float = 2.0
@@ -236,16 +243,16 @@ class Menu:
         self._t = 0.0
         self._orbs: List[tuple[shapes.Circle, float, float, float]] = []
 
-        self._bg_a = shapes.Rectangle(0, 0, width, height, color=(12, 14, 22), batch=self.batch)
-        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(7, 9, 16), batch=self.batch)
-        self._bg_b.opacity = 120
+        self._bg_a = shapes.Rectangle(0, 0, width, height, color=(9, 16, 26), batch=self.batch)
+        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
+        self._bg_b.opacity = 148
 
         count = max(10, min(22, int((width * height) / 90_000)))
         for _ in range(count):
             r = random.uniform(18, 55)
             x = random.uniform(0, width)
             y = random.uniform(0, height)
-            col = random.choice([(45, 90, 150), (110, 70, 170), (60, 120, 170)])
+            col = random.choice([(40, 115, 170), (180, 92, 130), (70, 165, 150)])
             orb = shapes.Circle(x, y, r, color=col, batch=self.batch)
             orb.opacity = random.randint(14, 36)
             vx = random.uniform(-14, 14)
@@ -254,10 +261,10 @@ class Menu:
             self._orbs.append((orb, vx, vy, phase))
 
         # Panel backing for buttons.
-        self._panel_border = shapes.Rectangle(0, 0, 1, 1, color=(130, 160, 230), batch=self.batch)
-        self._panel_border.opacity = 38
-        self._panel = shapes.Rectangle(0, 0, 1, 1, color=(16, 20, 30), batch=self.batch)
-        self._panel.opacity = 180
+        self._panel_border = shapes.Rectangle(0, 0, 1, 1, color=(155, 205, 255), batch=self.batch)
+        self._panel_border.opacity = 48
+        self._panel = shapes.Rectangle(0, 0, 1, 1, color=(10, 20, 34), batch=self.batch)
+        self._panel.opacity = 196
         self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
         self._panel_shine.opacity = 16
 
@@ -267,20 +274,20 @@ class Menu:
         self.buttons.append(MenuButton(0, 0, 160, 50, "Quit", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)))
 
         self.title = pyglet.text.Label(
-            "ISOMETRIC ROOM SURVIVAL",
-            font_name="Segoe UI",
+            "P L O U T O",
+            font_name=UI_FONT_HEAD,
             font_size=32,
             x=width // 2,
             y=height - 80,
             anchor_x="center",
             anchor_y="center",
-            color=(200, 220, 255, 255),
+            color=(224, 236, 255, 255),
             batch=self.batch,
         )
 
         self.subtitle = pyglet.text.Label(
-            "WASD/Arrows to move, Hold LMB to shoot, RMB Ultra, ESC for menu",
-            font_name="Segoe UI",
+            "Stellar Survival Protocol",
+            font_name=UI_FONT_META,
             font_size=12,
             x=width // 2,
             y=height - 120,
@@ -289,7 +296,7 @@ class Menu:
             width=max(320, width - 64),
             multiline=True,
             align="center",
-            color=(150, 150, 150, 255),
+            color=(166, 184, 202, 255),
             batch=self.batch,
         )
 
@@ -496,7 +503,7 @@ class SettingsMenu:
         
         self.title = pyglet.text.Label(
             "SETTINGS",
-            font_name="Segoe UI",
+            font_name=UI_FONT_HEAD,
             font_size=28,
             x=width // 2,
             y=height - 40,
@@ -508,7 +515,7 @@ class SettingsMenu:
         
         self.difficulty_label = pyglet.text.Label(
             "Difficulty",
-            font_name="Segoe UI",
+            font_name=UI_FONT_BODY,
             font_size=16,
             x=150,
             y=height // 2 + 100,
@@ -520,7 +527,7 @@ class SettingsMenu:
         
         self.window_label = pyglet.text.Label(
             "Display Mode",
-            font_name="Segoe UI",
+            font_name=UI_FONT_BODY,
             font_size=16,
             x=0,
             y=height // 2 - 10,
@@ -531,7 +538,7 @@ class SettingsMenu:
         )
         self.menu_note = pyglet.text.Label(
             "Resolution and arena scale update instantly.",
-            font_name="Segoe UI",
+            font_name=UI_FONT_META,
             font_size=11,
             x=width // 2,
             y=height - 72,
@@ -839,160 +846,13 @@ class SettingsMenu:
         self.batch.draw()
 
 
-class UpgradeMenu:
-    """In-run upgrade selection menu (shown every few waves)."""
-
-    def __init__(self, width: int, height: int):
-        self.screen_width = width
-        self.screen_height = height
-        self.batch = pyglet.graphics.Batch()
-
-        self.overlay = shapes.Rectangle(0, 0, width, height, color=(0, 0, 0), batch=self.batch)
-        self.overlay.opacity = 175
-
-        self._panel_border = shapes.Rectangle(0, 0, 1, 1, color=(130, 160, 230), batch=self.batch)
-        self._panel_border.opacity = 40
-        self._panel = shapes.Rectangle(0, 0, 1, 1, color=(14, 18, 28), batch=self.batch)
-        self._panel.opacity = 210
-        self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
-        self._panel_shine.opacity = 14
-
-        self.title = pyglet.text.Label(
-            "CHOOSE AN UPGRADE",
-            font_name="Segoe UI",
-            font_size=26,
-            x=width // 2,
-            y=height - 80,
-            anchor_x="center",
-            anchor_y="center",
-            color=(230, 240, 255, 255),
-            batch=self.batch,
-        )
-        self.subtitle = pyglet.text.Label(
-            "Every 3 waves. Run-only bonuses.",
-            font_name="Segoe UI",
-            font_size=12,
-            x=width // 2,
-            y=height - 110,
-            anchor_x="center",
-            anchor_y="center",
-            color=(165, 170, 185, 255),
-            batch=self.batch,
-        )
-
-        self.option_buttons: list[MenuButton] = [
-            MenuButton(0, 0, 320, 56, "Option 1", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)),
-            MenuButton(0, 0, 320, 56, "Option 2", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)),
-            MenuButton(0, 0, 320, 56, "Option 3", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)),
-        ]
-        for btn in self.option_buttons:
-            btn.ensure(self.batch)
-
-        self.option_desc: list[pyglet.text.Label] = []
-        for _ in range(3):
-            self.option_desc.append(
-                pyglet.text.Label(
-                    "",
-                    font_name="Segoe UI",
-                    font_size=11,
-                    x=0,
-                    y=0,
-                    anchor_x="left",
-                    anchor_y="center",
-                    color=(170, 175, 190, 255),
-                    batch=self.batch,
-                )
-            )
-
-        self._options: list[dict] = []
-        self.resize(width, height)
-
-    def set_options(self, options: list[dict]) -> None:
-        self._options = list(options or [])[:3]
-        while len(self._options) < 3:
-            self._options.append({"key": "", "title": "--", "desc": ""})
-        for i, opt in enumerate(self._options):
-            self.option_buttons[i].text = str(opt.get("title", "--"))
-            self.option_desc[i].text = str(opt.get("desc", ""))
-            self.option_buttons[i].sync()
-
-    def resize(self, width: int, height: int):
-        self.screen_width = width
-        self.screen_height = height
-        self.overlay.width = width
-        self.overlay.height = height
-
-        cx = width // 2
-        cy = height // 2
-        scale = min(_ui_scale(width, height), 1.55)
-
-        panel_w = min(int(width * 0.86), int(760 * scale))
-        panel_h = int(360 * scale)
-        panel_x = cx - panel_w // 2
-        panel_y = cy - panel_h // 2
-
-        self._panel_border.x = panel_x - 3
-        self._panel_border.y = panel_y - 3
-        self._panel_border.width = panel_w + 6
-        self._panel_border.height = panel_h + 6
-        self._panel.x = panel_x
-        self._panel.y = panel_y
-        self._panel.width = panel_w
-        self._panel.height = panel_h
-        self._panel_shine.x = panel_x + 4
-        self._panel_shine.y = panel_y + panel_h - max(8, int(20 * scale))
-        self._panel_shine.width = panel_w - 8
-        self._panel_shine.height = max(6, int(14 * scale))
-
-        self.title.x = cx
-        self.title.y = panel_y + panel_h - int(55 * scale)
-        self.title.font_size = max(16, int(28 * scale))
-        self.subtitle.x = cx
-        self.subtitle.y = self.title.y - int(28 * scale)
-        self.subtitle.font_size = max(10, int(12 * scale))
-
-        btn_w = min(int(panel_w * 0.78), int(520 * scale))
-        btn_h = int(72 * scale)
-        gap = int(16 * scale)
-        start_y = self.subtitle.y - int(45 * scale) - btn_h
-
-        for i, btn in enumerate(self.option_buttons):
-            btn.width = btn_w
-            btn.height = btn_h
-            btn.font_size = max(12, int(17 * scale))
-            btn.x = cx - btn_w // 2
-            btn.y = start_y - i * (btn_h + gap)
-            btn.sync()
-
-            self.option_desc[i].x = btn.x + int(12 * scale)
-            self.option_desc[i].y = btn.y + int(btn_h * 0.28)
-            self.option_desc[i].font_size = max(9, int(11 * scale))
-
-    def on_mouse_motion(self, x: float, y: float):
-        for btn in self.option_buttons:
-            btn.is_hovered = btn.contains_point(x, y)
-            btn.sync()
-
-    def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
-        if button != pyglet.window.mouse.LEFT:
-            return None
-        for i, btn in enumerate(self.option_buttons):
-            if btn.contains_point(x, y):
-                key = str(self._options[i].get("key", ""))
-                return key or None
-        return None
-
-    def draw(self):
-        self.batch.draw()
-
-
 class PauseMenu:
     """Pause menu screen."""
     
     def __init__(self, width: int, height: int):
         self.batch = pyglet.graphics.Batch()
-        self.overlay = shapes.Rectangle(0, 0, width, height, color=(0, 0, 0), batch=self.batch)
-        self.overlay.opacity = 150
+        self.overlay = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
+        self.overlay.opacity = 172
 
         self.buttons: List[MenuButton] = [
             MenuButton(0, 0, 160, 50, "Resume", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)),
@@ -1003,13 +863,13 @@ class PauseMenu:
 
         self.title = pyglet.text.Label(
             "PAUSED",
-            font_name="Segoe UI",
+            font_name=UI_FONT_HEAD,
             font_size=32,
             x=0,
             y=0,
             anchor_x="center",
             anchor_y="center",
-            color=(255, 255, 255, 255),
+            color=(226, 238, 255, 255),
             batch=self.batch,
         )
         self.resize(width, height)
@@ -1068,8 +928,8 @@ class GameOverMenu:
     
     def __init__(self, width: int, height: int):
         self.batch = pyglet.graphics.Batch()
-        self.overlay = shapes.Rectangle(0, 0, width, height, color=(20, 0, 0), batch=self.batch)
-        self.overlay.opacity = 200
+        self.overlay = shapes.Rectangle(0, 0, width, height, color=(22, 5, 10), batch=self.batch)
+        self.overlay.opacity = 216
 
         self.buttons: List[MenuButton] = [
             MenuButton(0, 0, 160, 50, "Try Again", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)),
@@ -1080,19 +940,19 @@ class GameOverMenu:
 
         self.title = pyglet.text.Label(
             "GAME OVER",
-            font_name="Segoe UI",
+            font_name=UI_FONT_HEAD,
             font_size=40,
             x=0,
             y=0,
             anchor_x="center",
             anchor_y="center",
-            color=(255, 50, 50, 255),
+            color=(255, 128, 146, 255),
             batch=self.batch,
         )
 
         self.score_label = pyglet.text.Label(
             "Reached Wave 1",
-            font_name="Segoe UI",
+            font_name=UI_FONT_BODY,
             font_size=20,
             x=0,
             y=0,

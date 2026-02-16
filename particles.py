@@ -43,7 +43,7 @@ class Particle:
 class ParticleSystem:
     """Manages particles and renders them with a dedicated Batch."""
 
-    def __init__(self, _unused_batch=None):
+    def __init__(self):
         self.particles: List[Particle] = []
         self.batch = pyglet.graphics.Batch()
 

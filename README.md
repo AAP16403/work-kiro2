@@ -1,163 +1,77 @@
-# Isometric Room Survival - Game Structure
+# PLOUTO (Stellar Survival)
 
-## Project Organization
+Fast-paced isometric wave survival built with `pyglet`.
 
-The game code is now organized into separate, modular files for better maintainability and clarity.
+## Current Highlights
 
-### Core Files:
+- Fullscreen startup and scaled modern menus
+- Enemy squad coordination and role-based formation behavior
+- Boss waves every 5 waves, with rebalanced boss patterns
+- Ultra system (right-click) with variant cycling and spawn pity rules
+- Boss reward RPG flow:
+  - 3 temporary card choices (2-3 waves)
+  - then 3 permanent run-boost choices
 
-#### **config.py**
-- All game configuration constants
-- Screen dimensions (SCREEN_W, SCREEN_H, FPS)
-- Game balance values (PLAYER_SPEED, PLAYER_HP, PLAYER_DAMAGE, etc.)
-- Colors for UI and environment
-- Isometric projection settings (ISO_SCALE_X, ISO_SCALE_Y)
-
-#### **utils.py**
-- `Vec2` class - 2D vector math with operations
-- Isometric conversion functions: `to_iso()`, `iso_to_world()`
-- Helper functions: `clamp_to_room()`, `random_spawn_edge()`, `dist()`
-
-#### **player.py**
-- `Player` dataclass with stats and controls
-- Player attributes: position, HP, shield, speed, damage, fire_rate
-- Timed powerups (laser/vortex) and current weapon
-
-#### **enemy.py**
-- `Enemy` dataclass with behavior types
-- `update_enemy()` function for AI behavior
-- Enemy types: "chaser", "ranged", "charger", "swarm", "tank", "spitter", "flyer", "engineer"
-- Bosses: "boss_thunder", "boss_laser", "boss_trapmaster", "boss_swarmqueen", "boss_brute"
-  - Bosses use phases + personality with mixed bullet patterns
-
-#### **weapons.py**
-- Weapon definitions and wave-based weapon selection
-- Projectile spawning per weapon type
-- Effective fire-rate calculation (weapon base rate + player fire-rate upgrades)
-
-#### **projectile.py**
-- `Projectile` dataclass for bullets
-- Attributes: position, velocity, damage, TTL, owner, projectile_type
-
-#### **powerup.py**
-- `PowerUp` dataclass for collectible items
-- `apply_powerup()` function to apply effects to player
-- Types: "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon"
-
-#### **hazards.py**
-- Trap and boss hazards (laser beams, thunder lines)
-
-#### **level.py**
-- `GameState` dataclass - central game state
-- `spawn_wave()` - creates enemy waves with increasing difficulty
-- `maybe_spawn_powerup()` - random powerup spawning
-- Boss wave every 5 waves and boss loot drops
-
-#### **particles.py**
-- Hit/muzzle/death/pickup particles and special effects (laser/vortex)
-
-#### **menu.py**
-- Main menu, settings, pause, and game over menus
-
-#### **map.py**
-- `Room` class - manages the game map
-- Isometric floor rendering with grid
-- Handles background and environment visuals
-- Fixed: Uses `thickness` instead of deprecated `width` parameter
-
-#### **visuals.py**
-- `GroupCache` class - manages rendering depth sorting
-- `RenderHandle` class - manages visual objects
-- `Visuals` class - complete rendering system
-  - Player sprite creation and updates
-  - Enemy sprite management (color-coded by type)
-  - Projectile rendering
-  - PowerUp visual effects with symbols
-
-#### **game.py** (Main Game)
-- `Game` class inheriting from `pyglet.window.Window`
-- Game loop and event handling
-- Input processing (keyboard, mouse)
-- Collision detection
-- Game state updates
-- Rendering coordination
-- Entry point: `main()` function
-
-#### **Untitled-1.py** (Launcher)
-- Thin entrypoint that calls `game.main()` (kept for a stable run/build filename)
-
-## Running the Game
-
-```bash
-python Untitled-1.py
-```
-
-## Build a Windows executable (.exe)
-
-Use PyInstaller to bundle the game into a distributable Windows build.
-
-1) Create a venv (once):
+## Run (Dev)
 
 ```powershell
 py -m venv .venv
-```
-
-2) Install dependencies:
-
-```powershell
 .\.venv\Scripts\python.exe -m pip install -U pip pyglet pyinstaller
+.\.venv\Scripts\python.exe main.py
 ```
 
-3) Build:
+Or:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build_exe.ps1
+py main.py
 ```
 
-Or run the one-step script:
+## Controls
+
+- `WASD` / Arrow keys: move
+- Hold `LMB`: fire
+- `RMB`: Ultra (needs Ultra charge)
+- `Q`: Ultra (keyboard shortcut)
+- `ESC`: pause/menu
+
+## Boss Rewards (RPG)
+
+After each boss kill:
+
+1. Pick one **Temporary Card** (lasts 2-3 waves)
+2. Pick one **Permanent Run Boost** (lasts until run ends)
+
+Temporary effects auto-expire by wave count. Permanent effects stack for the current run only.
+
+## Build Windows EXE
+
+Use one-step build:
 
 ```bat
 build_all.bat
 ```
 
-Output:
-- Folder: `.\dist\Kiro2Game\`
-- Executable: `.\dist\Kiro2Game\Kiro2Game.exe`
+What it does:
 
-## Controls
+1. Ensures `.venv` exists
+2. Installs/updates `pip`, `pyglet`, `pyinstaller`
+3. Runs syntax validation
+4. Builds with PyInstaller (`kiro2_game.spec`)
+5. Creates `dist\Plouto.zip`
 
-- **WASD** or **Arrow Keys** - Move around the room
-- **Hold Left Mouse Button** - Shoot at enemies
-- **Right Mouse Button** - Use Ultra ability (requires Ultra powerup)
+Outputs:
 
-## Run Upgrades
+- Folder: `dist\Plouto\`
+- EXE: `dist\Plouto\Plouto.exe`
+- ZIP: `dist\Plouto.zip`
 
-- After clearing every **3 waves**, you'll be prompted to pick **1** upgrade.
-- These upgrades last for the **current run only**.
+## Important Files
 
-## Game Features
-
-- **Isometric Perspective** - Depth-sorted rendering
-- **Wave-Based Combat** - Difficulty increases per wave
-- **Enemy Variety + Boss Waves** - Bosses appear every 5 waves with distinct patterns
-- **Weapon System** - Different weapon types with distinct projectile patterns
-- **Powerups**:
-  - Heal (green +) - restores HP
-  - Damage (red !) - increases attack power
-  - Speed (blue >) - increases movement speed
-  - Fire Rate (yellow *) - faster shooting
-  - Shield (cyan O) - temporary extra HP buffer
-  - Laser (magenta =) - short-duration beam weapon
-  - Vortex (purple @) - damaging aura
-  - Weapon (white/blue W) - swaps to a new gun (bosses always drop one)
-  - Ultra (gold U) - grants an Ultra charge (right-click), with cooldown
-
-## Dependencies
-
-- pyglet 2.1.13+ (for rendering and windowing)
-
-## Error Fixes Applied
-
-1. **Changed `OrderedGroup` import** - Updated to use `Group` from `pyglet.graphics`
-2. **Fixed `Line.thickness` parameter** - Changed from deprecated `width` to `thickness`
-3. **Resolved circular imports** - Used TYPE_CHECKING for forward references
+- `main.py`: entry point
+- `game.py`: game loop, FSM states, RPG reward integration
+- `rpg.py`: boss reward menu and card selection UI
+- `enemy.py`: enemy AI and boss behavior logic
+- `level.py`: wave/boss spawn rules, powerup spawn logic
+- `menu.py`: main/settings/pause/game-over menus
+- `kiro2_game.spec`: PyInstaller config
+- `build_all.bat`: full build script

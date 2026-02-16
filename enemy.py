@@ -54,10 +54,6 @@ def _perp(v: Vec2) -> Vec2:
     return Vec2(-v.y, v.x)
 
 
-def _clamp(x: float, a: float, b: float) -> float:
-    return a if x < a else b if x > b else x
-
-
 def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed: float, mult: float = 0.75) -> Vec2:
     d = (target_pos - shooter_pos).length()
     t = (d / max(1.0, float(proj_speed))) * float(mult)
@@ -155,6 +151,42 @@ def _cycle_gun(enemy: Enemy, guns: list[str]) -> str:
     idx = int(enemy.ai.get("gun_idx", 0))
     enemy.ai["gun_idx"] = idx + 1
     return str(guns[idx % len(guns)])
+
+
+def _difficulty_mult(state) -> float:
+    d = str(getattr(state, "difficulty", "normal")).lower()
+    if d == "easy":
+        return 0.88
+    if d == "hard":
+        return 1.12
+    return 1.0
+
+
+def _boss_damage(state, base: float, wave_scale: float = 0.22, cap: int = 32) -> int:
+    dmg = (float(base) + float(getattr(state, "wave", 1)) * float(wave_scale)) * _difficulty_mult(state)
+    return max(1, min(int(round(dmg)), int(cap)))
+
+
+def _boss_cd(state, base: float, phase: int, floor: float, persona: str = "aggressive") -> float:
+    cd = float(base)
+    if phase == 1:
+        cd *= 0.92
+    elif phase >= 2:
+        cd *= 0.84
+    if str(persona) == "aggressive":
+        cd *= 0.95
+    d = str(getattr(state, "difficulty", "normal")).lower()
+    if d == "easy":
+        cd *= 1.08
+    elif d == "hard":
+        cd *= 0.92
+    return max(float(floor), cd)
+
+
+def _boss_adds_cap(state, bonus: int) -> int:
+    # Keep boss encounters tense without flooding the room.
+    base = int(getattr(state, "max_enemies", 12))
+    return max(base + 1, min(base + int(bonus), base + 6))
 
 
 def _behavior_key(enemy: Enemy) -> str:
@@ -519,53 +551,47 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 span = config.ROOM_RADIUS * 2.2
                 start = anchor - dirv * span
                 end = anchor + dirv * span
-                th_dmg = 14 + state.wave // 5
-                state.thunders.append(ThunderLine(start=start, end=end, damage=th_dmg, thickness=14.0, warn=0.55, ttl=0.16))
+                th_dmg = _boss_damage(state, base=11.5, wave_scale=0.2, cap=24)
+                state.thunders.append(ThunderLine(start=start, end=end, damage=th_dmg, thickness=13.0, warn=0.64, ttl=0.18))
 
                 # Personality + phases: mix in bullet patterns. Swirl/rings are rare to keep difficulty fair.
-                proj_speed = 195.0 + state.wave * 1.8
-                dmg = 5 + state.wave // 4
+                proj_speed = 190.0 + state.wave * 1.55
+                dmg = _boss_damage(state, base=4.0, wave_scale=0.12, cap=14)
                 aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.8)
                 gun = _cycle_gun(enemy, ["plasma", "bullet", "spread"])
                 if phase == 0:
                     if persona != "cautious":
-                        _fire_fan(state, enemy.pos, aim, count=4, spread_deg=50.0, speed=proj_speed, damage=dmg, ttl=2.5, projectile_type=gun)
+                        _fire_fan(state, enemy.pos, aim, count=4, spread_deg=52.0, speed=proj_speed, damage=dmg, ttl=2.55, projectile_type=gun)
                 elif phase == 1:
-                    _fire_fan(state, enemy.pos, aim, count=5, spread_deg=62.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type=gun)
+                    _fire_fan(state, enemy.pos, aim, count=5, spread_deg=64.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type=gun)
                 else:
-                    swirl_chance = 0.12
+                    swirl_chance = 0.08
                     if persona == "trickster":
-                        swirl_chance = 0.25
+                        swirl_chance = 0.16
                     if random.random() < swirl_chance:
                         ring_gun = _cycle_gun(enemy, ["plasma", "bullet"])
                         _fire_ring(
                             state,
                             enemy.pos,
                             count=8,
-                            speed=proj_speed * 0.88,
+                            speed=proj_speed * 0.84,
                             damage=dmg + 1,
-                            ttl=2.55,
+                            ttl=2.5,
                             start_deg=enemy.t * 35.0,
                             projectile_type=ring_gun,
                         )
                     else:
-                        _fire_fan(state, enemy.pos, aim, count=7, spread_deg=76.0, speed=proj_speed, damage=dmg + 2, ttl=2.6, projectile_type=gun)
+                        _fire_fan(state, enemy.pos, aim, count=6, spread_deg=74.0, speed=proj_speed, damage=dmg + 2, ttl=2.6, projectile_type=gun)
 
                 # Henchmen: spawn a couple of ranged adds sometimes.
-                adds_cap = getattr(state, "max_enemies", 12) + 2
-                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.22:
+                adds_cap = _boss_adds_cap(state, 2)
+                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.16:
                     ang = random.uniform(0, math.tau)
                     pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(45, 80)
                     state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=50 + state.wave * 1.25, behavior="ranged"))
 
-                base_cd = 1.95 - state.wave * 0.015
-                if phase == 1:
-                    base_cd *= 0.95
-                elif phase == 2:
-                    base_cd *= 0.9
-                if persona == "aggressive":
-                    base_cd *= 0.95
-                enemy.attack_cd = max(0.9, base_cd)
+                base_cd = 2.05 - state.wave * 0.009
+                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=0.98, persona=persona)
             return
 
         if enemy.behavior == "boss_laser":
@@ -589,15 +615,15 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 beam_len = config.ROOM_RADIUS * 2.0
                 start = Vec2(enemy.pos.x, enemy.pos.y)
                 end = start + dir_to * beam_len
-                beam_dmg = 16 + state.wave // 3
+                beam_dmg = _boss_damage(state, base=12.0, wave_scale=0.22, cap=26)
                 state.lasers.append(
                     LaserBeam(
                         start=start,
                         end=end,
                         damage=beam_dmg,
-                        thickness=12.0,
-                        warn=0.42,
-                        ttl=0.10,
+                        thickness=11.0,
+                        warn=0.5,
+                        ttl=0.11,
                         color=(255, 120, 255),
                         owner="enemy",
                     )
@@ -611,37 +637,33 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                             LaserBeam(
                                 start=start,
                                 end=start + d2 * beam_len,
-                                damage=12 + state.wave // 3,
-                                thickness=9.0,
-                                warn=0.46 if phase == 1 else 0.4,
-                                ttl=0.09,
+                                damage=_boss_damage(state, base=9.0, wave_scale=0.18, cap=22),
+                                thickness=8.5,
+                                warn=0.56 if phase == 1 else 0.5,
+                                ttl=0.1,
                                 color=(255, 120, 255),
                                 owner="enemy",
                             )
                         )
 
                 # Mix-in: shotgun bursts later in the fight (or for tricksters).
-                if (phase == 2 and random.random() < 0.45) or (persona == "trickster" and phase >= 1 and random.random() < 0.35):
-                    proj_speed = 235.0 + state.wave * 2.2
-                    dmg = 5 + state.wave // 5
+                if (phase == 2 and random.random() < 0.3) or (persona == "trickster" and phase >= 1 and random.random() < 0.24):
+                    proj_speed = 225.0 + state.wave * 1.8
+                    dmg = _boss_damage(state, base=4.0, wave_scale=0.1, cap=12)
                     aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.75)
                     pellets = 4 if phase == 1 else 6
                     spread = 66.0 if phase == 1 else 76.0
                     _fire_fan(state, enemy.pos, aim, count=pellets, spread_deg=spread, speed=proj_speed, damage=dmg, ttl=2.5, projectile_type="plasma" if persona == "trickster" else "bullet")
 
                 # Henchmen: occasional fast chasers.
-                adds_cap = getattr(state, "max_enemies", 12) + 2
-                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.15:
+                adds_cap = _boss_adds_cap(state, 2)
+                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.1:
                     ang = random.uniform(0, math.tau)
                     pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(50, 90)
                     state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=85 + state.wave * 2.0, behavior="chaser"))
 
-                base_cd = 1.15 - state.wave * 0.015
-                if phase == 2:
-                    base_cd *= 0.92
-                if persona == "aggressive":
-                    base_cd *= 0.95
-                enemy.attack_cd = max(0.5, base_cd)
+                base_cd = 1.32 - state.wave * 0.01
+                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=0.72, persona=persona)
             return
 
         if enemy.behavior == "boss_trapmaster":
@@ -664,39 +686,45 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 if not hasattr(state, "traps"):
                     state.traps = []
                 # Ring of traps around the player.
-                n = 4
-                r = 85
+                n = 3 if phase == 0 else 4 if phase == 1 else 5
+                r = 82 if phase < 2 else 92
                 base_ang = random.uniform(0, math.tau)
                 for i in range(n):
                     ang = base_ang + (i / n) * math.tau
                     pos = player_pos + Vec2(math.cos(ang), math.sin(ang)) * r
-                    _append_trap_capped(state, Trap(pos=pos, radius=30.0, damage=18, ttl=9.0, armed_delay=0.55, kind="spike"))
+                    _append_trap_capped(
+                        state,
+                        Trap(
+                            pos=pos,
+                            radius=29.0,
+                            damage=_boss_damage(state, base=12.5, wave_scale=0.2, cap=25),
+                            ttl=7.6,
+                            armed_delay=0.6,
+                            kind="spike",
+                        ),
+                    )
 
                 # Phases: add shrapnel bursts after trap placement (no swirl/ring spam).
-                proj_speed = 200.0 + state.wave * 2.0
-                dmg = 7 + state.wave // 4
+                proj_speed = 195.0 + state.wave * 1.7
+                dmg = _boss_damage(state, base=5.0, wave_scale=0.14, cap=16)
                 aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.85)
                 if phase == 0:
                     if persona != "cautious":
-                        _fire_fan(state, enemy.pos, aim, count=5, spread_deg=60.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type="spread")
+                        _fire_fan(state, enemy.pos, aim, count=4, spread_deg=56.0, speed=proj_speed, damage=dmg, ttl=2.55, projectile_type="spread")
                 elif phase == 1:
-                    _fire_fan(state, enemy.pos, aim, count=7, spread_deg=85.0, speed=proj_speed, damage=dmg + 1, ttl=2.7, projectile_type="spread")
+                    _fire_fan(state, enemy.pos, aim, count=6, spread_deg=76.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="spread")
                 else:
-                    _fire_fan(state, enemy.pos, aim, count=9, spread_deg=98.0, speed=proj_speed, damage=dmg + 2, ttl=2.65, projectile_type="spread")
+                    _fire_fan(state, enemy.pos, aim, count=8, spread_deg=92.0, speed=proj_speed, damage=dmg + 2, ttl=2.65, projectile_type="spread")
                     if persona in ("aggressive", "trickster"):
-                        _fire_fan(state, enemy.pos, _perp(aim), count=5, spread_deg=46.0, speed=proj_speed * 0.95, damage=max(1, dmg), ttl=2.45, projectile_type="spread")
+                        _fire_fan(state, enemy.pos, _perp(aim), count=4, spread_deg=42.0, speed=proj_speed * 0.92, damage=max(1, dmg), ttl=2.4, projectile_type="spread")
 
                 # Henchmen: engineers join the fight.
-                adds_cap = getattr(state, "max_enemies", 12) + 2
-                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.2:
+                adds_cap = _boss_adds_cap(state, 2)
+                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < 0.14:
                     pos = enemy.pos + Vec2(random.uniform(-70, 70), random.uniform(-70, 70))
                     state.enemies.append(Enemy(pos=pos, hp=22 + state.wave * 3, speed=52 + state.wave * 1.2, behavior="engineer"))
-                base_cd = 2.2 - state.wave * 0.03
-                if phase >= 1:
-                    base_cd *= 0.9
-                if persona == "aggressive":
-                    base_cd *= 0.92
-                enemy.attack_cd = max(1.0, base_cd)
+                base_cd = 2.35 - state.wave * 0.012
+                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=1.05, persona=persona)
             return
 
         if enemy.behavior == "boss_swarmqueen":
@@ -711,23 +739,26 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
 
             enemy.attack_cd -= dt
             if enemy.attack_cd <= 0.0:
-                # Summon a few swarm enemies (capped to avoid runaway difficulty/perf).
-                adds_cap = getattr(state, "max_enemies", 12) + 6
+                # Summon swarms with phase-based pressure instead of flat spam.
+                adds_cap = _boss_adds_cap(state, 4)
                 slots = max(0, int(adds_cap) - len(getattr(state, "enemies", [])))
-                for _ in range(min(2, slots)):
-                    ang = random.uniform(0, math.tau)
-                    pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(30, 60)
-                    state.enemies.append(Enemy(pos=pos, hp=12 + state.wave * 2, speed=92 + state.wave * 1.4, behavior="swarm"))
+                summon_n = 1 if phase < 2 else 2
+                summon_chance = 0.62 if phase == 0 else 0.72 if phase == 1 else 0.84
+                if slots > 0 and random.random() < summon_chance:
+                    for _ in range(min(summon_n, slots)):
+                        ang = random.uniform(0, math.tau)
+                        pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * random.uniform(30, 60)
+                        state.enemies.append(Enemy(pos=pos, hp=12 + state.wave * 2, speed=90 + state.wave * 1.2, behavior="swarm"))
 
                 # Spit a fan of shots.
-                proj_speed = 210.0 + state.wave * 2.5
-                dmg = 8 + state.wave // 3
+                proj_speed = 205.0 + state.wave * 1.9
+                dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)
                 if phase == 0:
                     for off in (-24, -8, 8, 24):
                         vel = _rotate(dir_to, off) * proj_speed
-                        state.projectiles.append(Projectile(enemy.pos, vel, dmg, ttl=2.6, owner="enemy", projectile_type="bullet"))
+                        state.projectiles.append(Projectile(enemy.pos, vel, dmg, ttl=2.55, owner="enemy", projectile_type="bullet"))
                 elif phase == 1:
-                    _fire_fan(state, enemy.pos, dir_to, count=7, spread_deg=95.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type="spread")
+                    _fire_fan(state, enemy.pos, dir_to, count=6, spread_deg=84.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type="spread")
                     if persona == "trickster":
                         # Extra side-shot.
                         _fire_fan(state, enemy.pos, _perp(dir_to), count=3, spread_deg=24.0, speed=proj_speed * 0.95, damage=max(1, dmg - 1), ttl=2.4, projectile_type="spread")
@@ -738,46 +769,57 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     base_dir = Vec2(math.cos(math.radians(ang)), math.sin(math.radians(ang)))
 
                     gun = _cycle_gun(enemy, ["bullet", "spread", "plasma"])
-                    ring_n = 10
+                    ring_n = 9
                     ring_speed = proj_speed * 0.92
                     ring_dmg = dmg + 2
                     if gun == "plasma":
-                        ring_n = 8
+                        ring_n = 7
                         ring_speed = proj_speed * 0.86
                         ring_dmg = dmg + 3
                     elif gun == "spread":
-                        ring_n = 12
+                        ring_n = 10
                         ring_speed = proj_speed * 0.98
                         ring_dmg = dmg + 1
 
                     _fire_ring(state, enemy.pos, count=ring_n, speed=ring_speed, damage=ring_dmg, ttl=2.7, start_deg=ang, projectile_type=gun)
-                    _fire_fan(state, enemy.pos, base_dir, count=5, spread_deg=45.0, speed=proj_speed, damage=dmg + 1, ttl=2.6, projectile_type=gun)
+                    _fire_fan(state, enemy.pos, base_dir, count=4, spread_deg=40.0, speed=proj_speed, damage=dmg + 1, ttl=2.55, projectile_type=gun)
 
-                base_cd = 2.0 - state.wave * 0.02
-                if phase == 2:
-                    base_cd *= 0.82
-                if persona == "aggressive":
-                    base_cd *= 0.9
-                enemy.attack_cd = max(0.85, base_cd)
+                base_cd = 2.1 - state.wave * 0.01
+                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=0.92, persona=persona)
             return
 
         if enemy.behavior == "boss_brute":
             # Big charges and slam zones.
             dvec = player_pos - enemy.pos
-            d = dvec.length()
-            dir_to = dvec.normalized() if d > 1e-6 else Vec2(1, 0)
+            dir_to = dvec.normalized() if dvec.length() > 1e-6 else Vec2(1, 0)
             phase_boss = int(enemy.ai.get("phase", 0))
             persona = str(enemy.ai.get("persona", "aggressive"))
-            phase = enemy.t % 2.0
-            if phase < 0.55:
-                enemy.pos = enemy.pos + dir_to * enemy.speed * dt * 2.6
-                if phase_boss >= 1 and random.random() < 0.06:
-                    proj_speed = 230.0 + state.wave * 2.0
-                    dmg = 8 + state.wave // 3
-                    aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.7)
-                    _fire_fan(state, enemy.pos, aim, count=3 if phase_boss == 1 else 5, spread_deg=38.0, speed=proj_speed, damage=dmg, ttl=2.4)
+            if "brute_mode" not in enemy.ai:
+                enemy.ai["brute_mode"] = 0  # 0 recover, 1 charge
+            if "brute_mode_t" not in enemy.ai:
+                enemy.ai["brute_mode_t"] = 0.9
+            enemy.ai["brute_mode_t"] = float(enemy.ai["brute_mode_t"]) - dt
+            if enemy.ai["brute_mode_t"] <= 0.0:
+                if int(enemy.ai.get("brute_mode", 0)) == 0:
+                    enemy.ai["brute_mode"] = 1
+                    enemy.ai["brute_mode_t"] = 0.58 + random.uniform(0.0, 0.14)
+                    enemy.ai["charge_dir"] = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed=260.0, mult=0.52)
+                else:
+                    enemy.ai["brute_mode"] = 0
+                    enemy.ai["brute_mode_t"] = 0.85 + random.uniform(0.0, 0.35)
+
+            if int(enemy.ai.get("brute_mode", 0)) == 1:
+                cdir = enemy.ai.get("charge_dir", dir_to)
+                move = (cdir * 0.86 + dir_to * 0.4).normalized()
+                enemy.pos = enemy.pos + move * enemy.speed * dt * 2.1
+                if phase_boss >= 1 and random.random() < 0.04:
+                    proj_speed = 220.0 + state.wave * 1.5
+                    dmg = _boss_damage(state, base=5.0, wave_scale=0.14, cap=15)
+                    aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.66)
+                    _fire_fan(state, enemy.pos, aim, count=3 if phase_boss == 1 else 4, spread_deg=34.0, speed=proj_speed, damage=dmg, ttl=2.35)
             else:
-                enemy.pos = enemy.pos + dir_to * enemy.speed * dt * 0.6
+                strafe = Vec2(-dir_to.y, dir_to.x)
+                enemy.pos = enemy.pos + (dir_to * 0.58 + strafe * 0.32).normalized() * enemy.speed * dt * 0.7
 
             enemy.attack_cd -= dt
             if enemy.attack_cd <= 0.0:
@@ -785,32 +827,29 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 if not hasattr(state, "traps"):
                     state.traps = []
                 # Telegraph then strike.
-                _append_trap_capped(state, Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=80.0, damage=0, ttl=0.8, armed_delay=0.35, kind="slam_warn"))
-                _append_trap_capped(state, Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=70.0, damage=26, ttl=0.55, armed_delay=0.35, kind="slam"))
+                slam_dmg = _boss_damage(state, base=16.0, wave_scale=0.26, cap=30)
+                _append_trap_capped(state, Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=82.0, damage=0, ttl=0.92, armed_delay=0.46, kind="slam_warn"))
+                _append_trap_capped(state, Trap(pos=Vec2(enemy.pos.x, enemy.pos.y), radius=72.0, damage=slam_dmg, ttl=0.58, armed_delay=0.46, kind="slam"))
                 if phase_boss >= 1:
                     # Slam follow-up: heavy cone, not a full swirl ring.
-                    proj_speed = 200.0 + state.wave * 1.8
-                    dmg = 7 + state.wave // 4
+                    proj_speed = 194.0 + state.wave * 1.5
+                    dmg = _boss_damage(state, base=5.5, wave_scale=0.12, cap=15)
                     aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.6)
-                    pellets = 7 if phase_boss == 1 else 9
+                    pellets = 6 if phase_boss == 1 else 8
                     _fire_fan(
                         state,
                         Vec2(enemy.pos.x, enemy.pos.y),
                         aim,
                         count=pellets,
-                        spread_deg=74.0,
+                        spread_deg=66.0,
                         speed=proj_speed,
                         damage=dmg + (1 if persona == "aggressive" else 0),
-                        ttl=2.65,
+                        ttl=2.55,
                         projectile_type="spread",
                     )
 
-                base_cd = 2.0 - state.wave * 0.02
-                if phase_boss == 2:
-                    base_cd *= 0.85
-                if persona == "aggressive":
-                    base_cd *= 0.92
-                enemy.attack_cd = max(0.95, base_cd)
+                base_cd = 2.2 - state.wave * 0.01
+                enemy.attack_cd = _boss_cd(state, base_cd, phase_boss, floor=1.02, persona=persona)
             return
 
         if enemy.behavior == "boss_abyss_gaze":
@@ -836,57 +875,51 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 if not hasattr(state, "lasers"):
                     state.lasers = []
 
-                proj_speed = 235.0 + state.wave * 2.3
-                dmg = 9 + state.wave // 3
+                proj_speed = 225.0 + state.wave * 1.8
+                dmg = _boss_damage(state, base=6.5, wave_scale=0.15, cap=18)
                 aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.72)
 
                 # Main curtain/fan pattern.
                 if phase == 0:
-                    _fire_fan(state, enemy.pos, aim, count=7, spread_deg=78.0, speed=proj_speed, damage=dmg, ttl=2.65, projectile_type="plasma")
+                    _fire_fan(state, enemy.pos, aim, count=6, spread_deg=72.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type="plasma")
                 elif phase == 1:
-                    _fire_fan(state, enemy.pos, aim, count=9, spread_deg=92.0, speed=proj_speed, damage=dmg + 1, ttl=2.7, projectile_type="plasma")
-                    _fire_ring(state, enemy.pos, count=10, speed=proj_speed * 0.84, damage=max(1, dmg - 1), ttl=2.5, start_deg=enemy.t * 30.0, projectile_type="bullet")
+                    _fire_fan(state, enemy.pos, aim, count=7, spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="plasma")
+                    _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.45, start_deg=enemy.t * 30.0, projectile_type="bullet")
                 else:
                     # Dense forward curtain: multiple narrow fans to force lane changes.
-                    for off in (-20.0, -8.0, 8.0, 20.0):
+                    for off in (-18.0, -6.0, 6.0, 18.0):
                         a = _rotate(aim, off)
-                        _fire_fan(state, enemy.pos, a, count=5, spread_deg=30.0, speed=proj_speed * 1.02, damage=dmg + 1, ttl=2.55, projectile_type="plasma")
-                    _fire_ring(state, enemy.pos, count=12, speed=proj_speed * 0.86, damage=dmg, ttl=2.6, start_deg=enemy.t * 38.0, projectile_type="bullet")
+                        _fire_fan(state, enemy.pos, a, count=4, spread_deg=28.0, speed=proj_speed, damage=dmg + 1, ttl=2.5, projectile_type="plasma")
+                    _fire_ring(state, enemy.pos, count=10, speed=proj_speed * 0.82, damage=dmg, ttl=2.55, start_deg=enemy.t * 38.0, projectile_type="bullet")
 
                 # Beam checks to punish straight-line movement.
                 beam_len = config.ROOM_RADIUS * 2.0
                 if phase >= 1:
-                    offsets = (-22.0, 22.0) if phase == 1 else (-34.0, 0.0, 34.0)
+                    offsets = (-22.0, 22.0) if phase == 1 else (-30.0, 0.0, 30.0)
                     for off in offsets:
                         d2 = _rotate(aim, off)
                         state.lasers.append(
                             LaserBeam(
                                 start=Vec2(enemy.pos.x, enemy.pos.y),
                                 end=enemy.pos + d2 * beam_len,
-                                damage=14 + state.wave // 3 + (1 if phase == 2 else 0),
-                                thickness=8.5 if phase == 1 else 9.5,
-                                warn=0.5 if phase == 1 else 0.42,
-                                ttl=0.11,
+                                damage=_boss_damage(state, base=10.0, wave_scale=0.2, cap=24),
+                                thickness=8.0 if phase == 1 else 8.8,
+                                warn=0.56 if phase == 1 else 0.5,
+                                ttl=0.12,
                                 color=(190, 210, 255),
                                 owner="enemy",
                             )
                         )
 
                 # Minion support.
-                adds_cap = getattr(state, "max_enemies", 12) + 5
-                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < (0.22 if phase == 2 else 0.15):
+                adds_cap = _boss_adds_cap(state, 4)
+                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < (0.14 if phase == 2 else 0.09):
                     pos = enemy.pos + Vec2(random.uniform(-85, 85), random.uniform(-85, 85))
                     add_behavior = "flyer" if random.random() < 0.6 else "ranged"
                     state.enemies.append(Enemy(pos=pos, hp=16 + state.wave * 2, speed=74 + state.wave * 1.8, behavior=add_behavior))
 
-                base_cd = 1.45 - state.wave * 0.012
-                if phase == 2:
-                    base_cd *= 0.82
-                elif phase == 1:
-                    base_cd *= 0.92
-                if persona == "aggressive":
-                    base_cd *= 0.93
-                enemy.attack_cd = max(0.62, base_cd)
+                base_cd = 1.65 - state.wave * 0.008
+                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=0.86, persona=persona)
             return
 
         if enemy.behavior == "boss_womb_core":
@@ -913,30 +946,33 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     state.traps = []
 
                 # Telegraph pulse around player then strike.
-                pulse_r = 95.0 if phase < 2 else 110.0
-                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r + 16.0, damage=0, ttl=0.75, armed_delay=0.34, kind="womb_warn"))
-                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r, damage=18 + state.wave // 3, ttl=0.52, armed_delay=0.34, kind="womb_pulse"))
+                pulse_r = 92.0 if phase < 2 else 104.0
+                pulse_dmg = _boss_damage(state, base=13.0, wave_scale=0.24, cap=28)
+                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r + 18.0, damage=0, ttl=0.86, armed_delay=0.42, kind="womb_warn"))
+                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r, damage=pulse_dmg, ttl=0.58, armed_delay=0.42, kind="womb_pulse"))
 
-                proj_speed = 220.0 + state.wave * 2.4
-                dmg = 9 + state.wave // 3
+                proj_speed = 212.0 + state.wave * 1.9
+                dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)
                 aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.78)
                 gun = _cycle_gun(enemy, ["spread", "bullet", "plasma"])
 
                 # Main blood-burst patterns.
                 if phase == 0:
-                    _fire_fan(state, enemy.pos, aim, count=6, spread_deg=72.0, speed=proj_speed, damage=dmg, ttl=2.65, projectile_type=gun)
+                    _fire_fan(state, enemy.pos, aim, count=5, spread_deg=68.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type=gun)
                 elif phase == 1:
-                    _fire_fan(state, enemy.pos, aim, count=8, spread_deg=88.0, speed=proj_speed, damage=dmg + 1, ttl=2.7, projectile_type=gun)
-                    _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.82, damage=max(1, dmg - 1), ttl=2.55, start_deg=enemy.t * 24.0, projectile_type="bullet")
+                    _fire_fan(state, enemy.pos, aim, count=7, spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type=gun)
+                    _fire_ring(state, enemy.pos, count=7, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.5, start_deg=enemy.t * 24.0, projectile_type="bullet")
                 else:
-                    _fire_fan(state, enemy.pos, aim, count=10, spread_deg=102.0, speed=proj_speed, damage=dmg + 2, ttl=2.7, projectile_type=gun)
-                    _fire_fan(state, enemy.pos, _perp(aim), count=6, spread_deg=44.0, speed=proj_speed * 0.96, damage=dmg + 1, ttl=2.55, projectile_type="spread")
-                    _fire_ring(state, enemy.pos, count=10, speed=proj_speed * 0.86, damage=dmg, ttl=2.6, start_deg=enemy.t * 32.0, projectile_type="plasma")
+                    _fire_fan(state, enemy.pos, aim, count=8, spread_deg=92.0, speed=proj_speed, damage=dmg + 2, ttl=2.65, projectile_type=gun)
+                    _fire_fan(state, enemy.pos, _perp(aim), count=5, spread_deg=40.0, speed=proj_speed * 0.94, damage=dmg + 1, ttl=2.5, projectile_type="spread")
+                    _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.84, damage=dmg, ttl=2.55, start_deg=enemy.t * 32.0, projectile_type="plasma")
 
                 # Summon mixed rushers to keep pressure.
-                adds_cap = getattr(state, "max_enemies", 12) + 6
+                adds_cap = _boss_adds_cap(state, 4)
                 if len(getattr(state, "enemies", [])) < adds_cap:
                     summon_n = 1 if phase == 0 else 2
+                    if phase == 2 and random.random() < 0.35:
+                        summon_n = 1
                     for _ in range(summon_n):
                         if len(getattr(state, "enemies", [])) >= adds_cap:
                             break
@@ -944,14 +980,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                         add_behavior = "swarm" if random.random() < 0.7 else "charger"
                         state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=86 + state.wave * 1.6, behavior=add_behavior))
 
-                base_cd = 1.9 - state.wave * 0.015
-                if phase == 2:
-                    base_cd *= 0.8
-                elif phase == 1:
-                    base_cd *= 0.9
-                if persona == "aggressive":
-                    base_cd *= 0.94
-                enemy.attack_cd = max(0.74, base_cd)
+                base_cd = 2.05 - state.wave * 0.009
+                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=0.9, persona=persona)
             return
     else:
         if hasattr(enemy.behavior, "update"):

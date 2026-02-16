@@ -201,7 +201,8 @@ def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tu
     hp = float(hp) * float(hp_mult)
     if is_boss:
         # Bosses need to stay relevant even as the player stacks upgrades.
-        hp *= (1.25 + 0.01 * float(wave))
+        growth = 1.14 + 0.007 * float(wave)
+        hp *= min(1.75, growth)
     hp = max(1, int(hp))
     speed = float(speed) * mods["speed"]
     return (hp, speed, atk)

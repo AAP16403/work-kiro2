@@ -16,13 +16,13 @@ try {
     & $py -m pip install pyinstaller
   }
 
-  Write-Host "Building Kiro2Game..."
+  Write-Host "Building Plouto..."
   & $py -m PyInstaller --noconfirm --clean .\\kiro2_game.spec
 
   Write-Host ""
   Write-Host "Done."
-  Write-Host "Your distributable folder is: .\\dist\\Kiro2Game\\"
-  Write-Host "Executable: .\\dist\\Kiro2Game\\Kiro2Game.exe"
+  Write-Host "Your distributable folder is: .\\dist\\Plouto\\"
+  Write-Host "Executable: .\\dist\\Plouto\\Plouto.exe"
 }
 finally {
   Pop-Location

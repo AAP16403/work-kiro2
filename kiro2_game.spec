@@ -9,10 +9,16 @@ hiddenimports = []
 hiddenimports += collect_submodules("pyglet")
 
 a = Analysis(
-    ["Untitled-1.py"],
+    ["main.py"],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ("assets/fonts/Orbitron-Variable.ttf", "assets/fonts"),
+        ("assets/fonts/Rajdhani-Regular.ttf", "assets/fonts"),
+        ("assets/fonts/Rajdhani-SemiBold.ttf", "assets/fonts"),
+        ("assets/fonts/OFL-Orbitron.txt", "assets/fonts"),
+        ("assets/fonts/OFL-Rajdhani.txt", "assets/fonts"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -31,7 +37,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Kiro2Game",
+    name="Plouto",
     icon="laser-gun_38685.ico",
     debug=False,
     bootloader_ignore_signals=False,
@@ -49,5 +55,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="Kiro2Game",
+    name="Plouto",
 )

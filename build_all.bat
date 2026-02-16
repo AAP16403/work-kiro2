@@ -3,14 +3,14 @@ setlocal enableextensions
 
 cd /d "%~dp0"
 
-echo === Kiro2Game: build .exe ===
+echo === Plouto: full build ===
 echo Working dir: %CD%
 echo.
 
 where py >nul 2>nul
 if errorlevel 1 (
   echo ERROR: Python launcher ^(py.exe^) not found.
-  echo Install Python from python.org and ensure "py" works in a new terminal.
+  echo Install Python and ensure "py" works in a new terminal.
   goto :fail
 )
 
@@ -25,20 +25,25 @@ echo Installing/updating dependencies...
 if errorlevel 1 goto :fail
 
 echo.
+echo Running quick syntax validation...
+".venv\Scripts\python.exe" -m py_compile main.py game.py enemy.py level.py rpg.py menu.py fonts.py
+if errorlevel 1 goto :fail
+
+echo.
 echo Building executable ^(PyInstaller^)...
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\build_exe.ps1"
 if errorlevel 1 goto :fail
 
 echo.
 echo Creating .zip...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Push-Location '%CD%\\dist'; if (Test-Path '.\\Kiro2Game.zip') { Remove-Item -Force '.\\Kiro2Game.zip' }; Compress-Archive -Path '.\\Kiro2Game' -DestinationPath '.\\Kiro2Game.zip' -Force; Pop-Location"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Push-Location '%CD%\\dist'; if (Test-Path '.\\Plouto.zip') { Remove-Item -Force '.\\Plouto.zip' }; Compress-Archive -Path '.\\Plouto' -DestinationPath '.\\Plouto.zip' -Force; Pop-Location"
 if errorlevel 1 goto :fail
 
 echo.
 echo SUCCESS.
-echo Output folder: %CD%\dist\Kiro2Game\
-echo EXE: %CD%\dist\Kiro2Game\Kiro2Game.exe
-echo ZIP: %CD%\dist\Kiro2Game.zip
+echo Output folder: %CD%\dist\Plouto\
+echo EXE: %CD%\dist\Plouto\Plouto.exe
+echo ZIP: %CD%\dist\Plouto.zip
 echo.
 pause
 exit /b 0

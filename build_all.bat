@@ -5,6 +5,10 @@ cd /d "%~dp0"
 set "APP_NAME=Plouto"
 set "SPEC_FILE=kiro2_game.spec"
 set "PY_EXE=.venv\Scripts\python.exe"
+set "BUILD_PS1=build_exe.ps1"
+set "PS_EXE=powershell"
+set "DIST_DIR=dist\%APP_NAME%"
+set "DIST_EXE=%DIST_DIR%\%APP_NAME%.exe"
 
 echo === %APP_NAME%: full build ===
 echo Working dir: %CD%
@@ -21,10 +25,23 @@ if not exist "%PY_EXE%" (
   echo Creating virtual environment...
   py -m venv .venv
   if errorlevel 1 goto :fail
+  if not exist "%PY_EXE%" (
+    echo ERROR: Virtual environment creation did not produce %PY_EXE%
+    goto :fail
+  )
 )
 
 if not exist "%SPEC_FILE%" (
   echo ERROR: Missing spec file: %SPEC_FILE%
+  goto :fail
+)
+if not exist "%BUILD_PS1%" (
+  echo ERROR: Missing build script: %BUILD_PS1%
+  goto :fail
+)
+where %PS_EXE% >nul 2>nul
+if errorlevel 1 (
+  echo ERROR: PowerShell not found. Required for build and zip steps.
   goto :fail
 )
 
@@ -61,12 +78,21 @@ if errorlevel 1 goto :fail
 
 echo.
 echo Building executable ^(PyInstaller^)...
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\build_exe.ps1"
+%PS_EXE% -NoProfile -ExecutionPolicy Bypass -File ".\%BUILD_PS1%"
 if errorlevel 1 goto :fail
+
+if not exist "%DIST_DIR%" (
+  echo ERROR: Build completed but output folder is missing: %DIST_DIR%
+  goto :fail
+)
+if not exist "%DIST_EXE%" (
+  echo ERROR: Build completed but executable is missing: %DIST_EXE%
+  goto :fail
+)
 
 echo.
 echo Creating .zip...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Push-Location '%CD%\\dist'; if (Test-Path '.\\%APP_NAME%.zip') { Remove-Item -Force '.\\%APP_NAME%.zip' }; Compress-Archive -Path '.\\%APP_NAME%' -DestinationPath '.\\%APP_NAME%.zip' -Force; Pop-Location"
+%PS_EXE% -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; Push-Location '%CD%\\dist'; try { if (Test-Path '.\\%APP_NAME%.zip') { Remove-Item -Force '.\\%APP_NAME%.zip' }; $ok = $false; for ($i = 1; $i -le 5; $i++) { try { Compress-Archive -Path '.\\%APP_NAME%' -DestinationPath '.\\%APP_NAME%.zip' -Force; $ok = $true; break } catch { if ($i -eq 5) { throw }; Start-Sleep -Milliseconds (300 * $i) } }; if (-not $ok) { throw 'ZIP creation failed.' }; if (-not (Test-Path '.\\%APP_NAME%.zip')) { throw 'ZIP file not found after creation.' } } finally { Pop-Location }"
 if errorlevel 1 goto :fail
 
 echo.
@@ -75,12 +101,12 @@ echo Output folder: %CD%\dist\%APP_NAME%\
 echo EXE: %CD%\dist\%APP_NAME%\%APP_NAME%.exe
 echo ZIP: %CD%\dist\%APP_NAME%.zip
 echo.
-pause
+if not defined NO_PAUSE pause
 exit /b 0
 
 :fail
 echo.
 echo FAILED. Scroll up for the first error message.
 echo.
-pause
+if not defined NO_PAUSE pause
 exit /b 1

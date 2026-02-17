@@ -1,7 +1,6 @@
 """Flyer behavior for enemies."""
 from enemy_behaviors.base import Behavior
 from utils import Vec2
-import math
 import random
 
 def _perp(v: Vec2) -> Vec2:

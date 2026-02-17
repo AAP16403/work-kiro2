@@ -6,11 +6,12 @@ import random
 import math
 
 import pyglet
+from pyglet import shapes
 
 pyglet.options["shadow_window"] = False
 
 import config
-from config import SCREEN_W, SCREEN_H, FPS, WAVE_COOLDOWN, HUD_TEXT, ENEMY_COLORS, POWERUP_COLORS
+from config import SCREEN_W, SCREEN_H, FPS, WAVE_COOLDOWN, ENEMY_COLORS, POWERUP_COLORS
 from player import Player
 from map import Room
 from level import GameState as GameStateData, spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death
@@ -442,6 +443,31 @@ class PlayingState(State):
         game.batch.draw()
         game.particle_system.render(shake)
 
+        # Update HUD
+        hp_cap = max(1, int(getattr(game.player, "max_hp", 100)))
+        hp_now = max(0, int(game.player.hp))
+        hp_frac = max(0.0, min(1.0, hp_now / hp_cap))
+        game.hud_hp_bar.width = game._hud_bar_w * hp_frac
+        game.hud_hp_bar.color = (
+            int(210 - 120 * hp_frac),
+            int(80 + 155 * hp_frac),
+            int(82 + 50 * hp_frac),
+        )
+        game.hud_hp_value_label.text = f"{hp_now}/{hp_cap}"
+
+        shield_cap = 100
+        shield_now = max(0, int(game.player.shield))
+        shield_frac = max(0.0, min(1.0, shield_now / max(1, shield_cap)))
+        game.hud_shield_bar.width = game._hud_bar_w * shield_frac
+        game.hud_shield_bar.color = (
+            int(48 + 36 * shield_frac),
+            int(122 + 88 * shield_frac),
+            int(202 + 42 * shield_frac),
+        )
+        game.hud_shield_value_label.text = f"{shield_now}/{shield_cap}"
+        game.hud_wave_label.text = f"WAVE {int(game.state.wave):02d}"
+        game.hud_meta_label.text = f"{str(getattr(game.state, 'difficulty', 'normal')).upper()}  T+{int(game.state.time):03d}s"
+
         laser_left = max(0.0, game.player.laser_until - game.state.time)
         laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
         vortex_left = max(0.0, game.player.vortex_until - game.state.time)
@@ -458,21 +484,17 @@ class PlayingState(State):
         if boss:
             boss_name = enemy_behavior_name(boss)
             boss_txt = f"BOSS {boss_name[5:].replace('_', ' ').title()} HP {boss.hp}"
-        diff_txt = f"Diff {str(getattr(game.state, 'difficulty', 'normal')).capitalize()}"
+        
         temp_txt = game._active_temp_hud_text()
         perm_txt = game._perm_hud_text()
-        hp_cap = int(getattr(game.player, "max_hp", game.player.hp))
-        weapon_name = game.player.current_weapon.name.capitalize()
-        game.hud.text = (
-            f"HP {game.player.hp}/{hp_cap}  |  Shield {game.player.shield}  |  "
-            f"Wave {game.state.wave}  |  Enemies {len(game.state.enemies)}  |  Weapon {weapon_name}"
-        )
-        status_parts = [p for p in (laser_txt, vortex_txt, ultra_txt, boss_txt, diff_txt, temp_txt.strip(), perm_txt.strip()) if p]
-        if getattr(game, "hud_sub", None):
-            game.hud_sub.text = "  |  ".join(status_parts)
-        game.hud.draw()
-        if getattr(game, "hud_sub", None):
-            game.hud_sub.draw()
+        status_parts = [p for p in (laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt, boss_txt) if p]
+        status_text = "   |   ".join(status_parts) if status_parts else "No active effects"
+        max_chars = int(getattr(game, "_hud_status_max_chars", 120))
+        if len(status_text) > max_chars:
+            status_text = status_text[: max(3, max_chars - 3)].rstrip() + "..."
+        game.hud_status_label.text = status_text
+        
+        game.hud_batch.draw()
 
         if game._pause_hint:
             game._pause_hint.draw()
@@ -585,8 +607,6 @@ class Game(pyglet.window.Window):
         self.player = None
         self.visuals = None
         self.particle_system = None
-        self.hud = None
-        self.hud_sub = None
         
         self.keys = pyglet.window.key.KeyStateHandler()
         self.push_handlers(self.keys)
@@ -719,26 +739,229 @@ class Game(pyglet.window.Window):
         
         self.particle_system = ParticleSystem()
 
-        self.hud = pyglet.text.Label(
-            "",
-            font_name=UI_FONT_HEAD,
-            font_size=15,
-            x=12,
-            y=self.height - 16,
-            anchor_x="left",
-            anchor_y="top",
-            color=(236, 242, 250, 255),
+        self._init_hud()
+
+    def _init_hud(self):
+        self.hud_batch = pyglet.graphics.Batch()
+        self._hud_bar_w = 240
+
+        self.hud_panel_shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.hud_batch)
+        self.hud_panel_shadow.opacity = 78
+        self.hud_panel_bg = shapes.Rectangle(0, 0, 1, 1, color=(14, 21, 30), batch=self.hud_batch)
+        self.hud_panel_bg.opacity = 216
+        self.hud_panel_border = shapes.BorderedRectangle(
+            0, 0, 1, 1, border=2, color=(20, 28, 40), border_color=(82, 146, 212), batch=self.hud_batch
         )
-        self.hud_sub = pyglet.text.Label(
+        self.hud_panel_border.opacity = 228
+
+        self.hud_hp_bar_bg = shapes.Rectangle(0, 0, 1, 1, color=(42, 45, 55), batch=self.hud_batch)
+        self.hud_hp_bar = shapes.Rectangle(0, 0, 1, 1, color=(120, 210, 120), batch=self.hud_batch)
+        self.hud_shield_bar_bg = shapes.Rectangle(0, 0, 1, 1, color=(36, 44, 58), batch=self.hud_batch)
+        self.hud_shield_bar = shapes.Rectangle(0, 0, 1, 1, color=(84, 176, 232), batch=self.hud_batch)
+
+        self.hud_wave_chip_shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.hud_batch)
+        self.hud_wave_chip_shadow.opacity = 86
+        self.hud_wave_chip_bg = shapes.Rectangle(0, 0, 1, 1, color=(18, 28, 42), batch=self.hud_batch)
+        self.hud_wave_chip_bg.opacity = 230
+        self.hud_wave_chip_border = shapes.BorderedRectangle(
+            0, 0, 1, 1, border=2, color=(18, 28, 42), border_color=(110, 186, 255), batch=self.hud_batch
+        )
+
+        self.hud_status_bg = shapes.Rectangle(0, 0, 1, 1, color=(10, 16, 24), batch=self.hud_batch)
+        self.hud_status_bg.opacity = 196
+        self.hud_status_border = shapes.BorderedRectangle(
+            0, 0, 1, 1, border=1, color=(10, 16, 24), border_color=(70, 128, 184), batch=self.hud_batch
+        )
+
+        self.hud_hp_label = pyglet.text.Label(
+            "HULL",
+            font_name=UI_FONT_META,
+            font_size=10,
+            x=0,
+            y=0,
+            anchor_x="left",
+            anchor_y="bottom",
+            color=(214, 225, 238, 220),
+            batch=self.hud_batch,
+        )
+        self.hud_hp_value_label = pyglet.text.Label(
             "",
             font_name=UI_FONT_BODY,
             font_size=11,
-            x=12,
-            y=self.height - 36,
-            anchor_x="left",
-            anchor_y="top",
-            color=(170, 186, 206, 255),
+            x=0,
+            y=0,
+            anchor_x="right",
+            anchor_y="bottom",
+            color=(244, 250, 255, 255),
+            batch=self.hud_batch,
         )
+        self.hud_shield_label = pyglet.text.Label(
+            "SHIELD",
+            font_name=UI_FONT_META,
+            font_size=10,
+            x=0,
+            y=0,
+            anchor_x="left",
+            anchor_y="bottom",
+            color=(188, 210, 232, 220),
+            batch=self.hud_batch,
+        )
+        self.hud_shield_value_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_BODY,
+            font_size=11,
+            x=0,
+            y=0,
+            anchor_x="right",
+            anchor_y="bottom",
+            color=(232, 244, 255, 255),
+            batch=self.hud_batch,
+        )
+
+        self.hud_wave_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_HEAD,
+            font_size=22,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(238, 245, 255, 255),
+            batch=self.hud_batch,
+        )
+        self.hud_meta_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=10,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="top",
+            color=(168, 194, 222, 230),
+            batch=self.hud_batch,
+        )
+
+        self.hud_status_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_BODY,
+            font_size=12,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(170, 186, 206, 255),
+            batch=self.hud_batch,
+        )
+        self._layout_hud()
+
+    def _layout_hud(self) -> None:
+        if not getattr(self, "hud_batch", None):
+            return
+
+        margin = 14
+        panel_w = max(220, min(360, int(self.width * 0.33)))
+        panel_h = 88
+        panel_x = margin
+        panel_y = self.height - margin - panel_h
+
+        self.hud_panel_shadow.x = panel_x + 3
+        self.hud_panel_shadow.y = panel_y - 3
+        self.hud_panel_shadow.width = panel_w
+        self.hud_panel_shadow.height = panel_h
+        self.hud_panel_bg.x = panel_x
+        self.hud_panel_bg.y = panel_y
+        self.hud_panel_bg.width = panel_w
+        self.hud_panel_bg.height = panel_h
+        self.hud_panel_border.x = panel_x
+        self.hud_panel_border.y = panel_y
+        self.hud_panel_border.width = panel_w
+        self.hud_panel_border.height = panel_h
+
+        bar_margin_x = 14
+        self._hud_bar_w = panel_w - (bar_margin_x * 2)
+        bar_h = 12
+        hp_y = panel_y + 44
+        sh_y = panel_y + 22
+        bar_x = panel_x + bar_margin_x
+
+        self.hud_hp_bar_bg.x = bar_x
+        self.hud_hp_bar_bg.y = hp_y
+        self.hud_hp_bar_bg.width = self._hud_bar_w
+        self.hud_hp_bar_bg.height = bar_h
+
+        self.hud_hp_bar.x = bar_x
+        self.hud_hp_bar.y = hp_y
+        self.hud_hp_bar.height = bar_h
+
+        self.hud_shield_bar_bg.x = bar_x
+        self.hud_shield_bar_bg.y = sh_y
+        self.hud_shield_bar_bg.width = self._hud_bar_w
+        self.hud_shield_bar_bg.height = bar_h
+
+        self.hud_shield_bar.x = bar_x
+        self.hud_shield_bar.y = sh_y
+        self.hud_shield_bar.height = bar_h
+
+        self.hud_hp_label.x = bar_x
+        self.hud_hp_label.y = hp_y + bar_h + 3
+        self.hud_hp_value_label.x = bar_x + self._hud_bar_w
+        self.hud_hp_value_label.y = hp_y + bar_h + 2
+        self.hud_shield_label.x = bar_x
+        self.hud_shield_label.y = sh_y + bar_h + 3
+        self.hud_shield_value_label.x = bar_x + self._hud_bar_w
+        self.hud_shield_value_label.y = sh_y + bar_h + 2
+
+        chip_w = max(160, min(320, int(self.width * 0.26)))
+        chip_h = 46
+        chip_x = (self.width - chip_w) // 2
+        chip_y = self.height - margin - chip_h
+        min_gap = 12
+        panel_right = panel_x + panel_w
+        chip_left = chip_x
+        chip_right = chip_x + chip_w
+        chip_overlaps_panel = not (chip_left >= panel_right + min_gap or chip_right <= panel_x - min_gap)
+        if chip_overlaps_panel:
+            chip_y = panel_y - chip_h - 8
+        self.hud_wave_chip_shadow.x = chip_x + 3
+        self.hud_wave_chip_shadow.y = chip_y - 3
+        self.hud_wave_chip_shadow.width = chip_w
+        self.hud_wave_chip_shadow.height = chip_h
+        self.hud_wave_chip_bg.x = chip_x
+        self.hud_wave_chip_bg.y = chip_y
+        self.hud_wave_chip_bg.width = chip_w
+        self.hud_wave_chip_bg.height = chip_h
+        self.hud_wave_chip_border.x = chip_x
+        self.hud_wave_chip_border.y = chip_y
+        self.hud_wave_chip_border.width = chip_w
+        self.hud_wave_chip_border.height = chip_h
+
+        self.hud_wave_label.x = chip_x + chip_w // 2
+        self.hud_wave_label.y = chip_y + int(chip_h * 0.62)
+        self.hud_meta_label.x = chip_x + chip_w // 2
+        self.hud_meta_label.y = chip_y + int(chip_h * 0.28)
+
+        is_stacked = chip_y < panel_y
+        if is_stacked:
+            status_w = max(220, min(700, int(self.width * 0.9)))
+        else:
+            status_w = max(240, min(640, int(self.width * 0.58)))
+        status_h = 28
+        status_x = (self.width - status_w) // 2
+        status_y = max(6, chip_y - status_h - 10)
+        self.hud_status_bg.x = status_x
+        self.hud_status_bg.y = status_y
+        self.hud_status_bg.width = status_w
+        self.hud_status_bg.height = status_h
+        self.hud_status_border.x = status_x
+        self.hud_status_border.y = status_y
+        self.hud_status_border.width = status_w
+        self.hud_status_border.height = status_h
+        self.hud_status_label.x = status_x + status_w // 2
+        self.hud_status_label.y = status_y + status_h // 2
+        self._hud_status_max_chars = max(24, int((status_w - 28) / 7.2))
+
+
+
 
     def _effective_player_damage(self) -> int:
         if not self.player:
@@ -1147,13 +1370,11 @@ class Game(pyglet.window.Window):
         self.rpg_menu.resize(width, height)
         self.game_over_menu.resize(width, height)
 
-        if self.hud:
-            self.hud.y = height - 16
-        if getattr(self, "hud_sub", None):
-            self.hud_sub.y = height - 36
         if getattr(self, "_pause_hint", None):
             self._pause_hint.x = width - 10
             self._pause_hint.y = height - 14
+        if getattr(self, "hud_batch", None):
+            self._layout_hud()
 
         if self.room:
             self.room.resize(width, height)
@@ -1172,8 +1393,6 @@ class Game(pyglet.window.Window):
         self.player = None
         self.visuals = None
         self.particle_system = None
-        self.hud = None
-        self.hud_sub = None
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.mouse_xy = (x, y)

@@ -4,7 +4,6 @@ from utils import Vec2
 from projectile import Projectile
 import math
 import random
-import config
 
 def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed: float, mult: float = 0.75) -> Vec2:
     d = (target_pos - shooter_pos).length()

@@ -2,7 +2,6 @@
 from enemy_behaviors.base import Behavior
 from utils import Vec2
 from hazards import Trap
-import math
 import random
 import config
 

@@ -146,13 +146,10 @@ class Swarm(Behavior):
         base_r = max(52.0, 126.0 - min(55.0, n * 4.5))
         if brain["mode"] == "surge":
             ring_r = max(40.0, base_r * 0.62)
-            lead = 0.22
         elif brain["mode"] == "regroup":
             ring_r = base_r * 1.2
-            lead = 0.5
         else:
             ring_r = base_r
-            lead = 0.34
         brain["ring_r"] = ring_r
 
         # Keep lead time short; large prediction makes swarms appear to retreat

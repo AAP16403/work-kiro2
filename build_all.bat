@@ -60,7 +60,7 @@ if not exist "assets\fonts\Rajdhani-SemiBold.ttf" (
 )
 
 echo Installing/updating dependencies...
-"%PY_EXE%" -m pip install -U pip pyglet pyinstaller
+"%PY_EXE%" -m pip install -U pip pyglet pyinstaller moderngl
 if errorlevel 1 goto :fail
 
 echo.

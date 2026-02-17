@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING
 import pyglet
 from pyglet import shapes
 
-from menu import MenuButton, _ui_scale, UI_FONT_HEAD, UI_FONT_BODY, UI_FONT_META
+from menu import (
+    MenuButton,
+    _ui_scale,
+    UI_FONT_HEAD,
+    UI_FONT_BODY,
+    UI_FONT_META,
+    _sync_label_style_if_ready,
+)
 
 if TYPE_CHECKING:
     from player import Player
@@ -343,13 +350,13 @@ class BossRewardMenu:
 
         self.title.x = cx
         self.title.y = panel_y + panel_h - int(54 * scale)
-        self.title.font_size = max(18, int(31 * scale))
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(18, int(31 * scale)))
         self.subtitle.x = cx
         self.subtitle.y = self.title.y - int(34 * scale)
-        self.subtitle.font_size = max(11, int(14 * scale))
+        _sync_label_style_if_ready(self.subtitle, UI_FONT_BODY, max(11, int(14 * scale)))
         self.tip.x = cx
         self.tip.y = self.subtitle.y - int(24 * scale)
-        self.tip.font_size = max(9, int(11 * scale))
+        _sync_label_style_if_ready(self.tip, UI_FONT_META, max(9, int(11 * scale)))
 
         bw = min(int(panel_w * 0.84), int(680 * scale))
         bh = int(78 * scale)
@@ -364,7 +371,7 @@ class BossRewardMenu:
             btn.sync()
             self.desc_labels[i].x = btn.x + int(12 * scale)
             self.desc_labels[i].y = btn.y + int(bh * 0.28)
-            self.desc_labels[i].font_size = max(9, int(11 * scale))
+            _sync_label_style_if_ready(self.desc_labels[i], UI_FONT_META, max(9, int(11 * scale)))
 
     def on_mouse_motion(self, x: float, y: float):
         for btn in self.buttons:

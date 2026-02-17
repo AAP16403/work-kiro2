@@ -24,6 +24,21 @@ def _ui_scale(width: int, height: int) -> float:
     return max(0.85, min(1.85, s))
 
 
+def _sync_label_style_if_ready(label, font_name: str, font_size: int) -> None:
+    """Avoid pyglet font style updates when GL context is temporarily unavailable."""
+    try:
+        from pyglet import gl
+        if getattr(gl, "current_context", None) is None:
+            return
+        if getattr(label, "font_name", None) != font_name:
+            label.font_name = font_name
+        if int(getattr(label, "font_size", 0)) != int(font_size):
+            label.font_size = int(font_size)
+    except Exception:
+        # Style sync can safely be retried on the next frame.
+        return
+
+
 @dataclass
 class MenuButton:
     """A clickable button on the menu."""
@@ -106,8 +121,7 @@ class MenuButton:
         self._shine.opacity = 70 if self.is_hovered else 24
 
         self._label.text = self.text
-        self._label.font_name = self.font_name
-        self._label.font_size = self.font_size
+        _sync_label_style_if_ready(self._label, self.font_name, int(self.font_size))
         self._label.x = self.x + self.width // 2
         self._label.y = self.y + self.height // 2
 
@@ -205,8 +219,7 @@ class MenuSlider:
             return
         val_str = self.value_fmt.format(self.current_val)
         self._label_obj.text = f"{self.label}: {val_str}{self.value_suffix}"
-        self._label_obj.font_name = self.font_name
-        self._label_obj.font_size = self.font_size
+        _sync_label_style_if_ready(self._label_obj, self.font_name, int(self.font_size))
         self._label_obj.x = self.x
         self._label_obj.y = self.y + 20
 
@@ -382,11 +395,11 @@ class Menu:
         self._panel_shine.height = max(6, int(16 * scale))
 
         self.title.x = cx
-        self.title.font_size = max(22, int(38 * scale))
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(22, int(38 * scale)))
         self.title.y = height - int(85 * scale)
         self._title_base_y = self.title.y
         self.subtitle.x = cx
-        self.subtitle.font_size = max(10, int(13 * scale))
+        _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
         self.subtitle.y = height - int(130 * scale)
         self.subtitle.width = max(320, width - 64)
 
@@ -427,7 +440,14 @@ class Menu:
 class SettingsMenu:
     """Settings screen with difficulty and window size options."""
     
-    def __init__(self, width: int, height: int, on_save: Callable, display_size: tuple[int, int] | None = None):
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        on_save: Callable,
+        display_size: tuple[int, int] | None = None,
+        advanced_fx_enabled: bool | None = None,
+    ):
         self.screen_width = width
         self.screen_height = height
         self.on_save = on_save
@@ -464,6 +484,7 @@ class SettingsMenu:
         self.difficulty = 1  # 0=easy, 1=normal, 2=hard
         self.arena_margin = float(getattr(config, "ARENA_MARGIN", 0.97))
         self.arena_pct = float(round(self.arena_margin * 100.0))
+        self.advanced_fx = bool(getattr(config, "ENABLE_ADVANCED_FX", True) if advanced_fx_enabled is None else advanced_fx_enabled)
         self.window_size_idx = 0
         self.window_sizes, self.window_size_names = self._build_window_size_options(display_size)
         current_size = (int(width), int(height))
@@ -556,8 +577,21 @@ class SettingsMenu:
             color=(255, 255, 255, 255),
             batch=self.batch,
         )
+        self.fx_label = pyglet.text.Label(
+            "Advanced FX",
+            font_name=UI_FONT_BODY,
+            font_size=16,
+            x=0,
+            y=0,
+            anchor_x="left",
+            anchor_y="center",
+            color=(255, 255, 255, 255),
+            batch=self.batch,
+        )
+        self.fx_button = MenuButton(0, 0, 210, 50, "", self._toggle_advanced_fx, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self._refresh_fx_button_text()
         self.menu_note = pyglet.text.Label(
-            "Resolution and arena scale update instantly.",
+            "Resolution, arena scale, and FX mode update instantly.",
             font_name=UI_FONT_META,
             font_size=11,
             x=width // 2,
@@ -573,7 +607,7 @@ class SettingsMenu:
         self._selected_size_highlight = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
         self._selected_size_highlight.opacity = 60
 
-        for btn in self.difficulty_buttons + self.size_buttons + [self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + [self.fx_button, self.back_button]:
             btn.ensure(self.batch)
         self.arena_slider.ensure(self.batch)
 
@@ -715,7 +749,7 @@ class SettingsMenu:
             btn.width = diff_btn_w
             btn.height = button_h
             btn.font_size = btn_font
-        self.difficulty_label.font_size = max(12, int(17 * scale))
+        _sync_label_style_if_ready(self.difficulty_label, UI_FONT_BODY, max(12, int(17 * scale)))
         self.difficulty_label.x = content_left
         self.difficulty_label.y = content_top
 
@@ -734,7 +768,7 @@ class SettingsMenu:
             btn.height = button_h
             btn.font_size = btn_font
 
-        self.window_label.font_size = max(12, int(17 * scale))
+        _sync_label_style_if_ready(self.window_label, UI_FONT_BODY, max(12, int(17 * scale)))
         self.window_label.x = content_left
         self.window_label.y = diff_y - int(58 * scale)
 
@@ -751,9 +785,18 @@ class SettingsMenu:
         self.back_button.x = cx - self.back_button.width // 2
         self.back_button.y = panel_y + int(18 * scale)
 
+        _sync_label_style_if_ready(self.fx_label, UI_FONT_BODY, max(12, int(16 * scale)))
+        self.fx_label.x = content_left
+        self.fx_label.y = self.back_button.y + self.back_button.height + int(24 * scale)
+        self.fx_button.width = max(int(190 * scale), int(min(340 * scale, content_w * 0.5)))
+        self.fx_button.height = button_h
+        self.fx_button.font_size = btn_font
+        self.fx_button.x = content_left
+        self.fx_button.y = self.fx_label.y - int(18 * scale) - button_h
+
         rows = max(1, (len(self.size_buttons) + size_cols - 1) // size_cols)
         grid_bottom = size_top_y - (rows - 1) * (button_h + gap_y)
-        slider_floor_y = self.back_button.y + self.back_button.height + int(26 * scale)
+        slider_floor_y = self.fx_button.y + self.fx_button.height + int(24 * scale)
         slider_pref_y = grid_bottom - int(68 * scale)
         self.arena_slider.x = content_left
         self.arena_slider.y = max(int(slider_floor_y), int(slider_pref_y))
@@ -763,11 +806,11 @@ class SettingsMenu:
         self.arena_slider.track_thickness = max(2.0, 3.0 * scale)
 
         self.title.x = cx
-        self.title.font_size = max(18, int(32 * scale))
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(18, int(32 * scale)))
         self.title.y = height - int(60 * scale)
         self.menu_note.x = cx
         self.menu_note.y = self.title.y - int(26 * scale)
-        self.menu_note.font_size = max(9, int(11 * scale))
+        _sync_label_style_if_ready(self.menu_note, UI_FONT_META, max(9, int(11 * scale)))
 
         self._bg_a.width = width
         self._bg_a.height = height
@@ -790,10 +833,19 @@ class SettingsMenu:
         """Set window size."""
         self.window_size_idx = idx
         self.on_save(self.get_settings())
+
+    def _refresh_fx_button_text(self):
+        self.fx_button.text = f"Advanced FX: {'On' if self.advanced_fx else 'Off'}"
+        self.fx_button.sync()
+
+    def _toggle_advanced_fx(self):
+        self.advanced_fx = not self.advanced_fx
+        self._refresh_fx_button_text()
+        self.on_save(self.get_settings())
     
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
-        for btn in self.difficulty_buttons + self.size_buttons + [self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + [self.fx_button, self.back_button]:
             btn.is_hovered = btn.contains_point(x, y)
             btn.sync()
 
@@ -811,6 +863,9 @@ class SettingsMenu:
         if self.back_button.contains_point(x, y):
             self.on_save(self.get_settings())
             return "back"
+        if self.fx_button.contains_point(x, y):
+            self.fx_button.callback()
+            return None
         
         for btn in self.difficulty_buttons + self.size_buttons:
             if btn.contains_point(x, y):
@@ -842,6 +897,7 @@ class SettingsMenu:
             "window_size": self.window_sizes[self.window_size_idx],
             "fullscreen": fullscreen,
             "arena_margin": float(self.arena_margin),
+            "advanced_fx": bool(self.advanced_fx),
         }
     
     def draw(self):
@@ -860,7 +916,8 @@ class SettingsMenu:
             self._selected_size_highlight.width = selected_size.width + 4
             self._selected_size_highlight.height = selected_size.height + 4
 
-        for btn in self.difficulty_buttons + self.size_buttons + [self.back_button]:
+        self._refresh_fx_button_text()
+        for btn in self.difficulty_buttons + self.size_buttons + [self.fx_button, self.back_button]:
             btn.sync()
         self.arena_slider.sync()
         self.batch.draw()
@@ -1057,10 +1114,10 @@ class GuideMenu:
 
         self.title.x = cx
         self.title.y = height - int(64 * scale)
-        self.title.font_size = max(20, int(34 * scale))
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(20, int(34 * scale)))
         self.subtitle.x = cx
         self.subtitle.y = self.title.y - int(30 * scale)
-        self.subtitle.font_size = max(10, int(13 * scale))
+        _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
 
         top_y = panel_y + panel_h - int(86 * scale)
         self.btn_enemies.width = int(190 * scale)
@@ -1108,20 +1165,20 @@ class GuideMenu:
             icon_ring.x, icon_ring.y, icon_ring.radius = icon_x, icon_y, int(15 * scale)
             icon.x, icon.y, icon.radius = icon_x, icon_y, int(12 * scale)
             glyph.x, glyph.y = icon_x, icon_y
-            glyph.font_size = max(8, int(11 * scale))
+            _sync_label_style_if_ready(glyph, UI_FONT_HEAD, max(8, int(11 * scale)))
 
             text_x = row_x + int(56 * scale)
             name.x = text_x
             name.y = y + row_h - int(22 * scale)
-            name.font_size = max(11, int(16 * scale))
+            _sync_label_style_if_ready(name, UI_FONT_BODY, max(11, int(16 * scale)))
 
             desc.x = text_x
             desc.y = y + row_h - int(45 * scale)
-            desc.font_size = max(9, int(12 * scale))
+            _sync_label_style_if_ready(desc, UI_FONT_META, max(9, int(12 * scale)))
 
             lore.x = text_x
             lore.y = y + row_h - int(66 * scale)
-            lore.font_size = max(8, int(11 * scale))
+            _sync_label_style_if_ready(lore, UI_FONT_META, max(8, int(11 * scale)))
 
         self.btn_prev.width = int(118 * scale)
         self.btn_prev.height = int(44 * scale)
@@ -1136,7 +1193,7 @@ class GuideMenu:
 
         self.footer.x = cx
         self.footer.y = panel_y + int(28 * scale)
-        self.footer.font_size = max(9, int(11 * scale))
+        _sync_label_style_if_ready(self.footer, UI_FONT_META, max(9, int(11 * scale)))
 
         for b in self._buttons:
             b.sync()
@@ -1263,7 +1320,7 @@ class PauseMenu:
         self.overlay.width = width
         self.overlay.height = height
         self.title.x = cx
-        self.title.font_size = max(20, int(38 * scale))
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(20, int(38 * scale)))
         self.title.y = height - int(110 * scale)
 
         button_w = int(240 * scale)
@@ -1352,10 +1409,10 @@ class GameOverMenu:
         self.overlay.width = width
         self.overlay.height = height
         self.title.x = cx
-        self.title.font_size = max(24, int(46 * scale))
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(24, int(46 * scale)))
         self.title.y = height - int(115 * scale)
         self.score_label.x = cx
-        self.score_label.font_size = max(12, int(22 * scale))
+        _sync_label_style_if_ready(self.score_label, UI_FONT_BODY, max(12, int(22 * scale)))
         self.score_label.y = cy + int(78 * scale)
 
         button_w = int(260 * scale)

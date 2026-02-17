@@ -7,6 +7,8 @@ FPS = 60
 
 # Feature flags
 ENABLE_OBSTACLES = False
+ENABLE_ADVANCED_FX = True
+ADVANCED_FX_STRENGTH = 0.55
 
 # Room settings
 ROOM_RADIUS = 400.0  # Larger play area for more movement

@@ -154,37 +154,61 @@ class Visuals:
 
     def make_player(self):
         """Create player visual."""
-        sh = shapes.Ellipse(0, 0, 26, 10, color=(0, 0, 0), batch=self.batch)
+        sh = shapes.Ellipse(0, 0, 30, 12, color=(0, 0, 0), batch=self.batch)
         sh.opacity = 130
 
-        # Glow + outline
-        glow = shapes.Circle(0, 0, 18, color=(60, 140, 220), batch=self.batch)
-        glow.opacity = 55
-        outline = shapes.Circle(0, 0, 15, color=(10, 20, 35), batch=self.batch)
+        # Glow + layered body rig (helmet, torso, limbs, gear).
+        glow = shapes.Circle(0, 0, 22, color=(60, 140, 220), batch=self.batch)
+        glow.opacity = 65
+        glow2 = shapes.Circle(0, 0, 28, color=(80, 120, 220), batch=self.batch)
+        glow2.opacity = 28
+
+        torso_back = shapes.Ellipse(0, 0, 18, 16, color=(20, 38, 62), batch=self.batch)
+        torso_back.opacity = 230
+        outline = shapes.Circle(0, 0, 16, color=(10, 20, 35), batch=self.batch)
         outline.opacity = 255
         body = shapes.Circle(0, 0, 14, color=(70, 160, 220), batch=self.batch)
-        core = shapes.Circle(0, 0, 9, color=(120, 220, 255), batch=self.batch)
-        highlight = shapes.Circle(0, 0, 6, color=(255, 255, 255), batch=self.batch)
-        highlight.opacity = 55
+        chest = shapes.Ellipse(0, 0, 10, 9, color=(42, 108, 164), batch=self.batch)
+        core = shapes.Circle(0, 0, 6, color=(130, 228, 255), batch=self.batch)
+        core_glow = shapes.Circle(0, 0, 10, color=(145, 220, 255), batch=self.batch)
+        core_glow.opacity = 42
+        highlight = shapes.Circle(0, 0, 5, color=(255, 255, 255), batch=self.batch)
+        highlight.opacity = 60
 
-        backpack = shapes.Rectangle(0, 0, 12, 11, color=(30, 45, 60), batch=self.batch)
-        backpack.anchor_x = 6
-        backpack.anchor_y = 5
-        backpack.opacity = 220
-
-        visor = shapes.Rectangle(0, 0, 12, 4, color=(240, 245, 255), batch=self.batch)
-        visor.anchor_x = 6
+        helmet = shapes.Ellipse(0, 0, 13, 10, color=(92, 180, 240), batch=self.batch)
+        visor = shapes.Rectangle(0, 0, 14, 4, color=(238, 245, 255), batch=self.batch)
+        visor.anchor_x = 7
         visor.anchor_y = 2
-        visor.opacity = 230
+        visor_glow = shapes.Rectangle(0, 0, 16, 2, color=(200, 236, 255), batch=self.batch)
+        visor_glow.anchor_x = 8
+        visor_glow.anchor_y = 1
+        visor_glow.opacity = 110
+
+        shoulder_l = shapes.Circle(0, 0, 4, color=(54, 108, 152), batch=self.batch)
+        shoulder_r = shapes.Circle(0, 0, 4, color=(54, 108, 152), batch=self.batch)
+        arm_l = shapes.Line(0, 0, 0, 0, thickness=4, color=(44, 86, 128), batch=self.batch)
+        arm_r = shapes.Line(0, 0, 0, 0, thickness=4, color=(44, 86, 128), batch=self.batch)
+        arm_l.opacity = 220
+        arm_r.opacity = 220
+
+        leg_l = shapes.Line(0, 0, 0, 0, thickness=4, color=(36, 78, 120), batch=self.batch)
+        leg_r = shapes.Line(0, 0, 0, 0, thickness=4, color=(36, 78, 120), batch=self.batch)
+        boot_l = shapes.Circle(0, 0, 3, color=(165, 210, 245), batch=self.batch)
+        boot_r = shapes.Circle(0, 0, 3, color=(165, 210, 245), batch=self.batch)
+
+        backpack = shapes.Rectangle(0, 0, 12, 12, color=(30, 45, 60), batch=self.batch)
+        backpack.anchor_x = 6
+        backpack.anchor_y = 6
+        backpack.opacity = 220
+        antenna = shapes.Line(0, 0, 0, 0, thickness=2, color=(140, 190, 230), batch=self.batch)
+        antenna.opacity = 180
+        antenna_tip = shapes.Circle(0, 0, 2, color=(190, 240, 255), batch=self.batch)
+        antenna_tip.opacity = 180
 
         gun = shapes.Line(0, 0, 0, 0, thickness=3, color=(230, 230, 240), batch=self.batch)
         gun.opacity = 210
         gun_core = shapes.Line(0, 0, 0, 0, thickness=1, color=(255, 255, 255), batch=self.batch)
         gun_core.opacity = 220
-        arm_l = shapes.Line(0, 0, 0, 0, thickness=3, color=(44, 86, 128), batch=self.batch)
-        arm_r = shapes.Line(0, 0, 0, 0, thickness=3, color=(44, 86, 128), batch=self.batch)
-        arm_l.opacity = 210
-        arm_r.opacity = 210
         thruster_l = shapes.Line(0, 0, 0, 0, thickness=4, color=(130, 210, 255), batch=self.batch)
         thruster_r = shapes.Line(0, 0, 0, 0, thickness=4, color=(130, 210, 255), batch=self.batch)
         thruster_l.opacity = 0
@@ -201,15 +225,29 @@ class Visuals:
         self._player_handle = RenderHandle(
             sh,
             glow,
+            glow2,
             shield_ring2,
             shield_ring,
             laser_ring,
+            torso_back,
+            leg_l,
+            leg_r,
+            boot_l,
+            boot_r,
             outline,
             body,
+            chest,
+            core_glow,
             core,
             highlight,
             backpack,
+            antenna,
+            antenna_tip,
+            helmet,
             visor,
+            visor_glow,
+            shoulder_l,
+            shoulder_r,
             arm_l,
             arm_r,
             gun,
@@ -224,15 +262,29 @@ class Visuals:
         (
             sh,
             glow,
+            glow2,
             shield_ring2,
             shield_ring,
             laser_ring,
+            torso_back,
+            leg_l,
+            leg_r,
+            boot_l,
+            boot_r,
             outline,
             body,
+            chest,
+            core_glow,
             core,
             highlight,
             backpack,
+            antenna,
+            antenna_tip,
+            helmet,
             visor,
+            visor_glow,
+            shoulder_l,
+            shoulder_r,
             arm_l,
             arm_r,
             gun,
@@ -241,35 +293,65 @@ class Visuals:
             thruster_r,
         ) = self._player_handle.objs
         sx, sy = to_iso(player.pos, shake)
-        sh.x, sh.y = sx, sy - 18
-        glow.x, glow.y = sx, sy
-        outline.x, outline.y = sx, sy
-        body.x, body.y = sx, sy
-        core.x, core.y = sx, sy
-        highlight.x, highlight.y = sx - 4, sy + 5
-        backpack.x, backpack.y = sx - 14, sy + 2
-        visor.x, visor.y = sx + 2, sy + 2
-        arm_l.x, arm_l.y = sx - 5, sy + 1
-        arm_l.x2, arm_l.y2 = sx + 1, sy + 5
-        arm_r.x, arm_r.y = sx + 4, sy
-        arm_r.x2, arm_r.y2 = sx + 10, sy + 4
-
-        # Aim direction affects gun orientation.
         if aim_dir is None or aim_dir.length() <= 1e-6:
             aim_dir = Vec2(1, 0)
+        bob = math.sin(t * 6.0) * 1.5
+        gait = math.sin(t * 10.5)
+        lean_x = aim_dir.x * 2.2
+        lean_y = aim_dir.y * 1.1
+
+        cx = sx + lean_x
+        cy = sy + bob + lean_y
+        sh.x, sh.y = sx, sy - 19
+        glow.x, glow.y = cx, cy
+        glow2.x, glow2.y = cx, cy + 1
+        torso_back.x, torso_back.y = cx - 0.5, cy + 0.5
+        outline.x, outline.y = cx, cy
+        body.x, body.y = cx, cy
+        chest.x, chest.y = cx + 1.0, cy - 1.0
+        core_glow.x, core_glow.y = cx + 1.0, cy - 1.0
+        core.x, core.y = cx + 1.0, cy - 1.0
+        core_glow.opacity = int(34 + 18 * (0.5 + 0.5 * math.sin(t * 7.8)))
+        highlight.x, highlight.y = cx - 4, cy + 5
+
+        hip_x, hip_y = cx - 1, cy - 8
+        leg_l.x, leg_l.y = hip_x - 3, hip_y
+        leg_l.x2, leg_l.y2 = hip_x - 3 + gait * 1.2, hip_y - 7
+        leg_r.x, leg_r.y = hip_x + 3, hip_y
+        leg_r.x2, leg_r.y2 = hip_x + 3 - gait * 1.2, hip_y - 7
+        boot_l.x, boot_l.y = leg_l.x2, leg_l.y2 - 1
+        boot_r.x, boot_r.y = leg_r.x2, leg_r.y2 - 1
+
+        backpack.x, backpack.y = cx - 12, cy + 1
+        antenna.x, antenna.y = backpack.x - 1, backpack.y + 4
+        antenna.x2, antenna.y2 = antenna.x - 2, antenna.y + 8
+        antenna_tip.x, antenna_tip.y = antenna.x2, antenna.y2
+
+        helmet.x, helmet.y = cx + 2, cy + 5
+        visor.x, visor.y = cx + 3, cy + 5
+        visor_glow.x, visor_glow.y = cx + 3, cy + 5
+        visor_glow.opacity = int(90 + 40 * (0.5 + 0.5 * math.sin(t * 5.4)))
+
+        # Aim direction affects gun orientation.
         gun_len = 18
-        gx = sx + 4
-        gy = sy + 2
+        gx = cx + 4
+        gy = cy + 2
         gun.x, gun.y = gx, gy
         gun.x2, gun.y2 = gx + aim_dir.x * gun_len, gy + aim_dir.y * gun_len * 0.65
         gun_core.x, gun_core.y = gun.x, gun.y
         gun_core.x2, gun_core.y2 = gun.x2, gun.y2
+        shoulder_l.x, shoulder_l.y = cx - 6, cy + 1
+        shoulder_r.x, shoulder_r.y = cx + 5, cy + 1
+        arm_l.x, arm_l.y = shoulder_l.x, shoulder_l.y
+        arm_l.x2, arm_l.y2 = cx - 1, cy + 4
+        arm_r.x, arm_r.y = shoulder_r.x, shoulder_r.y
+        arm_r.x2, arm_r.y2 = gun.x, gun.y
 
         if bool(getattr(player, "is_dashing", False)):
             dash_pulse = 0.6 + 0.4 * math.sin(t * 40.0)
             back = Vec2(-aim_dir.x, -aim_dir.y)
-            tx1, ty1 = sx - 8, sy - 1
-            tx2, ty2 = sx - 2, sy - 4
+            tx1, ty1 = cx - 9, cy - 1
+            tx2, ty2 = cx - 3, cy - 4
             thruster_l.x, thruster_l.y = tx1, ty1
             thruster_l.x2, thruster_l.y2 = tx1 + back.x * (20 + 12 * dash_pulse), ty1 + back.y * (14 + 10 * dash_pulse)
             thruster_r.x, thruster_r.y = tx2, ty2
@@ -283,8 +365,8 @@ class Visuals:
         # Shield aura
         if getattr(player, "shield", 0) > 0:
             pulse = 0.65 + 0.35 * math.sin(t * 6.5)
-            shield_ring.x, shield_ring.y = sx, sy
-            shield_ring2.x, shield_ring2.y = sx, sy
+            shield_ring.x, shield_ring.y = cx, cy
+            shield_ring2.x, shield_ring2.y = cx, cy
             shield_ring.radius = 18 + 2.0 * pulse
             shield_ring2.radius = 24 + 3.0 * pulse
             shield_ring.opacity = int(90 + min(120, player.shield) * 1.0 * pulse)
@@ -296,13 +378,13 @@ class Visuals:
         # Laser aura
         if getattr(player, "laser_until", 0.0) > t:
             pulse = 0.6 + 0.4 * math.sin(t * 10.0)
-            laser_ring.x, laser_ring.y = sx, sy
+            laser_ring.x, laser_ring.y = cx, cy
             laser_ring.radius = 22 + 3.0 * pulse
             laser_ring.opacity = int(160 * pulse)
         else:
             laser_ring.opacity = 0
 
-        self._set_depth(self._player_handle, sy)
+        self._set_depth(self._player_handle, cy)
 
     def ensure_enemy(self, enemy):
         """Ensure enemy visual exists."""

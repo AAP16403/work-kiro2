@@ -56,6 +56,7 @@ from logic import BalanceLogic
 from level import get_difficulty_mods
 from player import Player, perform_dash, recharge_dash, format_dash_hud
 from fsm import State, StateMachine
+from advanced_fx import AdvancedFX
 
 
 def _draw_playing_scene(game) -> None:
@@ -648,12 +649,19 @@ class Game(pyglet.window.Window):
             "window_size": (self.width, self.height),
             "fullscreen": True,
             "arena_margin": float(getattr(config, "ARENA_MARGIN", 0.97)),
+            "advanced_fx": bool(getattr(config, "ENABLE_ADVANCED_FX", True)),
         }
         self._windowed_size = (self.width, self.height)
         
         # Menu system
         self.main_menu = Menu(self.width, self.height)
-        self.settings_menu = SettingsMenu(self.width, self.height, self._on_settings_change, display_size=self._display_size)
+        self.settings_menu = SettingsMenu(
+            self.width,
+            self.height,
+            self._on_settings_change,
+            display_size=self._display_size,
+            advanced_fx_enabled=bool(self.settings.get("advanced_fx", True)),
+        )
         self.guide_menu = GuideMenu(self.width, self.height)
         self.pause_menu = PauseMenu(self.width, self.height)
         self.rpg_menu = BossRewardMenu(self.width, self.height, self._apply_temp_reward, self._apply_perm_reward)
@@ -680,6 +688,9 @@ class Game(pyglet.window.Window):
         self._frame_dt_cap = self.balance.frame_dt_cap
         self._max_catchup_steps = self.balance.max_catchup_steps
         self._accumulator = 0.0
+        self._render_time = 0.0
+        self.advanced_fx = AdvancedFX(self.width, self.height)
+        self.advanced_fx.enabled = bool(self.settings.get("advanced_fx", True))
 
         # Cached UI labels to avoid per-frame allocations.
         self._pause_hint = pyglet.text.Label(
@@ -1139,6 +1150,8 @@ class Game(pyglet.window.Window):
                 self.particle_system.add_shield_hit(self.player.pos, absorbed)
         if amount > 0:
             self.player.hp -= amount
+            if getattr(self, "advanced_fx", None):
+                self.advanced_fx.trigger_hit(min(1.0, 0.28 + amount * 0.03))
 
     def _use_ultra(self):
         if not self.state or not self.player:
@@ -1245,6 +1258,8 @@ class Game(pyglet.window.Window):
 
         self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)
         self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN) * float(getattr(self, "_ultra_cd_mult", 1.0))
+        if getattr(self, "advanced_fx", None):
+            self.advanced_fx.trigger_ultra(1.0)
 
     def _dash(self):
         if not self.state or not self.player:
@@ -1258,6 +1273,8 @@ class Game(pyglet.window.Window):
         )
         if did_dash:
             self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction)
+            if getattr(self, "advanced_fx", None):
+                self.advanced_fx.trigger_dash(0.7)
 
     def _enemy_radius(self, enemy) -> float:
         return self.balance.enemy_radius(enemy_behavior_name(enemy))
@@ -1284,12 +1301,37 @@ class Game(pyglet.window.Window):
             self.close()
             pyglet.app.exit()
         pyglet.clock.schedule_once(_close, 0)
+
+    @staticmethod
+    def _coerce_bool(value, default: bool = True) -> bool:
+        """Parse common bool-ish values safely (including string forms)."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            v = value.strip().lower()
+            if v in {"1", "true", "yes", "on", "enabled"}:
+                return True
+            if v in {"0", "false", "no", "off", "disabled"}:
+                return False
+        return bool(default)
     
     def _on_settings_change(self, value):
         """Callback for settings changes."""
         if not isinstance(value, dict):
             return
         self.settings.update(value)
+        advanced_fx = value.get("advanced_fx")
+        if advanced_fx is not None:
+            fx_enabled = self._coerce_bool(advanced_fx, default=bool(getattr(config, "ENABLE_ADVANCED_FX", True)))
+            self.settings["advanced_fx"] = fx_enabled
+            config.ENABLE_ADVANCED_FX = fx_enabled
+            if getattr(self, "advanced_fx", None):
+                self.advanced_fx.enabled = fx_enabled
+            if getattr(self, "settings_menu", None):
+                self.settings_menu.advanced_fx = fx_enabled
+                self.settings_menu._refresh_fx_button_text()
         fullscreen = value.get("fullscreen")
         arena_margin = value.get("arena_margin")
         if arena_margin is not None:
@@ -1354,6 +1396,8 @@ class Game(pyglet.window.Window):
         if self.state:
             if config.ENABLE_OBSTACLES:
                 self._regen_layout(getattr(self.state, "layout_segment", 0))
+        if getattr(self, "advanced_fx", None):
+            self.advanced_fx.resize(width, height)
     
     def _return_to_menu(self):
         """Return to main menu."""
@@ -1418,6 +1462,7 @@ class Game(pyglet.window.Window):
     def update(self, dt: float):
         """Update game logic."""
         frame_dt = max(0.0, min(float(dt), self._frame_dt_cap))
+        self._render_time += frame_dt
         self._accumulator += frame_dt
         steps = 0
         while self._accumulator >= self._fixed_dt and steps < self._max_catchup_steps:
@@ -1432,6 +1477,15 @@ class Game(pyglet.window.Window):
         """Render the game."""
         self.clear()
         self.fsm.draw()
+        ci = float(getattr(getattr(self, "room", None), "combat_intensity", 0.0))
+        hp_ratio = 1.0
+        boss_active = False
+        if getattr(self, "player", None):
+            hp_max = max(1, int(getattr(self.player, "max_hp", 100)))
+            hp_ratio = max(0.0, min(1.0, float(getattr(self.player, "hp", hp_max)) / float(hp_max)))
+        if getattr(self, "state", None):
+            boss_active = any(enemy_behavior_name(e).startswith("boss_") for e in getattr(self.state, "enemies", []))
+        self.advanced_fx.render(self._render_time, ci, hp_ratio=hp_ratio, boss_active=boss_active)
 
 
 def main():

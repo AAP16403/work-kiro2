@@ -5,6 +5,7 @@ __pycache__/
 
 build/
 dist/
+release/
 
 .pytest_cache/
 .mypy_cache/
@@ -12,6 +13,7 @@ dist/
 
 *.log
 _run*.log
+*.zip
 
 # Android / Buildozer (kept in-repo scripts, ignore generated env/artifacts)
 android/.venv_buildozer/

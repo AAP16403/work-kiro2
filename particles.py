@@ -197,6 +197,15 @@ class ParticleSystem:
             self._add_spark(p, vel, length=random.uniform(12, 18), color=color, ttl=0.12, drag=6.0)
         self._add_ring(pos, radius=radius * 0.45, color=color, ttl=0.18, thickness=3.0)
 
+    def add_dash_effect(self, pos: Vec2, direction: Vec2):
+        # A burst of sparks in the opposite direction of the dash.
+        back = -direction
+        for _ in range(12):
+            angle = math.atan2(back.y, back.x) + random.uniform(-0.6, 0.6)
+            speed = random.uniform(200, 450)
+            vel = Vec2(math.cos(angle) * speed, math.sin(angle) * speed)
+            self._add_spark(pos, vel, length=random.uniform(12, 20), color=(180, 220, 255), ttl=random.uniform(0.15, 0.3), drag=3.0)
+
     def add_laser_beam(self, start: Vec2, end: Vec2, color: Color = (255, 120, 255)):
         # A few sparks along the beam for energy feel.
         dx = end.x - start.x

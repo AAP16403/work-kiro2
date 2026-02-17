@@ -44,7 +44,7 @@ from menu import (
 from rpg import BossRewardMenu
 from hazards import LaserBeam
 from layout import generate_obstacles
-from logic import BalanceLogic
+from logic import BalanceLogic, EnemyTuningLogic
 from fsm import State, StateMachine
 
 
@@ -137,11 +137,13 @@ class PlayingState(State):
             self.game.fsm.set_state("PausedState")
         elif symbol == pyglet.window.key.Q:
             self.game._use_ultra()
+        elif symbol == pyglet.window.key.SPACE:
+            self.game._dash()
 
     def on_mouse_press(self, x, y, button, modifiers):
         self.game.mouse_xy = (x, y)
         if button == pyglet.window.mouse.LEFT:
-            self.game.mouse_down = True
+            self.game.auto_shoot = not self.game.auto_shoot
         elif button == pyglet.window.mouse.RIGHT:
             self.game._rmb_down = True
             self.game._use_ultra()
@@ -154,9 +156,7 @@ class PlayingState(State):
         self.game._rmb_down = rmb_pressed
 
     def on_mouse_release(self, x, y, button, modifiers):
-        if button == pyglet.window.mouse.LEFT:
-            self.game.mouse_down = False
-        elif button == pyglet.window.mouse.RIGHT:
+        if button == pyglet.window.mouse.RIGHT:
             self.game._rmb_down = False
 
     @staticmethod
@@ -187,6 +187,8 @@ class PlayingState(State):
 
         s = game.state
         s.time += dt
+        if game.player.invincibility_timer > 0:
+            game.player.invincibility_timer -= dt
 
         if not s.wave_active and (s.time - s.last_wave_clear) >= WAVE_COOLDOWN:
             spawn_wave(s, Vec2(0.0, 0.0))
@@ -233,11 +235,17 @@ class PlayingState(State):
                 game.visuals.drop_thunder(th)
 
         old_pos = Vec2(game.player.pos.x, game.player.pos.y)
-        idir = game._input_dir()
-        if idir.length() > 0:
-            nd = idir.normalized()
-            game.player.pos = game.player.pos + nd * game._effective_player_speed() * dt
-            game.particle_system.add_step_dust(game.player.pos, nd)
+        if game.player.is_dashing:
+            game.player.pos += game.player.dash_direction * game.player.dash_speed * dt
+            game.player.dash_timer -= dt
+            if game.player.dash_timer <= 0:
+                game.player.is_dashing = False
+        else:
+            idir = game._input_dir()
+            if idir.length() > 0:
+                nd = idir.normalized()
+                game.player.pos = game.player.pos + nd * game._effective_player_speed() * dt
+                game.particle_system.add_step_dust(game.player.pos, nd)
         game.player.pos = clamp_to_room(game.player.pos, config.ROOM_RADIUS * 0.9)
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
             game.player.pos = resolve_circle_obstacles(game.player.pos, game._player_radius(), s.obstacles)
@@ -248,7 +256,7 @@ class PlayingState(State):
             player_vel = Vec2(0.0, 0.0)
 
         weapon_cd = get_effective_fire_rate(game.player.current_weapon, game._effective_player_fire_rate())
-        if game.mouse_down and (s.time - game.player.last_shot) >= weapon_cd:
+        if game.auto_shoot and (s.time - game.player.last_shot) >= weapon_cd:
             world_mouse = iso_to_world(game.mouse_xy)
             aim = (world_mouse - game.player.pos).normalized()
             muzzle = game.player.pos + aim * 14.0
@@ -501,9 +509,11 @@ class PlayingState(State):
             boss_name = enemy_behavior_name(boss)
             boss_txt = f"BOSS {boss_name[5:].replace('_', ' ').title()} HP {boss.hp}"
         
+        dash_cd = max(0.0, float(game.player.dash_cooldown) - game.state.time)
+        dash_txt = f"Dash {dash_cd:.1f}s" if dash_cd > 0 else ""
         temp_txt = game._active_temp_hud_text()
         perm_txt = game._perm_hud_text()
-        status_parts = [p for p in (laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt, boss_txt) if p]
+        status_parts = [p for p in (dash_txt, laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt, boss_txt) if p]
         status_text = "   |   ".join(status_parts) if status_parts else "No active effects"
         max_chars = int(getattr(game, "_hud_status_max_chars", 120))
         if len(status_text) > max_chars:
@@ -630,6 +640,7 @@ class Game(pyglet.window.Window):
         self.mouse_xy = (self.width / 2, self.height / 2)
         self.mouse_down = False
         self._rmb_down = False
+        self.auto_shoot = False
         self.balance = BalanceLogic(fps=float(FPS))
         self._fixed_dt = self.balance.fixed_dt
         self._frame_dt_cap = self.balance.frame_dt_cap
@@ -754,6 +765,10 @@ class Game(pyglet.window.Window):
         self._temp_fire_rate_mult = 1.0
         self._temp_incoming_damage_mult = 1.0
         self._ultra_cd_mult = 1.0
+        self._dash_cd_mult = 1.0
+        _tuning = EnemyTuningLogic()
+        _diff_mods = _tuning.difficulty_mods(difficulty)
+        self._dash_cd_difficulty = float(_diff_mods.get("dash_cd", 1.0))
 
         self.visuals = Visuals(self.batch, self.groups)
         self.visuals.make_player()
@@ -1071,6 +1086,7 @@ class Game(pyglet.window.Window):
             "perm_fire": "Trigger",
             "perm_shield": "Shield",
             "perm_ultra": "Ultra+",
+            "perm_dash": "Dash+",
         }
         shown = []
         for k in vals[:3]:
@@ -1098,6 +1114,7 @@ class Game(pyglet.window.Window):
             {"key": "perm_fire", "title": "Trigger Tuning", "desc": "Slightly faster shots this run"},
             {"key": "perm_shield", "title": "Shield Layer", "desc": "+18 shield now"},
             {"key": "perm_ultra", "title": "Ultra Charge", "desc": "+1 Ultra charge now"},
+            {"key": "perm_dash", "title": "Quick Dash", "desc": "Dash cooldown reduced this run"},
         ]
         active_temp = {str(x.get("key", "")) for x in self._active_temp_rewards}
         temp_candidates = [x for x in temp_pool if x["key"] not in active_temp and x["key"] != self._last_reward_temp_key]
@@ -1150,6 +1167,8 @@ class Game(pyglet.window.Window):
             p.shield = min(120, int(getattr(p, "shield", 0)) + 18)
         elif k == "perm_ultra":
             p.ultra_charges = min(int(getattr(config, "ULTRA_MAX_CHARGES", 2)), int(p.ultra_charges) + 1)
+        elif k == "perm_dash":
+            self._dash_cd_mult = max(0.5, float(getattr(self, "_dash_cd_mult", 1.0)) * 0.88)
         else:
             return
         self._last_reward_perm_key = k
@@ -1182,6 +1201,8 @@ class Game(pyglet.window.Window):
         )
 
     def _damage_player(self, amount: int):
+        if self.player.invincibility_timer > 0:
+            return
         if amount <= 0:
             return
         mult = getattr(self, "_incoming_damage_mult", 1.0) * getattr(self, "_temp_incoming_damage_mult", 1.0)
@@ -1301,6 +1322,34 @@ class Game(pyglet.window.Window):
 
         self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)
         self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN) * float(getattr(self, "_ultra_cd_mult", 1.0))
+
+    def _dash(self):
+        if not self.state or not self.player:
+            return
+
+        s = self.state
+        if s.time < self.player.dash_cooldown:
+            return
+        if self.player.is_dashing:
+            return
+
+        self.player.is_dashing = True
+        self.player.dash_timer = 0.15  # seconds
+        base_cd = float(self.balance.dash_cooldown)
+        diff_mod = float(getattr(self, "_dash_cd_difficulty", 1.0))
+        perm_mod = float(getattr(self, "_dash_cd_mult", 1.0))
+        self.player.dash_cooldown = s.time + base_cd * diff_mod * perm_mod  # seconds
+        self.player.invincibility_timer = 0.15 # seconds
+
+        idir = self._input_dir()
+        if idir.length() > 0:
+            self.player.dash_direction = idir.normalized()
+        else:
+            # Dash towards mouse if no movement keys are pressed
+            world_mouse = iso_to_world(self.mouse_xy)
+            self.player.dash_direction = (world_mouse - self.player.pos).normalized()
+        
+        self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction)
 
     def _enemy_radius(self, enemy) -> float:
         return self.balance.enemy_radius(enemy_behavior_name(enemy))

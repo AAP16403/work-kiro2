@@ -29,3 +29,9 @@ class Player:
     ultra_cd_until: float = 0.0
     ultra_variant_idx: int = 0
     current_weapon: "Weapon" = field(default=None)  # Will be set in Game.__init__
+    is_dashing: bool = False
+    dash_timer: float = 0.0
+    dash_cooldown: float = 0.0
+    dash_direction: Vec2 = field(default_factory=lambda: Vec2(0, 0))
+    dash_speed: float = 800.0
+    invincibility_timer: float = 0.0

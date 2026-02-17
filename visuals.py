@@ -375,6 +375,21 @@ class Visuals:
             self._enemy_handles[id(enemy)] = RenderHandle(sh, body, backpack, visor, tool, tool2, gear)
             return
 
+        if behavior == "egg_sac":
+            # Organic pulsating sac
+            sh.width = 18
+            sh.height = 8
+            body = shapes.Circle(0, 0, 15, color=(200, 180, 190), batch=self.batch)
+            vein1 = shapes.Arc(0, 0, 14, segments=16, thickness=2, color=(160, 60, 80), batch=self.batch)
+            vein1.opacity = 140
+            vein2 = shapes.Arc(0, 0, 10, segments=16, thickness=2, color=(160, 60, 80), batch=self.batch)
+            vein2.rotation = 90
+            vein2.opacity = 140
+            core = shapes.Circle(0, 0, 6, color=(255, 100, 120), batch=self.batch)
+            core.opacity = 180
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, vein1, vein2, core)
+            return
+
         body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
         shine = shapes.Circle(0, 0, 7, color=(255, 255, 255), batch=self.batch)
         shine.opacity = 60
@@ -465,6 +480,31 @@ class Visuals:
             gear.x, gear.y = sx - 12, sy + 2 + bob
             gear.radius = 17 + 1.5 * math.sin(enemy.t * 5.0)
             gear.opacity = 40 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 3.0)))
+            self._set_depth(h, sy)
+            return
+
+        if behavior == "egg_sac":
+            sh, body, vein1, vein2, core = h.objs
+            sh.x, sh.y = sx, sy - 18
+            
+            # Heartbeat pulse
+            pulse = 0.8 + 0.2 * math.sin(enemy.t * 8.0)
+            if hasattr(enemy, "ai") and enemy.ai.get("hatch_timer", 0) < 1.0:
+                 # Fast pulse before hatching
+                 pulse = 0.8 + 0.3 * math.sin(enemy.t * 18.0)
+            
+            body.x, body.y = sx, sy + bob
+            body.radius = 15 * pulse
+            
+            vein1.x, vein1.y = sx, sy + bob
+            vein1.radius = 14 * pulse
+            
+            vein2.x, vein2.y = sx, sy + bob
+            vein2.radius = 10 * pulse
+
+            core.x, core.y = sx, sy + bob
+            core.radius = 6 * pulse + 2 * math.sin(enemy.t * 12.0)
+            
             self._set_depth(h, sy)
             return
 

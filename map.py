@@ -256,7 +256,7 @@ class Room:
             x3, y3 = to_iso(p3, Vec2(0, 0))
             x4, y4 = to_iso(p4, Vec2(0, 0))
 
-            col = random.choice([(58, 56, 52), (48, 46, 42), (62, 58, 54), (44, 42, 40)])
+            col = random.choice([(42, 45, 50), (35, 38, 42), (48, 52, 60), (32, 35, 40)])
             poly = shapes.Polygon((x1, y1), (x2, y2), (x3, y3), (x4, y4), color=col, batch=self.batch)
             poly.opacity = random.randint(22, 46)
             self._decor.append(poly)
@@ -297,11 +297,38 @@ class Room:
                 glow.opacity = random.randint(20, 40)
                 self._decor.append(glow)
 
-        # Pavement cracks — subtle dark fissure lines across the floor.
+        # Central Reactor Seal Decal
+        # A large, complex geometric pattern in the center.
+        seal_r = radius * 0.35
+        seal_segments = 64
+        seal_color = (60, 70, 85)
+        seal_points = []
+        for i in range(seal_segments):
+            a = (i / seal_segments) * math.tau
+            r_mod = seal_r * (0.9 + 0.1 * math.cos(a * 4))
+            seal_points.append(to_iso(Vec2(math.cos(a) * r_mod, math.sin(a) * r_mod), Vec2(0, 0)))
+        
+        # Draw the seal lines
+        for i in range(seal_segments):
+            p1 = seal_points[i]
+            p2 = seal_points[(i + 1) % seal_segments]
+            ln = shapes.Line(p1[0], p1[1], p2[0], p2[1], thickness=2, color=seal_color, batch=self.batch)
+            ln.opacity = 60
+            self._decor.append(ln)
+            # Inner spokes
+            if i % 8 == 0:
+                p3 = to_iso(Vec2(0, 0), Vec2(0, 0))
+                spoke = shapes.Line(p1[0], p1[1], p3[0], p3[1], thickness=1, color=seal_color, batch=self.batch)
+                spoke.opacity = 40
+                self._decor.append(spoke)
+
+        # Pavement cracks — subtle dark fissure lines across the floor (cooled down).
         crack_count = max(8, min(18, int(radius * 0.04)))
         for _ in range(crack_count):
             ang = random.uniform(0.0, math.tau)
             r_start = (random.random() ** 0.6) * (radius * 0.75)
+            if r_start < seal_r:  # Don't draw cracks over the seal
+                r_start = seal_r + (seal_r * 0.2)
             start = Vec2(math.cos(ang) * r_start, math.sin(ang) * r_start)
             # Crack follows a slightly bent path.
             seg_count = random.randint(2, 4)
@@ -314,9 +341,9 @@ class Room:
                     break
                 cx1, cy1 = to_iso(cur, Vec2(0, 0))
                 cx2, cy2 = to_iso(nxt, Vec2(0, 0))
-                crack_col = random.choice([(35, 33, 30), (40, 38, 34), (30, 28, 25)])
+                crack_col = random.choice([(25, 30, 35), (20, 25, 30), (15, 20, 25)])
                 ln = shapes.Line(cx1, cy1, cx2, cy2, thickness=random.choice([1, 1, 2]), color=crack_col, batch=self.batch)
-                ln.opacity = random.randint(60, 110)
+                ln.opacity = random.randint(50, 90)
                 self._decor.append(ln)
                 cur = nxt
                 ang = seg_ang
@@ -386,12 +413,12 @@ class Room:
         # Update intensity overlay color and opacity.
         if self._intensity_overlay is not None:
             ci = self._combat_intensity
-            # Blend from cool blue-grey (calm) to warm red (boss).
-            r = int(40 + 60 * ci)
-            g = int(35 - 10 * ci)
-            b = int(50 - 30 * ci)
+            # Blend from cool blue-grey (calm) to alarm red (boss).
+            r = int(30 + 100 * ci)
+            g = int(35 - 15 * ci)
+            b = int(42 - 20 * ci)
             self._intensity_overlay.color = (r, g, b)
-            self._intensity_overlay.opacity = int(18 * ci)
+            self._intensity_overlay.opacity = int(24 * ci)
 
         # Subtle pulsing grid opacity for depth.
         pulse = 0.5 + 0.5 * math.sin(self._t * 0.8)

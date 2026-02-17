@@ -7,7 +7,6 @@ allocating new Shapes every frame.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
 import math
 import random
 
@@ -17,7 +16,7 @@ from pyglet import shapes
 from utils import Vec2, to_iso
 
 
-Color = Tuple[int, int, int]
+Color = tuple[int, int, int]
 
 
 @dataclass
@@ -37,14 +36,14 @@ class Particle:
     angle: float = 0.0
 
     # Render objects created once and then updated/reused.
-    objs: List[object] = field(default_factory=list)
+    objs: list[object] = field(default_factory=list)
 
 
 class ParticleSystem:
     """Manages particles and renders them with a dedicated Batch."""
 
     def __init__(self):
-        self.particles: List[Particle] = []
+        self.particles: list[Particle] = []
         self.batch = pyglet.graphics.Batch()
 
     # ----------------------------

@@ -1,13 +1,18 @@
 """Weapon system with different projectile types."""
 
 from dataclasses import dataclass
-from typing import List
 from projectile import Projectile
 from utils import Vec2
 from config import PLAYER_FIRE_RATE
 import random
 import math
 
+
+def _rotate_dir(aim: Vec2, angle_deg: float) -> Vec2:
+    """Rotate aim direction by angle_deg degrees."""
+    rad = math.radians(angle_deg)
+    c, s = math.cos(rad), math.sin(rad)
+    return Vec2(aim.x * c - aim.y * s, aim.x * s + aim.y * c)
 
 @dataclass
 class Weapon:
@@ -116,7 +121,7 @@ def spawn_weapon_projectiles(
     weapon: Weapon,
     current_time: float,
     base_damage: int
-) -> List[Projectile]:
+) -> list[Projectile]:
     """Spawn projectiles based on weapon type."""
     projectiles = []
     
@@ -126,16 +131,8 @@ def spawn_weapon_projectiles(
     if weapon.projectile_type == "bullet":
         for i in range(weapon.projectile_count):
             angle_offset = (i - weapon.projectile_count / 2 + 0.5) * weapon.spread_angle
-            angle_rad = math.radians(angle_offset)
-            
-            # Rotate aim direction
-            cos_a = math.cos(angle_rad)
-            sin_a = math.sin(angle_rad)
-            rotated_x = aim_direction.x * cos_a - aim_direction.y * sin_a
-            rotated_y = aim_direction.x * sin_a + aim_direction.y * cos_a
-            
-            vel = Vec2(rotated_x, rotated_y) * weapon.projectile_speed
-            
+            d = _rotate_dir(aim_direction, angle_offset)
+            vel = d * weapon.projectile_speed
             projectiles.append(Projectile(
                 muzzle, vel, final_damage,
                 ttl=2.0, owner="player", projectile_type="bullet"
@@ -144,39 +141,23 @@ def spawn_weapon_projectiles(
     elif weapon.projectile_type == "spread":
         for i in range(weapon.projectile_count):
             angle_offset = (i - weapon.projectile_count / 2 + 0.5) * weapon.spread_angle
-            angle_rad = math.radians(angle_offset)
-            
-            cos_a = math.cos(angle_rad)
-            sin_a = math.sin(angle_rad)
-            rotated_x = aim_direction.x * cos_a - aim_direction.y * sin_a
-            rotated_y = aim_direction.x * sin_a + aim_direction.y * cos_a
-            
-            vel = Vec2(rotated_x, rotated_y) * weapon.projectile_speed
-            
+            d = _rotate_dir(aim_direction, angle_offset)
+            vel = d * weapon.projectile_speed
             projectiles.append(Projectile(
                 muzzle, vel, final_damage,
                 ttl=2.2, owner="player", projectile_type="spread"
             ))
     
     elif weapon.projectile_type == "missile":
-        # Larger, slower projectiles
         vel = aim_direction * weapon.projectile_speed
         muzzle_extended = muzzle + aim_direction * 4.0
         projectiles.append(Projectile(muzzle_extended, vel, final_damage, ttl=3.0, owner="player", projectile_type="missile"))
     
     elif weapon.projectile_type == "plasma":
-        # Multiple projectiles with spread
         for i in range(weapon.projectile_count):
             angle_offset = (i - weapon.projectile_count / 2 + 0.5) * weapon.spread_angle
-            angle_rad = math.radians(angle_offset)
-            
-            cos_a = math.cos(angle_rad)
-            sin_a = math.sin(angle_rad)
-            rotated_x = aim_direction.x * cos_a - aim_direction.y * sin_a
-            rotated_y = aim_direction.x * sin_a + aim_direction.y * cos_a
-            
-            vel = Vec2(rotated_x, rotated_y) * weapon.projectile_speed
-            
+            d = _rotate_dir(aim_direction, angle_offset)
+            vel = d * weapon.projectile_speed
             projectiles.append(Projectile(muzzle, vel, final_damage, ttl=2.5, owner="player", projectile_type="plasma"))
     
     return projectiles

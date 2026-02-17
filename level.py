@@ -2,7 +2,6 @@
 
 import random
 from dataclasses import dataclass, field
-from typing import List
 
 import config
 from enemy import Enemy
@@ -23,13 +22,13 @@ class GameState:
     difficulty: str = "normal"
     layout_seed: int = 0
     layout_segment: int = 0
-    obstacles: List[Obstacle] = field(default_factory=list)
-    enemies: List[Enemy] = field(default_factory=list)
-    projectiles: List[Projectile] = field(default_factory=list)
-    powerups: List[PowerUp] = field(default_factory=list)
-    traps: List[Trap] = field(default_factory=list)
-    lasers: List[LaserBeam] = field(default_factory=list)
-    thunders: List[ThunderLine] = field(default_factory=list)
+    obstacles: list[Obstacle] = field(default_factory=list)
+    enemies: list[Enemy] = field(default_factory=list)
+    projectiles: list[Projectile] = field(default_factory=list)
+    powerups: list[PowerUp] = field(default_factory=list)
+    traps: list[Trap] = field(default_factory=list)
+    lasers: list[LaserBeam] = field(default_factory=list)
+    thunders: list[ThunderLine] = field(default_factory=list)
     wave_active: bool = False
     last_wave_clear: float = 0.0
     shake: float = 0.0

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import random
-from typing import List
 
 from utils import Vec2, dist
 

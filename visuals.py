@@ -1,6 +1,7 @@
 """Visual rendering system."""
 
-from typing import Dict, Optional
+from __future__ import annotations
+
 import math
 
 import pyglet
@@ -15,7 +16,7 @@ class GroupCache:
     """Cache for rendering groups for depth sorting."""
 
     def __init__(self):
-        self._cache: Dict[int, object] = {}
+        self._cache: dict[int, object] = {}
 
     def get(self, order: int):
         g = self._cache.get(order)
@@ -50,14 +51,14 @@ class Visuals:
         self.batch = batch
         self.groups = group_cache
 
-        self._enemy_handles: Dict[int, RenderHandle] = {}
-        self._proj_handles: Dict[int, RenderHandle] = {}
-        self._power_handles: Dict[int, RenderHandle] = {}
-        self._obstacle_handles: Dict[int, RenderHandle] = {}
-        self._trap_handles: Dict[int, RenderHandle] = {}
-        self._laser_handles: Dict[int, RenderHandle] = {}
-        self._thunder_handles: Dict[int, RenderHandle] = {}
-        self._player_handle: Optional[RenderHandle] = None
+        self._enemy_handles: dict[int, RenderHandle] = {}
+        self._proj_handles: dict[int, RenderHandle] = {}
+        self._power_handles: dict[int, RenderHandle] = {}
+        self._obstacle_handles: dict[int, RenderHandle] = {}
+        self._trap_handles: dict[int, RenderHandle] = {}
+        self._laser_handles: dict[int, RenderHandle] = {}
+        self._thunder_handles: dict[int, RenderHandle] = {}
+        self._player_handle: RenderHandle | None = None
 
     def _set_depth(self, handle: RenderHandle, y: float) -> None:
         handle.set_group(self.groups.get(int(SCREEN_H + 1000 - y)))
@@ -116,7 +117,7 @@ class Visuals:
             gun_core,
         )
 
-    def sync_player(self, player, shake: Vec2, t: float = 0.0, aim_dir: Optional[Vec2] = None):
+    def sync_player(self, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None):
         """Update player visual position."""
         assert self._player_handle is not None
         (

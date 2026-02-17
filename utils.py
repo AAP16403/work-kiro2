@@ -3,7 +3,6 @@
 import math
 import random
 from dataclasses import dataclass
-from typing import Tuple
 
 from config import ISO_SCALE_X, ISO_SCALE_Y, SCREEN_H, SCREEN_W
 
@@ -93,14 +92,14 @@ class Vec2:
         return Vec2(self.x / l, self.y / l)
 
 
-def to_iso(world: Vec2, shake: Vec2) -> Tuple[float, float]:
+def to_iso(world: Vec2, shake: Vec2) -> tuple[float, float]:
     """Convert world coordinates to isometric screen coordinates."""
     ix = (world.x - world.y) * ISO_SCALE_X
     iy = (world.x + world.y) * ISO_SCALE_Y
     return (ix + VIEW_W / 2 + shake.x, iy + VIEW_H / 2 + shake.y)
 
 
-def iso_to_world(screen_xy: Tuple[float, float]) -> Vec2:
+def iso_to_world(screen_xy: tuple[float, float]) -> Vec2:
     """Convert isometric screen coordinates to world coordinates."""
     ix = screen_xy[0] - VIEW_W / 2
     iy = screen_xy[1] - VIEW_H / 2

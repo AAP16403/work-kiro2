@@ -2,7 +2,6 @@
 
 import math
 import random
-from typing import List
 
 from pyglet import shapes
 
@@ -16,11 +15,11 @@ class Room:
 
     def __init__(self, batch, width: int, height: int):
         self.batch = batch
-        self._grid: List[object] = []
-        self._boundary: List[tuple[object, float]] = []
-        self._pulse_lines: List[tuple[object, int, float]] = []
-        self._pulse_nodes: List[tuple[object, int, float]] = []
-        self._decor: List[object] = []
+        self._grid: list[object] = []
+        self._boundary: list[tuple[object, float]] = []
+        self._pulse_lines: list[tuple[object, int, float]] = []
+        self._pulse_nodes: list[tuple[object, int, float]] = []
+        self._decor: list[object] = []
         self._floor = None
         self._edge = None
         self._t = 0.0

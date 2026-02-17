@@ -2,7 +2,6 @@
 # Controls: WASD/Arrows move, hold Left Mouse to shoot, ESC for menu.
 # Install: py -m pip install pyglet
 
-import random
 import math
 
 import pyglet

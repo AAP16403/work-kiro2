@@ -1,7 +1,6 @@
 """Enemy entity and related functionality."""
 
 from dataclasses import dataclass, field
-import inspect
 import math
 import random
 

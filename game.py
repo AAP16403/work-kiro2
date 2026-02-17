@@ -44,6 +44,7 @@ from menu import (
 from rpg import BossRewardMenu
 from hazards import LaserBeam
 from layout import generate_obstacles
+from logic import BalanceLogic
 from fsm import State, StateMachine
 
 
@@ -169,8 +170,8 @@ class PlayingState(State):
         return p.owner == "enemy" and str(getattr(p, "projectile_type", "bullet")) == "bomb"
 
     def _explode_enemy_bomb(self, game, s, p) -> None:
-        blast_r = 72.0
-        blast_dmg = max(10, int(getattr(p, "damage", 0)))
+        blast_r = game.balance.bomb_blast_radius
+        blast_dmg = game.balance.bomb_blast_damage(int(getattr(p, "damage", 0)))
         if game.particle_system:
             game.particle_system.add_death_explosion(p.pos, (255, 145, 90), "bomber")
         if dist(p.pos, game.player.pos) <= blast_r:
@@ -181,6 +182,8 @@ class PlayingState(State):
         game = self.game
         if not game.state:
             return
+        # Clamp unstable frame spikes for more consistent simulation behavior.
+        dt = max(0.0, min(float(dt), game.balance.sim_dt_cap))
 
         s = game.state
         s.time += dt
@@ -211,7 +214,7 @@ class PlayingState(State):
                 s.traps.remove(tr)
                 game.visuals.drop_trap(tr)
                 continue
-            if tr.damage > 0 and tr.t >= tr.armed_delay and dist(tr.pos, game.player.pos) <= tr.radius:
+            if tr.damage > 0 and tr.t >= tr.armed_delay and dist(tr.pos, game.player.pos) <= tr.radius + game._player_radius():
                 game._damage_player(tr.damage)
                 s.shake = max(s.shake, 10.0)
                 s.traps.remove(tr)
@@ -220,7 +223,7 @@ class PlayingState(State):
         for th in list(getattr(s, "thunders", [])):
             th.t += dt
             if th.t >= th.warn and not th.hit_done:
-                if point_segment_distance(game.player.pos, th.start, th.end) <= th.thickness * 0.6:
+                if point_segment_distance(game.player.pos, th.start, th.end) <= th.thickness * 0.6 + game._player_radius() * 0.35:
                     th.hit_done = True
                     game._damage_player(th.damage)
                     s.shake = max(s.shake, 14.0)
@@ -237,7 +240,7 @@ class PlayingState(State):
             game.particle_system.add_step_dust(game.player.pos, nd)
         game.player.pos = clamp_to_room(game.player.pos, config.ROOM_RADIUS * 0.9)
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
-            game.player.pos = resolve_circle_obstacles(game.player.pos, 14.0, s.obstacles)
+            game.player.pos = resolve_circle_obstacles(game.player.pos, game._player_radius(), s.obstacles)
             game.player.pos = clamp_to_room(game.player.pos, config.ROOM_RADIUS * 0.9)
         if dt > 1e-6:
             player_vel = (game.player.pos - old_pos) * (1.0 / dt)
@@ -258,7 +261,7 @@ class PlayingState(State):
                 s.lasers.append(beam)
                 game.particle_system.add_laser_beam(muzzle, end, color=beam.color)
                 for e in list(s.enemies):
-                    if point_segment_distance(e.pos, muzzle, end) <= 14:
+                    if point_segment_distance(e.pos, muzzle, end) <= (beam.thickness * 0.5) + game._enemy_radius(e):
                         e.hp -= dmg
                         s.shake = max(s.shake, 4.0)
                         if e.hp <= 0:
@@ -279,20 +282,24 @@ class PlayingState(State):
             if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
                 e.pos = resolve_circle_obstacles(e.pos, game._enemy_radius(e), s.obstacles)
                 e.pos = clamp_to_room(e.pos, config.ROOM_RADIUS * 0.96)
-            if dist(e.pos, game.player.pos) < 12:
-                game._damage_player(10)
+            if dist(e.pos, game.player.pos) <= game._enemy_radius(e) + game._player_radius():
+                game._damage_player(game.balance.enemy_contact_damage)
                 s.enemies.remove(e)
                 game.visuals.drop_enemy(e)
                 s.shake = 9.0
                 spawn_loot_on_enemy_death(s, enemy_behavior_name(e), game.player.pos)
 
+        prev_projectile_pos: dict[int, Vec2] = {}
         for p in list(s.projectiles):
+            prev_projectile_pos[id(p)] = Vec2(p.pos.x, p.pos.y)
             p.pos = p.pos + p.vel * dt
             p.ttl -= dt
             if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
                 blocked = False
+                pr = game._projectile_radius(p)
+                prev = prev_projectile_pos.get(id(p), p.pos)
                 for ob in s.obstacles:
-                    if dist(p.pos, ob.pos) <= ob.radius:
+                    if point_segment_distance(ob.pos, prev, p.pos) <= ob.radius + pr:
                         blocked = True
                         break
                 if blocked:
@@ -309,10 +316,10 @@ class PlayingState(State):
 
         for p in list(s.projectiles):
             if p.owner == "player":
-                ptype = str(getattr(p, "projectile_type", "bullet"))
-                hit_r = 16.0 if ptype == "missile" else 12.0 if ptype == "plasma" else 11.0
+                pr = game._projectile_radius(p)
+                p_prev = prev_projectile_pos.get(id(p), p.pos)
                 for e in list(s.enemies):
-                    if dist(p.pos, e.pos) < hit_r:
+                    if point_segment_distance(e.pos, p_prev, p.pos) <= pr + game._enemy_radius(e):
                         e.hp -= p.damage
                         s.shake = max(s.shake, 4.0)
 
@@ -324,19 +331,20 @@ class PlayingState(State):
                             s.enemies.remove(e)
                             game.visuals.drop_enemy(e)
                             game.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
-                            if behavior_name == "tank" and dist(e.pos, game.player.pos) < 70:
-                                game._damage_player(15)
+                            if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
+                                game._damage_player(game.balance.tank_death_blast_damage)
                                 s.shake = 15.0
                             spawn_loot_on_enemy_death(s, behavior_name, e.pos)
                         self._remove_projectile(game, s, p)
                         break
             else:
                 ptype = str(getattr(p, "projectile_type", "bullet"))
+                p_prev = prev_projectile_pos.get(id(p), p.pos)
                 if ptype == "bomb":
-                    if dist(p.pos, game.player.pos) < 18:
+                    if point_segment_distance(game.player.pos, p_prev, p.pos) <= game._projectile_radius(p) + game._player_radius():
                         self._explode_enemy_bomb(game, s, p)
                         self._remove_projectile(game, s, p)
-                elif dist(p.pos, game.player.pos) < 12:
+                elif point_segment_distance(game.player.pos, p_prev, p.pos) <= game._projectile_radius(p) + game._player_radius():
                     game._damage_player(p.damage)
                     s.shake = max(s.shake, 6.0)
                     self._remove_projectile(game, s, p)
@@ -344,15 +352,14 @@ class PlayingState(State):
         for pu in list(s.powerups):
             dpu = dist(pu.pos, game.player.pos)
             kind = getattr(pu, "kind", "")
-            is_special = kind in ("weapon", "ultra")
-            magnet_r = (190.0 if is_special else 150.0) + game._pickup_magnet_bonus
+            magnet_r = game.balance.pickup_magnet_radius(kind, game._pickup_magnet_bonus)
             if dpu < magnet_r and dpu > 1e-6:
                 pull = (game.player.pos - pu.pos).normalized()
-                pull_speed = 220.0 + (magnet_r - dpu) * 2.0
+                pull_speed = game.balance.pickup_pull_speed(magnet_r, dpu)
                 pu.pos = pu.pos + pull * pull_speed * dt
                 dpu = dist(pu.pos, game.player.pos)
 
-            pickup_r = 20.0 if is_special else 16.0
+            pickup_r = game.balance.pickup_radius(kind)
             if dpu < pickup_r:
                 color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
                 game.particle_system.add_powerup_collection(pu.pos, color)
@@ -386,7 +393,7 @@ class PlayingState(State):
         for lb in list(getattr(s, "lasers", [])):
             lb.t += dt
             if lb.owner == "enemy" and lb.t >= lb.warn and not lb.hit_done:
-                if point_segment_distance(game.player.pos, lb.start, lb.end) <= lb.thickness * 0.55:
+                if point_segment_distance(game.player.pos, lb.start, lb.end) <= lb.thickness * 0.55 + game._player_radius() * 0.35:
                     lb.hit_done = True
                     game._damage_player(lb.damage)
                     s.shake = max(s.shake, 10.0)
@@ -466,7 +473,16 @@ class PlayingState(State):
         )
         game.hud_shield_value_label.text = f"{shield_now}/{shield_cap}"
         game.hud_wave_label.text = f"WAVE {int(game.state.wave):02d}"
-        game.hud_meta_label.text = f"{str(getattr(game.state, 'difficulty', 'normal')).upper()}  T+{int(game.state.time):03d}s"
+        combo_value = int(getattr(game.state, "enemy_combo_value", 0))
+        combo_text = str(getattr(game.state, "enemy_combo_text", "")).strip()
+        if combo_text:
+            game.hud_meta_label.text = (
+                f"{str(getattr(game.state, 'difficulty', 'normal')).upper()}  "
+                f"T+{int(game.state.time):03d}s  "
+                f"CMB {combo_value}  {combo_text}"
+            )
+        else:
+            game.hud_meta_label.text = f"{str(getattr(game.state, 'difficulty', 'normal')).upper()}  T+{int(game.state.time):03d}s"
 
         laser_left = max(0.0, game.player.laser_until - game.state.time)
         laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
@@ -614,6 +630,11 @@ class Game(pyglet.window.Window):
         self.mouse_xy = (self.width / 2, self.height / 2)
         self.mouse_down = False
         self._rmb_down = False
+        self.balance = BalanceLogic(fps=float(FPS))
+        self._fixed_dt = self.balance.fixed_dt
+        self._frame_dt_cap = self.balance.frame_dt_cap
+        self._max_catchup_steps = self.balance.max_catchup_steps
+        self._accumulator = 0.0
 
         # Cached UI labels to avoid per-frame allocations.
         self._pause_hint = pyglet.text.Label(
@@ -1223,9 +1244,9 @@ class Game(pyglet.window.Window):
             s.lasers.append(beam)
             if self.particle_system:
                 self.particle_system.add_laser_beam(start, end, color=beam.color)
-            hit_r = float(thickness) * 0.75
+            hit_r = float(thickness) * 0.5
             for e in list(s.enemies):
-                if point_segment_distance(e.pos, start, end) <= hit_r:
+                if point_segment_distance(e.pos, start, end) <= hit_r + self._enemy_radius(e):
                     _hit_enemy(e, int(damage))
 
         # Cycle variants for built-in variety while preserving predictable control.
@@ -1282,19 +1303,14 @@ class Game(pyglet.window.Window):
         self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN) * float(getattr(self, "_ultra_cd_mult", 1.0))
 
     def _enemy_radius(self, enemy) -> float:
-        b = enemy_behavior_name(enemy)
-        if b.startswith("boss_"):
-            return 24.0
-        return {
-            "tank": 16.0,
-            "swarm": 9.0,
-            "flyer": 11.0,
-            "engineer": 13.0,
-            "charger": 13.0,
-            "spitter": 12.0,
-            "ranged": 12.0,
-            "chaser": 12.0,
-        }.get(b, 12.0)
+        return self.balance.enemy_radius(enemy_behavior_name(enemy))
+
+    def _player_radius(self) -> float:
+        return self.balance.player_radius
+
+    def _projectile_radius(self, projectile) -> float:
+        ptype = str(getattr(projectile, "projectile_type", "bullet"))
+        return self.balance.projectile_radius(ptype)
 
     @staticmethod
     def _ultra_variant_name(player) -> str:
@@ -1444,7 +1460,16 @@ class Game(pyglet.window.Window):
 
     def update(self, dt: float):
         """Update game logic."""
-        self.fsm.update(dt)
+        frame_dt = max(0.0, min(float(dt), self._frame_dt_cap))
+        self._accumulator += frame_dt
+        steps = 0
+        while self._accumulator >= self._fixed_dt and steps < self._max_catchup_steps:
+            self.fsm.update(self._fixed_dt)
+            self._accumulator -= self._fixed_dt
+            steps += 1
+        if steps >= self._max_catchup_steps:
+            # Drop extra accumulated time to avoid spiral-of-death stalls.
+            self._accumulator = 0.0
 
     def on_draw(self):
         """Render the game."""

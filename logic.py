@@ -59,7 +59,7 @@ class BalanceLogic:
     pickup_pull_nearby_gain: float = 2.0
 
     # Dash
-    dash_cooldown: float = 0.8
+    dash_cooldown: float = 1.5
 
     @property
     def fixed_dt(self) -> float:
@@ -240,9 +240,9 @@ class EnemyTuningLogic:
 
     def __init__(self) -> None:
         self.difficulty_modifiers: dict[str, dict[str, float]] = {
-            "easy": {"spawn": 0.85, "hp": 0.88, "speed": 0.92, "powerup": 1.15, "boss_hp": 0.92, "dash_cd": 0.85},
+            "easy": {"spawn": 0.85, "hp": 0.88, "speed": 0.92, "powerup": 1.15, "boss_hp": 0.92, "dash_cd": 0.9},
             "normal": {"spawn": 1.0, "hp": 1.0, "speed": 1.0, "powerup": 1.0, "boss_hp": 1.0, "dash_cd": 1.0},
-            "hard": {"spawn": 1.12, "hp": 1.16, "speed": 1.08, "powerup": 0.9, "boss_hp": 1.08, "dash_cd": 1.18},
+            "hard": {"spawn": 1.12, "hp": 1.16, "speed": 1.08, "powerup": 0.9, "boss_hp": 1.08, "dash_cd": 1.12},
         }
         self.enemy_profiles: dict[str, EnemyStatProfile] = {
             "chaser": EnemyStatProfile(hp_offset=0.0, hp_mult=1.0, speed_mult=1.32, attack_mult=1.0),

@@ -12,7 +12,6 @@ pyglet.options["shadow_window"] = False
 
 import config
 from config import SCREEN_W, SCREEN_H, FPS, WAVE_COOLDOWN, ENEMY_COLORS, POWERUP_COLORS
-from player import Player
 from map import Room
 from level import GameState as GameStateData, spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death
 from enemy import update_enemy
@@ -41,10 +40,21 @@ from menu import (
     UI_FONT_BODY,
     UI_FONT_META,
 )
-from rpg import BossRewardMenu
+from rpg import (
+    BossRewardMenu,
+    recompute_temp_mods,
+    advance_temp_rewards,
+    apply_temp_reward as rpg_apply_temp,
+    apply_perm_reward as rpg_apply_perm,
+    roll_boss_rewards as rpg_roll_rewards,
+    format_temp_hud,
+    format_perm_hud,
+)
 from hazards import LaserBeam
 from layout import generate_obstacles
-from logic import BalanceLogic, EnemyTuningLogic
+from logic import BalanceLogic
+from level import get_difficulty_mods
+from player import Player, perform_dash, recharge_dash, format_dash_hud
 from fsm import State, StateMachine
 
 
@@ -246,6 +256,13 @@ class PlayingState(State):
                 nd = idir.normalized()
                 game.player.pos = game.player.pos + nd * game._effective_player_speed() * dt
                 game.particle_system.add_step_dust(game.player.pos, nd)
+
+        # Recharge dash charges
+        recharge_dash(
+            game.player, s.time, game.balance,
+            float(getattr(game, "_dash_cd_difficulty", 1.0)),
+            float(getattr(game, "_dash_cd_mult", 1.0)),
+        )
         game.player.pos = clamp_to_room(game.player.pos, config.ROOM_RADIUS * 0.9)
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
             game.player.pos = resolve_circle_obstacles(game.player.pos, game._player_radius(), s.obstacles)
@@ -509,10 +526,9 @@ class PlayingState(State):
             boss_name = enemy_behavior_name(boss)
             boss_txt = f"BOSS {boss_name[5:].replace('_', ' ').title()} HP {boss.hp}"
         
-        dash_cd = max(0.0, float(game.player.dash_cooldown) - game.state.time)
-        dash_txt = f"Dash {dash_cd:.1f}s" if dash_cd > 0 else ""
-        temp_txt = game._active_temp_hud_text()
-        perm_txt = game._perm_hud_text()
+        dash_txt = format_dash_hud(game.player, game.state.time)
+        temp_txt = format_temp_hud(game._active_temp_rewards)
+        perm_txt = format_perm_hud(game._run_permanent_rewards)
         status_parts = [p for p in (dash_txt, laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt, boss_txt) if p]
         status_text = "   |   ".join(status_parts) if status_parts else "No active effects"
         max_chars = int(getattr(game, "_hud_status_max_chars", 120))
@@ -766,9 +782,7 @@ class Game(pyglet.window.Window):
         self._temp_incoming_damage_mult = 1.0
         self._ultra_cd_mult = 1.0
         self._dash_cd_mult = 1.0
-        _tuning = EnemyTuningLogic()
-        _diff_mods = _tuning.difficulty_mods(difficulty)
-        self._dash_cd_difficulty = float(_diff_mods.get("dash_cd", 1.0))
+        self._dash_cd_difficulty = float(get_difficulty_mods(difficulty).get("dash_cd", 1.0))
 
         self.visuals = Visuals(self.batch, self.groups)
         self.visuals.make_player()
@@ -1015,131 +1029,35 @@ class Game(pyglet.window.Window):
         return max(0.08, float(self.player.fire_rate) * float(getattr(self, "_temp_fire_rate_mult", 1.0)))
 
     def _recompute_temp_reward_mods(self) -> None:
-        dmg = 1.0
-        speed = 1.0
-        fire = 1.0
-        magnet = 0.0
-        incoming = 1.0
-        ultra_cd = 1.0
-        for fx in list(getattr(self, "_active_temp_rewards", [])):
-            k = str(fx.get("key", ""))
-            if k == "temp_overdrive":
-                dmg *= 1.28
-            elif k == "temp_haste":
-                speed *= 1.22
-            elif k == "temp_rapidfire":
-                fire *= 0.78
-            elif k == "temp_magnet":
-                magnet += 80.0
-            elif k == "temp_guard":
-                incoming *= 0.82
-            elif k == "temp_ultra_flux":
-                ultra_cd *= 0.7
-        self._temp_damage_mult = dmg
-        self._temp_speed_mult = speed
-        self._temp_fire_rate_mult = fire
-        self._pickup_magnet_bonus = magnet
-        self._temp_incoming_damage_mult = incoming
-        self._ultra_cd_mult = ultra_cd
+        mods = recompute_temp_mods(getattr(self, "_active_temp_rewards", []))
+        self._temp_damage_mult = mods["damage"]
+        self._temp_speed_mult = mods["speed"]
+        self._temp_fire_rate_mult = mods["fire_rate"]
+        self._pickup_magnet_bonus = mods["magnet"]
+        self._temp_incoming_damage_mult = mods["incoming_damage"]
+        self._ultra_cd_mult = mods["ultra_cd"]
 
     def _advance_temp_rewards(self) -> None:
         if not getattr(self, "_active_temp_rewards", None):
             return
-        kept = []
-        for fx in self._active_temp_rewards:
-            left = int(fx.get("waves_left", 0)) - 1
-            if left > 0:
-                fx["waves_left"] = left
-                kept.append(fx)
-        self._active_temp_rewards = kept
+        self._active_temp_rewards = advance_temp_rewards(self._active_temp_rewards)
         self._recompute_temp_reward_mods()
 
-    def _active_temp_hud_text(self) -> str:
-        if not getattr(self, "_active_temp_rewards", None):
-            return ""
-        names = {
-            "temp_overdrive": "Overdrive",
-            "temp_haste": "Haste",
-            "temp_rapidfire": "Rapidfire",
-            "temp_magnet": "Magnet",
-            "temp_guard": "Guard",
-            "temp_ultra_flux": "Ultra Flux",
-        }
-        parts = []
-        for fx in self._active_temp_rewards[:2]:
-            key = str(fx.get("key", ""))
-            left = int(fx.get("waves_left", 0))
-            if key in names and left > 0:
-                parts.append(f"{names[key]}:{left}")
-        if not parts:
-            return ""
-        return "Temp " + ", ".join(parts)
 
-    def _perm_hud_text(self) -> str:
-        vals = list(getattr(self, "_run_permanent_rewards", []))
-        if not vals:
-            return ""
-        names = {
-            "perm_damage": "Core Damage",
-            "perm_speed": "Servo",
-            "perm_hp": "Hull",
-            "perm_fire": "Trigger",
-            "perm_shield": "Shield",
-            "perm_ultra": "Ultra+",
-            "perm_dash": "Dash+",
-        }
-        shown = []
-        for k in vals[:3]:
-            if k in names:
-                shown.append(names[k])
-        if not shown:
-            return ""
-        return "Run " + ",".join(shown)
 
     def _roll_boss_rewards(self) -> None:
         if not self.player:
             return
-        temp_pool = [
-            {"key": "temp_overdrive", "title": "Overdrive", "desc": "+28% damage for 2 waves", "duration": 2},
-            {"key": "temp_haste", "title": "Haste Drive", "desc": "+22% move speed for 3 waves", "duration": 3},
-            {"key": "temp_rapidfire", "title": "Hot Trigger", "desc": "22% faster fire-rate for 2 waves", "duration": 2},
-            {"key": "temp_magnet", "title": "Magnet Core", "desc": "Wider pickup magnet for 3 waves", "duration": 3},
-            {"key": "temp_guard", "title": "Aegis Skin", "desc": "-18% incoming damage for 2 waves", "duration": 2},
-            {"key": "temp_ultra_flux", "title": "Ultra Flux", "desc": "Ultra cooldown reduced for 3 waves", "duration": 3},
-        ]
-        perm_pool = [
-            {"key": "perm_damage", "title": "Core Damage", "desc": "+1 damage this run"},
-            {"key": "perm_speed", "title": "Servo Boost", "desc": "+6 move speed this run"},
-            {"key": "perm_hp", "title": "Hull Plating", "desc": "+6 max HP this run"},
-            {"key": "perm_fire", "title": "Trigger Tuning", "desc": "Slightly faster shots this run"},
-            {"key": "perm_shield", "title": "Shield Layer", "desc": "+18 shield now"},
-            {"key": "perm_ultra", "title": "Ultra Charge", "desc": "+1 Ultra charge now"},
-            {"key": "perm_dash", "title": "Quick Dash", "desc": "Dash cooldown reduced this run"},
-        ]
-        active_temp = {str(x.get("key", "")) for x in self._active_temp_rewards}
-        temp_candidates = [x for x in temp_pool if x["key"] not in active_temp and x["key"] != self._last_reward_temp_key]
-        if len(temp_candidates) < 3:
-            temp_candidates = [x for x in temp_pool if x["key"] not in active_temp] or list(temp_pool)
-        perm_candidates = [x for x in perm_pool if x["key"] != self._last_reward_perm_key]
-        if len(perm_candidates) < 3:
-            perm_candidates = list(perm_pool)
-        temp_opts = random.sample(temp_candidates, k=3)
-        perm_opts = random.sample(perm_candidates, k=3)
+        temp_opts, perm_opts = rpg_roll_rewards(
+            self._active_temp_rewards, self._last_reward_temp_key, self._last_reward_perm_key
+        )
         self.rpg_menu.begin(temp_opts, perm_opts)
 
     def _apply_temp_reward(self, key: str, duration: int) -> None:
         if not self.player:
             return
         k = str(key or "").strip().lower()
-        dur = max(2, min(3, int(duration)))
-        refreshed = False
-        for fx in self._active_temp_rewards:
-            if str(fx.get("key", "")) == k:
-                fx["waves_left"] = max(int(fx.get("waves_left", 0)), dur)
-                refreshed = True
-                break
-        if not refreshed:
-            self._active_temp_rewards.append({"key": k, "waves_left": dur})
+        rpg_apply_temp(self._active_temp_rewards, k, duration)
         self._last_reward_temp_key = k
         if k == "temp_ultra_flux":
             self.player.ultra_charges = min(int(getattr(config, "ULTRA_MAX_CHARGES", 2)), int(self.player.ultra_charges) + 1)
@@ -1153,29 +1071,16 @@ class Game(pyglet.window.Window):
         if not self.player:
             return
         k = str(key or "").strip().lower()
-        p = self.player
-        if k == "perm_damage":
-            p.damage = int(p.damage) + 1
-        elif k == "perm_speed":
-            p.speed = float(p.speed) + 6.0
-        elif k == "perm_hp":
-            p.max_hp = int(getattr(p, "max_hp", p.hp)) + 6
-            p.hp = min(int(p.max_hp), int(p.hp) + 6)
-        elif k == "perm_fire":
-            p.fire_rate = max(0.12, float(p.fire_rate) - 0.006)
-        elif k == "perm_shield":
-            p.shield = min(120, int(getattr(p, "shield", 0)) + 18)
-        elif k == "perm_ultra":
-            p.ultra_charges = min(int(getattr(config, "ULTRA_MAX_CHARGES", 2)), int(p.ultra_charges) + 1)
-        elif k == "perm_dash":
-            self._dash_cd_mult = max(0.5, float(getattr(self, "_dash_cd_mult", 1.0)) * 0.88)
-        else:
+        self._dash_cd_mult, applied = rpg_apply_perm(
+            self.player, self._run_permanent_rewards, k,
+            self._dash_cd_mult,
+            ultra_max_charges=int(getattr(config, "ULTRA_MAX_CHARGES", 2)),
+        )
+        if not applied:
             return
         self._last_reward_perm_key = k
-        if k not in self._run_permanent_rewards:
-            self._run_permanent_rewards.append(k)
         if self.particle_system:
-            self.particle_system.add_powerup_collection(p.pos, (200, 235, 255))
+            self.particle_system.add_powerup_collection(self.player.pos, (200, 235, 255))
         if self.state:
             self.state.shake = max(self.state.shake, 6.0)
 
@@ -1326,30 +1231,15 @@ class Game(pyglet.window.Window):
     def _dash(self):
         if not self.state or not self.player:
             return
-
-        s = self.state
-        if s.time < self.player.dash_cooldown:
-            return
-        if self.player.is_dashing:
-            return
-
-        self.player.is_dashing = True
-        self.player.dash_timer = 0.15  # seconds
-        base_cd = float(self.balance.dash_cooldown)
-        diff_mod = float(getattr(self, "_dash_cd_difficulty", 1.0))
-        perm_mod = float(getattr(self, "_dash_cd_mult", 1.0))
-        self.player.dash_cooldown = s.time + base_cd * diff_mod * perm_mod  # seconds
-        self.player.invincibility_timer = 0.15 # seconds
-
-        idir = self._input_dir()
-        if idir.length() > 0:
-            self.player.dash_direction = idir.normalized()
-        else:
-            # Dash towards mouse if no movement keys are pressed
-            world_mouse = iso_to_world(self.mouse_xy)
-            self.player.dash_direction = (world_mouse - self.player.pos).normalized()
-        
-        self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction)
+        world_mouse = iso_to_world(self.mouse_xy)
+        did_dash = perform_dash(
+            self.player, self.state.time, self.balance,
+            float(getattr(self, "_dash_cd_difficulty", 1.0)),
+            float(getattr(self, "_dash_cd_mult", 1.0)),
+            self._input_dir(), world_mouse,
+        )
+        if did_dash:
+            self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction)
 
     def _enemy_radius(self, enemy) -> float:
         return self.balance.enemy_radius(enemy_behavior_name(enemy))

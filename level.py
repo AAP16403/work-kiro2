@@ -53,11 +53,13 @@ def spawn_wave(state: GameState, center: Vec2):
     # Boss wave every 5 waves.
     if state.wave % 5 == 0:
         behavior_name = get_boss_for_wave(state.wave)
-        hp, speed, _attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
+        hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
         pos = random_spawn_edge(center, config.ROOM_RADIUS)
         e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name)
         lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
-        e.attack_cd = random.uniform(lo, hi)
+        atk_cd_scale = max(0.6, min(1.6, float(attack_mult)))
+        e.attack_cd = random.uniform(lo, hi) / atk_cd_scale
+        e.ai["attack_mult"] = float(attack_mult)
         state.enemies.append(e)
         state.enemy_combo_value = _SPAWN_LOGIC.boss_combo_value(behavior_name)
         state.enemy_combo_text = f"BOSS {behavior_name[5:].upper()}"
@@ -69,12 +71,14 @@ def spawn_wave(state: GameState, center: Vec2):
 
     for behavior_name, behavior_count in plan.behavior_counts.items():
         for _ in range(int(behavior_count)):
-            hp, speed, _attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
+            hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
             pos = random_spawn_edge(center, config.ROOM_RADIUS)
 
             e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name)
             lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
-            e.attack_cd = random.uniform(lo, hi)
+            atk_cd_scale = max(0.6, min(1.6, float(attack_mult)))
+            e.attack_cd = random.uniform(lo, hi) / atk_cd_scale
+            e.ai["attack_mult"] = float(attack_mult)
             state.enemies.append(e)
 
 

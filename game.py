@@ -1,5 +1,5 @@
 # Pyglet isometric room survival prototype
-# Controls: WASD/Arrows move, hold Left Mouse to shoot, ESC for menu.
+# Controls: WASD/Arrows move, LMB toggles auto-fire, SPACE dash, ESC menu.
 # Install: py -m pip install pyglet
 
 import math

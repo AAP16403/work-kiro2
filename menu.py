@@ -898,6 +898,16 @@ class GuideMenu:
         {"key": "weapon", "name": "Weapon (W)", "icon": "W", "what": "Switches current weapon pattern.", "deal": "Adapt playstyle to the new spread/tempo.", "lore": "Recovered armament cache from dead merc squads."},
         {"key": "ultra", "name": "Ultra (U)", "icon": "U", "what": "Adds an Ultra charge for RMB/Q.", "deal": "Spend on boss spikes or dangerous swarms.", "lore": "A forbidden core spark meant for ship cannons."},
     ]
+    BASICS_INFO = [
+        {"key": "move", "name": "Movement", "icon": "MV", "what": "Use WASD or Arrow keys to move.", "deal": "Stay moving; linear retreats get punished.", "lore": "Mobility is your main defense layer."},
+        {"key": "fire", "name": "Primary Fire", "icon": "LMB", "what": "LMB toggles auto-fire on/off.", "deal": "Keep auto-fire on, then focus on dodging and spacing.", "lore": "Auto-fire replaced hold-to-fire pacing."},
+        {"key": "dash", "name": "Dash", "icon": "SP", "what": "Press SPACE to dash through pressure.", "deal": "Save dash for layered patterns, not chip damage.", "lore": "Dash timing decides most boss survivability windows."},
+        {"key": "ultra_use", "name": "Ultra Use", "icon": "U!", "what": "RMB or Q consumes one Ultra charge.", "deal": "Use Ultra during spike phases or add floods.", "lore": "Ultra is burst control, not passive DPS."},
+        {"key": "arena", "name": "Arena Control", "icon": "AR", "what": "Fight near edge lanes, avoid center traps.", "deal": "Rotate clockwise/counter-clockwise with intent.", "lore": "Bad pathing is deadlier than low HP."},
+        {"key": "loot", "name": "Loot Priority", "icon": "LT", "what": "Powerups and weapon drops shape run tempo.", "deal": "Early damage/fire-rate usually beats greed picks.", "lore": "Boss waves guarantee high-value drops."},
+        {"key": "rpg", "name": "Boss Rewards", "icon": "CRD", "what": "Boss kills open temp + permanent card picks.", "deal": "Pick consistency first, then high-risk scaling.", "lore": "Card flow is your long-run progression core."},
+        {"key": "pause", "name": "Pause/Menu", "icon": "ESC", "what": "Press ESC to pause or navigate menus.", "deal": "Use pause to reset focus in dense waves.", "lore": "A short reset often saves a run."},
+    ]
 
     def __init__(self, width: int, height: int):
         self.screen_width = width
@@ -945,10 +955,11 @@ class GuideMenu:
 
         self.btn_enemies = MenuButton(0, 0, 180, 50, "Enemies", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_powerups = MenuButton(0, 0, 180, 50, "Powerups", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
+        self.btn_basics = MenuButton(0, 0, 180, 50, "Basics", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_prev = MenuButton(0, 0, 120, 44, "Prev", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_next = MenuButton(0, 0, 120, 44, "Next", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_back = MenuButton(0, 0, 200, 54, "Back to Menu", lambda: None, color=(110, 110, 150), hover_color=(145, 145, 195))
-        self._buttons = [self.btn_enemies, self.btn_powerups, self.btn_prev, self.btn_next, self.btn_back]
+        self._buttons = [self.btn_enemies, self.btn_powerups, self.btn_basics, self.btn_prev, self.btn_next, self.btn_back]
         for b in self._buttons:
             b.ensure(self.batch)
 
@@ -985,7 +996,11 @@ class GuideMenu:
         self.resize(width, height)
 
     def _entries(self) -> list[dict]:
-        return self.ENEMY_INFO if self.tab == "enemies" else self.POWERUP_INFO
+        if self.tab == "enemies":
+            return self.ENEMY_INFO
+        if self.tab == "powerups":
+            return self.POWERUP_INFO
+        return self.BASICS_INFO
 
     def _total_pages(self) -> int:
         n = len(self._entries())
@@ -1001,7 +1016,9 @@ class GuideMenu:
         key = str(e.get("key", ""))
         if self.tab == "enemies":
             return config.ENEMY_COLORS.get(key, (200, 200, 200))
-        return config.POWERUP_COLORS.get(key, (200, 200, 200))
+        if self.tab == "powerups":
+            return config.POWERUP_COLORS.get(key, (200, 200, 200))
+        return (140, 200, 255)
 
     def update(self, dt: float):
         self._t += dt
@@ -1057,6 +1074,11 @@ class GuideMenu:
         self.btn_powerups.font_size = max(12, int(17 * scale))
         self.btn_powerups.x = self.btn_enemies.x + self.btn_enemies.width + int(14 * scale)
         self.btn_powerups.y = top_y
+        self.btn_basics.width = int(190 * scale)
+        self.btn_basics.height = int(52 * scale)
+        self.btn_basics.font_size = max(12, int(17 * scale))
+        self.btn_basics.x = self.btn_powerups.x + self.btn_powerups.width + int(14 * scale)
+        self.btn_basics.y = top_y
 
         self.btn_back.width = int(220 * scale)
         self.btn_back.height = int(52 * scale)
@@ -1137,6 +1159,10 @@ class GuideMenu:
             self.tab = "powerups"
             self.page = 0
             return None
+        if self.btn_basics.contains_point(x, y):
+            self.tab = "basics"
+            self.page = 0
+            return None
         total_pages = self._total_pages()
         if self.btn_prev.contains_point(x, y):
             self.page = (self.page - 1) % total_pages
@@ -1155,8 +1181,10 @@ class GuideMenu:
     def draw(self):
         self.btn_enemies.is_hovered = self.btn_enemies.is_hovered or self.tab == "enemies"
         self.btn_powerups.is_hovered = self.btn_powerups.is_hovered or self.tab == "powerups"
+        self.btn_basics.is_hovered = self.btn_basics.is_hovered or self.tab == "basics"
         self.btn_enemies.sync()
         self.btn_powerups.sync()
+        self.btn_basics.sync()
         entries = self._page_entries()
         for i, row in enumerate(self._rows):
             bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, phase = row
@@ -1188,12 +1216,16 @@ class GuideMenu:
         if self.tab == "enemies":
             self.subtitle.text = "Enemy dossiers, threat cues, and fast counterplay."
             self.footer.text = f"{page_info}  |  {len(self.ENEMY_INFO)} entries"
-        else:
+        elif self.tab == "powerups":
             self.subtitle.text = "Powerup effects, timing advice, and field notes."
             self.footer.text = f"{page_info}  |  {len(self.POWERUP_INFO)} entries"
+        else:
+            self.subtitle.text = "Core controls, movement rules, and run-flow fundamentals."
+            self.footer.text = f"{page_info}  |  {len(self.BASICS_INFO)} entries"
         self.batch.draw()
         self.btn_enemies.is_hovered = False
         self.btn_powerups.is_hovered = False
+        self.btn_basics.is_hovered = False
 
 
 class PauseMenu:

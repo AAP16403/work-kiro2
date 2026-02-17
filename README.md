@@ -30,7 +30,8 @@ py main.py
 ## Controls
 
 - `WASD` / Arrow keys: move
-- Hold `LMB`: fire
+- `LMB`: toggle auto-fire on/off
+- `SPACE`: dash
 - `RMB`: Ultra (needs Ultra charge)
 - `Q`: Ultra (keyboard shortcut)
 - `ESC`: pause/menu

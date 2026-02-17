@@ -152,6 +152,8 @@ class EnemySpawnLogic:
             "boss_abyss_gaze": 28,
             "boss_womb_core": 30,
         }
+        # Prevent wave plans from collapsing into a single class too often.
+        self.max_class_share: float = 0.6
 
     @staticmethod
     def _spawn_mod(difficulty: str) -> float:
@@ -163,9 +165,11 @@ class EnemySpawnLogic:
         return 1.0
 
     def _base_count(self, wave: int, difficulty: str, cap: int) -> int:
-        base = 4 + int(max(1, wave) * 1.4)
+        wave_i = max(1, int(wave))
+        cap_i = max(1, int(cap))
+        base = 4 + int(wave_i * 1.4)
         scaled = int(base * self._spawn_mod(difficulty))
-        return max(1, min(int(cap), max(1, scaled)))
+        return max(1, min(cap_i, max(1, scaled)))
 
     def _active_classes(self, wave: int) -> list[EnemyClass]:
         return [c for c in self.enemy_classes if int(wave) >= int(c.unlock_wave)]
@@ -194,11 +198,17 @@ class EnemySpawnLogic:
             picked = random.choices(pool, weights=cls_weights, k=1)[0]
             selected.append(picked)
             pool.remove(picked)
+        if not selected:
+            selected = [active[0]]
 
         counts_by_class = {c.key: 1 for c in selected}
         remaining = max(0, total - len(selected))
+        max_per_class = max(1, int(round(total * self.max_class_share)))
         for _ in range(remaining):
-            pick = random.choices(selected, weights=[max(0.1, c.weight) for c in selected], k=1)[0]
+            selectable = [c for c in selected if counts_by_class.get(c.key, 0) < max_per_class]
+            if not selectable:
+                selectable = selected
+            pick = random.choices(selectable, weights=[max(0.1, c.weight) for c in selectable], k=1)[0]
             counts_by_class[pick.key] += 1
 
         class_by_key = {c.key: c for c in selected}
@@ -297,14 +307,15 @@ class EnemyTuningLogic:
     def enemy_stats(self, behavior: str, wave: int, difficulty: str = "normal") -> tuple[int, float, float]:
         mods = self.difficulty_mods(difficulty)
         b = str(behavior or "")
+        wave_i = max(1, int(wave))
         profile = self.enemy_profiles.get(b, EnemyStatProfile())
 
-        base_hp = 22.0 + float(wave) * 5.0
-        base_speed = 55.0 + float(wave) * 2.0
+        base_hp = 22.0 + float(wave_i) * 5.0
+        base_speed = 55.0 + float(wave_i) * 2.0
         is_boss = b.startswith("boss_")
 
         if is_boss and profile.boss_base_hp is not None and profile.boss_wave_hp_gain is not None:
-            hp = float(profile.boss_base_hp) + float(wave) * float(profile.boss_wave_hp_gain)
+            hp = float(profile.boss_base_hp) + float(wave_i) * float(profile.boss_wave_hp_gain)
         elif b == "swarm":
             hp = max(8.0, (base_hp * profile.hp_mult) + profile.hp_offset)
         else:
@@ -316,11 +327,12 @@ class EnemyTuningLogic:
         hp_mult = mods["boss_hp"] if is_boss else mods["hp"]
         hp *= float(hp_mult)
         if is_boss:
-            growth = float(self.boss_hp_growth_base) + float(self.boss_hp_growth_per_wave) * float(wave)
+            growth = float(self.boss_hp_growth_base) + float(self.boss_hp_growth_per_wave) * float(wave_i)
             hp *= min(float(self.boss_hp_growth_max), growth)
         hp_int = max(1, int(hp))
         speed_final = float(speed) * float(mods["speed"])
-        return hp_int, speed_final, float(atk)
+        atk_mult = max(0.5, min(2.5, float(atk)))
+        return hp_int, speed_final, atk_mult
 
     def spawn_attack_cd_range(self, behavior: str) -> tuple[float, float]:
         b = str(behavior or "")

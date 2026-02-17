@@ -1,6 +1,7 @@
 """Enemy entity and related functionality."""
 
 from dataclasses import dataclass, field
+import inspect
 import math
 import random
 
@@ -53,11 +54,22 @@ def _perp(v: Vec2) -> Vec2:
     return Vec2(-v.y, v.x)
 
 
+def _safe_dir(v: Vec2, fallback: Vec2 | None = None) -> Vec2:
+    n = v.normalized()
+    if n.length_squared() > 1e-9:
+        return n
+    if fallback is not None:
+        fb = fallback.normalized()
+        if fb.length_squared() > 1e-9:
+            return fb
+    return Vec2(1.0, 0.0)
+
+
 def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed: float, mult: float = 0.75) -> Vec2:
     d = (target_pos - shooter_pos).length()
     t = (d / max(1.0, float(proj_speed))) * float(mult)
     aim_pos = Vec2(target_pos.x + target_vel.x * t, target_pos.y + target_vel.y * t)
-    return (aim_pos - shooter_pos).normalized()
+    return _safe_dir(aim_pos - shooter_pos)
 
 def _rotate(v: Vec2, deg: float) -> Vec2:
     a = math.radians(deg)
@@ -125,13 +137,6 @@ def _fire_ring(
 def _spawn_shockwave(state, origin: Vec2, count: int = 16, speed: float = 240.0, damage: int = 10):
     """Spawn a expanding ring of projectiles (shockwave)."""
     _fire_ring(state, origin, count, speed, damage, ttl=1.8, projectile_type="plasma")
-    ptype = str(projectile_type or "bullet")
-    n = max(3, int(count))
-    base = float(start_deg)
-    for i in range(n):
-        a = base + (i / n) * 360.0
-        d = Vec2(math.cos(math.radians(a)), math.sin(math.radians(a)))
-        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype))
 
 
 def _boss_init(enemy: Enemy):
@@ -403,13 +408,13 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, p
             nearby_same.append(o)
 
     to_player_vec = player_pos - enemy.pos
-    to_player = to_player_vec.normalized() if to_player_vec.length() > 1e-6 else Vec2(1.0, 0.0)
+    to_player = _safe_dir(to_player_vec)
 
     center = Vec2(enemy.pos.x, enemy.pos.y)
     for a in nearby_all:
         center = center + a.pos
     center = center / float(len(nearby_all) + 1)
-    cohesion = (center - enemy.pos).normalized()
+    cohesion = _safe_dir(center - enemy.pos, to_player)
 
     # Local separation keeps allies from stacking (stronger for same-type).
     separation = Vec2(0.0, 0.0)
@@ -424,14 +429,14 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, p
             separation = separation + dvec.normalized() * (1.0 - d / (coord_r * 0.45)) * wt
             sep_count += 1
     if sep_count > 0:
-        separation = (separation / float(sep_count)).normalized()
+        separation = _safe_dir(separation / float(sep_count), to_player)
 
     slot_target = slot_targets.get(id(enemy))
     if slot_target is None:
         slot_target = player_pos + to_player * _slot_radius(key)
-    to_slot = (slot_target - enemy.pos).normalized()
+    to_slot = _safe_dir(slot_target - enemy.pos, to_player)
 
-    vel_dir = enemy.vel.normalized() if enemy.vel.length() > 1e-6 else to_player
+    vel_dir = _safe_dir(enemy.vel, to_player)
 
     # Keep role identity, but ensure forward combat pressure.
     min_forward = {
@@ -467,13 +472,13 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, p
         "support": 0.24,
     }.get(role, 0.52)
 
-    desired_dir = (
+    desired_dir = _safe_dir(
         vel_dir * 0.45
         + to_slot * role_slot_weight
         + cohesion * 0.36
         + separation * 0.72
         + to_player * role_player_weight
-    ).normalized()
+    , to_player)
 
     # Forward-pressure hysteresis avoids frame-to-frame retreat jitter.
     fwd = desired_dir.dot(to_player)
@@ -484,7 +489,7 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, p
         lock_t = max(0.0, lock_t - dt * 2.0)
     enemy.ai["forward_lock_t"] = lock_t
     if lock_t > 0.0 and fwd < min_forward:
-        desired_dir = (desired_dir + to_player * (0.28 + lock_t * 0.9)).normalized()
+        desired_dir = _safe_dir(desired_dir + to_player * (0.28 + lock_t * 0.9), to_player)
 
     desired_speed = enemy.speed * (1.02 if key in ("chaser", "swarm", "charger") else 0.98) * float(prof["pressure_mult"])
     desired_vel = desired_dir * desired_speed
@@ -547,7 +552,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 enemy.ai[state_timer] = 1.5
 
             st = enemy.ai[state_key]
-            enemy.ai[state_timer] -= dt
+            enemy.ai[state_timer] = max(0.0, float(enemy.ai.get(state_timer, 0.0)) - dt)
             timer = enemy.ai[state_timer]
 
             # --- STALK: Drift slowly, prepare to warp ---
@@ -555,7 +560,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 # Mild movement to look alive
                 dvec = player_pos - enemy.pos
                 dist = dvec.length()
-                dir_to = dvec.normalized() if dist > 1e-6 else Vec2(1, 0)
+                dir_to = _safe_dir(dvec)
                 
                 # Orbit/drift
                 drift = _rotate(dir_to, 90 if enemy.seed > 3.14 else -90)
@@ -647,8 +652,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             persona = str(enemy.ai.get("persona", "aggressive"))
             
             l_state = enemy.ai.get("laser_state", "reposition")
-            l_timer = float(enemy.ai.get("laser_timer", 0.0))
-            l_timer -= dt
+            l_timer = max(0.0, float(enemy.ai.get("laser_timer", 0.0)) - dt)
+            enemy.ai["laser_timer"] = l_timer
             
             # --- REPOSITION: Move to a corner or far edge ---
             if l_state == "reposition":
@@ -672,7 +677,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     enemy.ai["laser_state"] = "charge"
                     enemy.ai["laser_timer"] = 0.75
                 else:
-                    enemy.pos = enemy.pos + dvec.normalized() * enemy.speed * 1.5 * dt
+                    enemy.pos = enemy.pos + _safe_dir(dvec) * enemy.speed * 1.5 * dt
 
             # --- CHARGE: Telegraph attack ---
             elif l_state == "charge":
@@ -692,27 +697,21 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 to_player = player_pos - enemy.pos
                 base_angle = math.degrees(math.atan2(to_player.y, to_player.x))
                 
-                # Emit beam slices at a controlled cadence instead of every frame.
                 tick = float(enemy.ai.get("laser_tick", 0.0)) - dt
                 if tick > 0.0:
                     enemy.ai["laser_tick"] = tick
                 else:
                     sweep_offset = math.sin(enemy.t * 2.5) * (28.0 + phase * 8.0)
-
                     if persona == "aggressive" and phase >= 2:
-                        # Dual sweep (V shape) only in the final phase.
                         offsets = [sweep_offset, -sweep_offset]
                     else:
                         offsets = [sweep_offset]
-                
                     for off in offsets:
                         angle = base_angle + off
                         rad = math.radians(angle)
                         beam_dir = Vec2(math.cos(rad), math.sin(rad))
-                        
                         start = enemy.pos
                         end = start + beam_dir * config.ROOM_RADIUS * 2.2
-                        
                         dmg = _boss_damage(state, base=9.5, wave_scale=0.18, cap=20)
                         state.lasers.append(
                             LaserBeam(
@@ -735,15 +734,13 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 if l_timer <= 0:
                     enemy.ai["laser_state"] = "reposition"
                     enemy.ai["laser_timer"] = 0.7
-            
-            enemy.ai["laser_timer"] = l_timer
             return
 
         if enemy.behavior == "boss_trapmaster":
             # Places trap patterns while staying mid-range.
             dvec = player_pos - enemy.pos
             d = dvec.length()
-            dir_to = dvec.normalized() if d > 1e-6 else Vec2(1, 0)
+            dir_to = _safe_dir(dvec)
             phase = int(enemy.ai.get("phase", 0))
             persona = str(enemy.ai.get("persona", "aggressive"))
             if d > 320:
@@ -810,10 +807,10 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             # Retreat logic: keep distance
             dvec = player_pos - enemy.pos
             if dvec.length() < 300:
-                enemy.pos = enemy.pos - dvec.normalized() * enemy.speed * dt * 0.8
+                enemy.pos = enemy.pos - _safe_dir(dvec) * enemy.speed * dt * 0.8
             else:
                  # Orbit slowly
-                drift = _rotate(dvec.normalized(), 90)
+                drift = _rotate(_safe_dir(dvec), 90)
                 enemy.pos = enemy.pos + drift * enemy.speed * 0.3 * dt
 
             enemy.attack_cd -= dt
@@ -841,7 +838,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 elif roll < 0.85:
                     proj_speed = 190.0
                     dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)
-                    aim = (player_pos - enemy.pos).normalized()
+                    aim = _safe_dir(player_pos - enemy.pos)
                     _fire_fan(state, enemy.pos, aim, count=5 + min(phase, 1), spread_deg=56.0, speed=proj_speed, damage=dmg, projectile_type="plasma")
                 
                 # 3. Swarm Call (Direct spawn)
@@ -877,15 +874,14 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             persona = str(enemy.ai.get("persona", "aggressive"))
             
             b_state = enemy.ai.get("brute_state", "chase")
-            b_timer = float(enemy.ai.get("brute_timer", 0.0))
-            
-            b_timer -= dt
+            b_timer = max(0.0, float(enemy.ai.get("brute_timer", 0.0)) - dt)
+            enemy.ai["brute_timer"] = b_timer
             
             # --- CHASE: Move towards player, but heavy/slow ---
             if b_state == "chase":
                 dvec = player_pos - enemy.pos
                 dist = dvec.length()
-                dir_to = dvec.normalized() if dist > 1e-6 else Vec2(1, 0)
+                dir_to = _safe_dir(dvec)
                 
                 # Heavy movement
                 speed_mod = 0.75
@@ -907,7 +903,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     enemy.ai["brute_timer"] = 1.2 # Max charge duration
                     # Lock direction
                     dvec = player_pos - enemy.pos
-                    dir_to = dvec.normalized() if dvec.length() > 1e-6 else Vec2(1, 0)
+                    dir_to = _safe_dir(dvec)
                     enemy.ai["charge_dir_x"] = dir_to.x
                     enemy.ai["charge_dir_y"] = dir_to.y
 
@@ -955,16 +951,13 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 if b_timer <= 0:
                     enemy.ai["brute_state"] = "chase"
                     enemy.ai["brute_timer"] = 2.5
-            
-            # Save state
-            enemy.ai["brute_timer"] = b_timer
             return
 
         if enemy.behavior == "boss_abyss_gaze":
             # Inspired by Isaac's late bullet-hell fights: tracking curtains + beam checks.
             dvec = player_pos - enemy.pos
             d = dvec.length()
-            dir_to = dvec.normalized() if d > 1e-6 else Vec2(1, 0)
+            dir_to = _safe_dir(dvec)
             phase = int(enemy.ai.get("phase", 0))
             persona = str(enemy.ai.get("persona", "aggressive"))
             strafe = Vec2(-dir_to.y, dir_to.x)
@@ -1034,7 +1027,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             # Inspired by Mom's Heart style: pulse slams + organic projectile bursts.
             dvec = player_pos - enemy.pos
             d = dvec.length()
-            dir_to = dvec.normalized() if d > 1e-6 else Vec2(1, 0)
+            dir_to = _safe_dir(dvec)
             phase = int(enemy.ai.get("phase", 0))
             persona = str(enemy.ai.get("persona", "aggressive"))
 

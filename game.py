@@ -456,6 +456,8 @@ class PlayingState(State):
         if s.shake > 0:
             shake = Vec2(random.uniform(-1, 1), random.uniform(-1, 1)) * s.shake
 
+        game.visuals.sync_scene(s.time, shake, combat_intensity=float(getattr(game.room, "combat_intensity", 0.0)))
+
         if config.ENABLE_OBSTACLES:
             for ob in getattr(game.state, "obstacles", []):
                 game.visuals.ensure_obstacle(ob)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 
 import pyglet
 from pyglet import shapes
@@ -50,6 +51,8 @@ class Visuals:
     def __init__(self, batch, group_cache: GroupCache):
         self.batch = batch
         self.groups = group_cache
+        self._scene_group = Group(order=-20000)
+        self._overlay_group = Group(order=22000)
 
         self._enemy_handles: dict[int, RenderHandle] = {}
         self._proj_handles: dict[int, RenderHandle] = {}
@@ -59,9 +62,95 @@ class Visuals:
         self._laser_handles: dict[int, RenderHandle] = {}
         self._thunder_handles: dict[int, RenderHandle] = {}
         self._player_handle: RenderHandle | None = None
+        self._scene_stars: list[tuple[shapes.Circle, float, float, float]] = []
+        self._scene_rings: list[shapes.Arc] = []
+        self._vignette: list[shapes.Rectangle] = []
+        self._init_scene_fx()
+
+    def _init_scene_fx(self) -> None:
+        self._scene_glows = [
+            shapes.Circle(0, 0, 320, color=(30, 75, 130), batch=self.batch, group=self._scene_group),
+            shapes.Circle(0, 0, 240, color=(160, 70, 120), batch=self.batch, group=self._scene_group),
+            shapes.Circle(0, 0, 180, color=(70, 180, 165), batch=self.batch, group=self._scene_group),
+        ]
+        self._scene_glows[0].opacity = 28
+        self._scene_glows[1].opacity = 18
+        self._scene_glows[2].opacity = 16
+
+        for i in range(3):
+            ring = shapes.Arc(
+                0,
+                0,
+                180 + i * 42,
+                segments=128,
+                thickness=2,
+                color=(130, 185, 245),
+                batch=self.batch,
+                group=self._scene_group,
+            )
+            ring.opacity = 22 + i * 5
+            self._scene_rings.append(ring)
+
+        for _ in range(32):
+            star = shapes.Circle(
+                random.uniform(0.0, 1920.0),
+                random.uniform(0.0, 1080.0),
+                random.uniform(1.2, 2.6),
+                color=(210, 235, 255),
+                batch=self.batch,
+                group=self._scene_group,
+            )
+            star.opacity = random.randint(20, 70)
+            self._scene_stars.append((star, random.uniform(-8.0, 8.0), random.uniform(-5.0, 5.0), random.uniform(0.0, math.tau)))
+
+        for _ in range(4):
+            vg = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.batch, group=self._overlay_group)
+            vg.opacity = 0
+            self._vignette.append(vg)
 
     def _set_depth(self, handle: RenderHandle, y: float) -> None:
         handle.set_group(self.groups.get(int(SCREEN_H + 1000 - y)))
+
+    def sync_scene(self, t: float, shake: Vec2, combat_intensity: float = 0.0) -> None:
+        center_x, center_y = to_iso(Vec2(0.0, 0.0), shake)
+        ci = max(0.0, min(1.0, float(combat_intensity)))
+
+        offsets = ((-220.0, 120.0), (210.0, -60.0), (30.0, 190.0))
+        for i, glow in enumerate(self._scene_glows):
+            ox, oy = offsets[i]
+            glow.x = center_x + ox + math.sin(t * (0.25 + i * 0.07)) * 30.0
+            glow.y = center_y + oy + math.cos(t * (0.22 + i * 0.09)) * 24.0
+            glow.opacity = int((14 + i * 6) + (16 + i * 4) * (0.5 + 0.5 * math.sin(t * (0.7 + i * 0.2))))
+
+        for i, ring in enumerate(self._scene_rings):
+            ring.x = center_x
+            ring.y = center_y
+            ring.radius = (180 + i * 42) + 6.0 * math.sin(t * (0.8 + i * 0.3))
+            ring.opacity = int(16 + 10 * i + (8 + 10 * ci) * (0.5 + 0.5 * math.sin(t * (1.1 + i * 0.15))))
+
+        for star, vx, vy, phase in self._scene_stars:
+            star.x += vx * (0.22 + ci * 0.6)
+            star.y += vy * (0.22 + ci * 0.6)
+            if star.x < -24:
+                star.x = 1944
+            elif star.x > 1944:
+                star.x = -24
+            if star.y < -24:
+                star.y = 1104
+            elif star.y > 1104:
+                star.y = -24
+            star.opacity = int(14 + 64 * (0.5 + 0.5 * math.sin(t * 1.4 + phase)))
+
+        top, bot, left, right = self._vignette
+        top.x, top.y, top.width, top.height = 0, 1048, 1920, 32
+        bot.x, bot.y, bot.width, bot.height = 0, 0, 1920, 32
+        left.x, left.y, left.width, left.height = 0, 0, 38, 1080
+        right.x, right.y, right.width, right.height = 1882, 0, 38, 1080
+        v_op = int(22 + 18 * ci)
+        top.opacity = v_op
+        bot.opacity = v_op
+        left.opacity = int(v_op * 0.8)
+        right.opacity = int(v_op * 0.8)
 
     def make_player(self):
         """Create player visual."""
@@ -92,6 +181,14 @@ class Visuals:
         gun.opacity = 210
         gun_core = shapes.Line(0, 0, 0, 0, thickness=1, color=(255, 255, 255), batch=self.batch)
         gun_core.opacity = 220
+        arm_l = shapes.Line(0, 0, 0, 0, thickness=3, color=(44, 86, 128), batch=self.batch)
+        arm_r = shapes.Line(0, 0, 0, 0, thickness=3, color=(44, 86, 128), batch=self.batch)
+        arm_l.opacity = 210
+        arm_r.opacity = 210
+        thruster_l = shapes.Line(0, 0, 0, 0, thickness=4, color=(130, 210, 255), batch=self.batch)
+        thruster_r = shapes.Line(0, 0, 0, 0, thickness=4, color=(130, 210, 255), batch=self.batch)
+        thruster_l.opacity = 0
+        thruster_r.opacity = 0
 
         # Shield/laser aura rings (toggled in sync)
         shield_ring = shapes.Arc(0, 0, 19, segments=48, thickness=4, color=(120, 220, 255), batch=self.batch)
@@ -113,8 +210,12 @@ class Visuals:
             highlight,
             backpack,
             visor,
+            arm_l,
+            arm_r,
             gun,
             gun_core,
+            thruster_l,
+            thruster_r,
         )
 
     def sync_player(self, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None):
@@ -132,8 +233,12 @@ class Visuals:
             highlight,
             backpack,
             visor,
+            arm_l,
+            arm_r,
             gun,
             gun_core,
+            thruster_l,
+            thruster_r,
         ) = self._player_handle.objs
         sx, sy = to_iso(player.pos, shake)
         sh.x, sh.y = sx, sy - 18
@@ -144,6 +249,10 @@ class Visuals:
         highlight.x, highlight.y = sx - 4, sy + 5
         backpack.x, backpack.y = sx - 14, sy + 2
         visor.x, visor.y = sx + 2, sy + 2
+        arm_l.x, arm_l.y = sx - 5, sy + 1
+        arm_l.x2, arm_l.y2 = sx + 1, sy + 5
+        arm_r.x, arm_r.y = sx + 4, sy
+        arm_r.x2, arm_r.y2 = sx + 10, sy + 4
 
         # Aim direction affects gun orientation.
         if aim_dir is None or aim_dir.length() <= 1e-6:
@@ -155,6 +264,21 @@ class Visuals:
         gun.x2, gun.y2 = gx + aim_dir.x * gun_len, gy + aim_dir.y * gun_len * 0.65
         gun_core.x, gun_core.y = gun.x, gun.y
         gun_core.x2, gun_core.y2 = gun.x2, gun.y2
+
+        if bool(getattr(player, "is_dashing", False)):
+            dash_pulse = 0.6 + 0.4 * math.sin(t * 40.0)
+            back = Vec2(-aim_dir.x, -aim_dir.y)
+            tx1, ty1 = sx - 8, sy - 1
+            tx2, ty2 = sx - 2, sy - 4
+            thruster_l.x, thruster_l.y = tx1, ty1
+            thruster_l.x2, thruster_l.y2 = tx1 + back.x * (20 + 12 * dash_pulse), ty1 + back.y * (14 + 10 * dash_pulse)
+            thruster_r.x, thruster_r.y = tx2, ty2
+            thruster_r.x2, thruster_r.y2 = tx2 + back.x * (20 + 12 * dash_pulse), ty2 + back.y * (14 + 10 * dash_pulse)
+            thruster_l.opacity = int(120 + 110 * dash_pulse)
+            thruster_r.opacity = int(90 + 90 * dash_pulse)
+        else:
+            thruster_l.opacity = 0
+            thruster_r.opacity = 0
 
         # Shield aura
         if getattr(player, "shield", 0) > 0:
@@ -709,15 +833,31 @@ class Visuals:
                 sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch)
                 core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
         
-        self._proj_handles[id(proj)] = RenderHandle(sh, core)
+        # Clean projectile rendering: light streak + core, without heavy blob glow.
+        trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=sh.color, batch=self.batch)
+        trail.opacity = 95 if is_enemy else 125
+        flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch)
+        flare.opacity = 120
+        self._proj_handles[id(proj)] = RenderHandle(trail, sh, core, flare)
 
     def sync_projectile(self, proj, shake: Vec2):
         """Update projectile visual position."""
         h = self._proj_handles[id(proj)]
-        sh, core = h.objs
+        trail, sh, core, flare = h.objs
         sx, sy = to_iso(proj.pos, shake)
+        v = getattr(proj, "vel", Vec2(0.0, 0.0))
+        v2 = Vec2(v.x, v.y)
+        if v2.length() <= 1e-6:
+            v2 = Vec2(1.0, 0.0)
+        vd = v2.normalized()
+        trail_len = 8 + min(16.0, v2.length() * 0.03)
+        trail.x, trail.y = sx, sy
+        trail.x2, trail.y2 = sx - vd.x * trail_len, sy - vd.y * trail_len * 0.65
+        trail.opacity = 95 if str(getattr(proj, "owner", "player")) == "enemy" else 125
         sh.x, sh.y = sx, sy
         core.x, core.y = sx, sy
+        flare.x, flare.y = sx + vd.x * 1.8, sy + vd.y * 1.2
+        flare.opacity = 90 if str(getattr(proj, "owner", "player")) == "enemy" else 130
         self._set_depth(h, sy)
 
     def drop_projectile(self, proj):

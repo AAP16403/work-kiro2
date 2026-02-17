@@ -26,15 +26,20 @@ class Room:
         self._w = width
         self._h = height
 
+        # Combat intensity overlay (0 = calm cool tint, 1 = boss warm tint).
+        self._combat_intensity = 0.0
+        self._combat_intensity_target = 0.0
+        self._intensity_overlay = None
+
         # Gradient backdrop via stacked translucent rectangles.
         self._bg_a = shapes.Rectangle(0, 0, width, height, color=config.BG_TOP, batch=batch)
         self._bg_b = shapes.Rectangle(0, 0, width, height, color=config.BG_BOTTOM, batch=batch)
         self._bg_b.opacity = 120
 
-        self._ambient: List[tuple[shapes.Circle, float, float, float]] = []
-        self._scanlines: List[tuple[shapes.Line, int, float]] = []
-        self._vignette: List[tuple[shapes.Circle, float]] = []
-        self._bg_grid: List[tuple[shapes.Line, int, float]] = []
+        self._ambient: list[tuple[shapes.Circle, float, float, float]] = []
+        self._scanlines: list[tuple[shapes.Line, int, float]] = []
+        self._vignette: list[tuple[shapes.Circle, float]] = []
+        self._bg_grid: list[tuple[shapes.Line, int, float]] = []
         self._build_ambient()
         self._build_floor()
 
@@ -106,6 +111,9 @@ class Room:
         if self._edge is not None:
             self._edge.delete()
             self._edge = None
+        if self._intensity_overlay is not None:
+            self._intensity_overlay.delete()
+            self._intensity_overlay = None
         for o in self._grid:
             if hasattr(o, "delete"):
                 o.delete()
@@ -150,6 +158,10 @@ class Room:
 
         self._floor = shapes.Polygon(*points, color=FLOOR_MAIN, batch=self.batch)
         self._edge = shapes.Polygon(*edge_points, color=FLOOR_EDGE, batch=self.batch)
+
+        # Combat intensity overlay — a translucent polygon matching the floor shape.
+        self._intensity_overlay = shapes.Polygon(*points, color=(60, 30, 20), batch=self.batch)
+        self._intensity_overlay.opacity = 0
         self._edge.opacity = 150  # Border glow
 
         # Soft central lighting (screen-space; low opacity so it "just adds depth").
@@ -244,14 +256,14 @@ class Room:
             x3, y3 = to_iso(p3, Vec2(0, 0))
             x4, y4 = to_iso(p4, Vec2(0, 0))
 
-            col = random.choice([(52, 60, 82), (38, 44, 62), (58, 66, 90), (44, 50, 72)])
+            col = random.choice([(58, 56, 52), (48, 46, 42), (62, 58, 54), (44, 42, 40)])
             poly = shapes.Polygon((x1, y1), (x2, y2), (x3, y3), (x4, y4), color=col, batch=self.batch)
             poly.opacity = random.randint(22, 46)
             self._decor.append(poly)
 
             # Occasional panel seams (subtle outlines).
             if random.random() < 0.22 and sx * sy > 700:
-                seam_col = random.choice([(110, 140, 180), (160, 120, 190), (120, 180, 170)])
+                seam_col = random.choice([(85, 82, 78), (75, 72, 68), (95, 90, 85)])
                 base = random.randint(28, 55)
                 ln1 = shapes.Line(x1, y1, x2, y2, thickness=1, color=seam_col, batch=self.batch)
                 ln1.opacity = base
@@ -273,7 +285,7 @@ class Room:
                 x2_inner, y2_inner = to_iso(p2_inner, Vec2(0, 0))
                 x3_inner, y3_inner = to_iso(p3_inner, Vec2(0, 0))
                 x4_inner, y4_inner = to_iso(p4_inner, Vec2(0, 0))
-                inner_col = random.choice([(60, 70, 90), (45, 55, 75)])
+                inner_col = random.choice([(55, 52, 48), (46, 44, 40)])
                 inner_poly = shapes.Polygon((x1_inner, y1_inner), (x2_inner, y2_inner), (x3_inner, y3_inner), (x4_inner, y4_inner), color=inner_col, batch=self.batch)
                 inner_poly.opacity = random.randint(30, 50)
                 self._decor.append(inner_poly)
@@ -284,6 +296,30 @@ class Room:
                 glow = shapes.Circle(cx, cy, radius=random.uniform(3, 6), color=(150, 180, 220), batch=self.batch)
                 glow.opacity = random.randint(20, 40)
                 self._decor.append(glow)
+
+        # Pavement cracks — subtle dark fissure lines across the floor.
+        crack_count = max(8, min(18, int(radius * 0.04)))
+        for _ in range(crack_count):
+            ang = random.uniform(0.0, math.tau)
+            r_start = (random.random() ** 0.6) * (radius * 0.75)
+            start = Vec2(math.cos(ang) * r_start, math.sin(ang) * r_start)
+            # Crack follows a slightly bent path.
+            seg_count = random.randint(2, 4)
+            cur = start
+            for _seg in range(seg_count):
+                seg_len = random.uniform(15.0, 55.0)
+                seg_ang = ang + random.uniform(-0.6, 0.6)
+                nxt = cur + Vec2(math.cos(seg_ang), math.sin(seg_ang)) * seg_len
+                if nxt.length() > radius * 0.9:
+                    break
+                cx1, cy1 = to_iso(cur, Vec2(0, 0))
+                cx2, cy2 = to_iso(nxt, Vec2(0, 0))
+                crack_col = random.choice([(35, 33, 30), (40, 38, 34), (30, 28, 25)])
+                ln = shapes.Line(cx1, cy1, cx2, cy2, thickness=random.choice([1, 1, 2]), color=crack_col, batch=self.batch)
+                ln.opacity = random.randint(60, 110)
+                self._decor.append(ln)
+                cur = nxt
+                ang = seg_ang
 
         # Circuit lines (pulse in update).
         circuit_count = max(14, min(26, int(radius * 0.07)))
@@ -331,8 +367,31 @@ class Room:
             self._pulse_nodes.append((glow, glow.opacity, phase))
             self._pulse_nodes.append((core, core.opacity, phase + 0.7))
 
+    def set_combat_intensity(self, target: float) -> None:
+        """Set the target combat intensity (0 = calm, 1 = boss fight)."""
+        self._combat_intensity_target = max(0.0, min(1.0, float(target)))
+
     def update(self, dt: float):
         self._t += dt
+
+        # Smoothly lerp combat intensity toward target.
+        ci = self._combat_intensity
+        ct = self._combat_intensity_target
+        if abs(ci - ct) > 0.001:
+            speed = 0.8 if ct > ci else 1.5  # Fade in slower, fade out faster
+            self._combat_intensity = ci + (ct - ci) * min(1.0, speed * dt)
+        else:
+            self._combat_intensity = ct
+
+        # Update intensity overlay color and opacity.
+        if self._intensity_overlay is not None:
+            ci = self._combat_intensity
+            # Blend from cool blue-grey (calm) to warm red (boss).
+            r = int(40 + 60 * ci)
+            g = int(35 - 10 * ci)
+            b = int(50 - 30 * ci)
+            self._intensity_overlay.color = (r, g, b)
+            self._intensity_overlay.opacity = int(18 * ci)
 
         # Subtle pulsing grid opacity for depth.
         pulse = 0.5 + 0.5 * math.sin(self._t * 0.8)

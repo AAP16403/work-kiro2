@@ -3,6 +3,7 @@
 # Install: py -m pip install pyglet
 
 import math
+import random
 
 import pyglet
 from pyglet import shapes
@@ -412,6 +413,19 @@ class PlayingState(State):
 
         game.particle_system.update(dt)
         if game.room:
+            # Compute combat intensity from game state.
+            n_enemies = len(s.enemies)
+            has_boss = any(
+                str(getattr(e, "behavior", "")).startswith("boss_")
+                for e in s.enemies
+            )
+            if n_enemies == 0:
+                ci = 0.0
+            elif has_boss:
+                ci = 0.8 + 0.2 * min(1.0, n_enemies / 4.0)
+            else:
+                ci = min(0.55, 0.08 * n_enemies)
+            game.room.set_combat_intensity(ci)
             game.room.update(dt)
 
         for lb in list(getattr(s, "lasers", [])):

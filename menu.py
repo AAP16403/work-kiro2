@@ -1,7 +1,8 @@
 """Menu system for game configuration and navigation."""
 
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 import math
 import random
 import pyglet
@@ -167,7 +168,7 @@ class MenuSlider:
         r = float(self.knob_radius)
         return (abs(px - knob_x) <= r and abs(py - self.y) <= r)
     
-    def draw(self, batch) -> List:
+    def draw(self, batch) -> list:
         """Draw slider and return list of visual objects."""
         # Backwards compat: keep `draw(batch)` but make it persistent.
         self.ensure(batch)
@@ -241,7 +242,7 @@ class Menu:
         self.screen_height = height
         self.batch = pyglet.graphics.Batch()
         self._t = 0.0
-        self._orbs: List[tuple[shapes.Circle, float, float, float]] = []
+        self._orbs: list[tuple[shapes.Circle, float, float, float]] = []
 
         self._bg_a = shapes.Rectangle(0, 0, width, height, color=(9, 16, 26), batch=self.batch)
         self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
@@ -268,7 +269,7 @@ class Menu:
         self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
         self._panel_shine.opacity = 16
 
-        self.buttons: List[MenuButton] = []
+        self.buttons: list[MenuButton] = []
         self.buttons.append(MenuButton(0, 0, 160, 50, "Start Game", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Guide", lambda: None, color=(120, 95, 220), hover_color=(162, 136, 255)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Settings", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)))
@@ -384,7 +385,7 @@ class Menu:
             button.is_hovered = button.contains_point(x, y)
             button.sync()
     
-    def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
+    def on_mouse_press(self, x: float, y: float, button: int) -> str | None:
         """Handle mouse clicks. Returns action string or None."""
         if button != pyglet.window.mouse.LEFT:
             return None
@@ -410,13 +411,13 @@ class Menu:
 class SettingsMenu:
     """Settings screen with difficulty and window size options."""
     
-    def __init__(self, width: int, height: int, on_save: Callable, display_size: Optional[tuple[int, int]] = None):
+    def __init__(self, width: int, height: int, on_save: Callable, display_size: tuple[int, int] | None = None):
         self.screen_width = width
         self.screen_height = height
         self.on_save = on_save
         self.batch = pyglet.graphics.Batch()
         self._t = 0.0
-        self._orbs: List[tuple[shapes.Circle, float, float, float]] = []
+        self._orbs: list[tuple[shapes.Circle, float, float, float]] = []
 
         self._bg_a = shapes.Rectangle(0, 0, width, height, color=(10, 12, 20), batch=self.batch)
         self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 7, 14), batch=self.batch)
@@ -562,7 +563,7 @@ class SettingsMenu:
 
         self.resize(width, height)
 
-    def _build_window_size_options(self, display_size: Optional[tuple[int, int]]) -> tuple[list[tuple[int, int]], list[str]]:
+    def _build_window_size_options(self, display_size: tuple[int, int] | None) -> tuple[list[tuple[int, int]], list[str]]:
         # Modern defaults focused on common desktop 16:9/16:10 resolutions.
         common = [
             (1280, 720),
@@ -786,7 +787,7 @@ class SettingsMenu:
             self.arena_slider.set_value_from_x(x)
             self.arena_slider.sync()
     
-    def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
+    def on_mouse_press(self, x: float, y: float, button: int) -> str | None:
         """Handle mouse clicks. Returns action string or None."""
         if button != pyglet.window.mouse.LEFT:
             return None

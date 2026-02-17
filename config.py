@@ -47,9 +47,9 @@ ISO_SCALE_Y = 0.5
 # Colors
 BG_TOP = (10, 15, 30)
 BG_BOTTOM = (5, 8, 20)
-FLOOR_MAIN = (40, 30, 60)
-FLOOR_EDGE = (100, 80, 150)
-FLOOR_GRID = (80, 200, 255)
+FLOOR_MAIN = (52, 50, 48)       # Warm concrete
+FLOOR_EDGE = (90, 85, 80)       # Pavement edge
+FLOOR_GRID = (95, 110, 130)     # Subtle steel-blue grid
 HUD_TEXT = (240, 240, 240)
 
 # Powerup Colors

@@ -237,7 +237,12 @@ class Visuals:
             body = shapes.Circle(0, 0, 14, color=base, batch=self.batch)
             core = shapes.Circle(0, 0, 8, color=(255, 255, 255), batch=self.batch)
             core.opacity = 200
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, core)
+            # Orbiting fuse spark
+            fuse = shapes.Circle(0, 0, 3, color=(255, 200, 60), batch=self.batch)
+            fuse.opacity = 220
+            fuse_trail = shapes.Arc(0, 0, 16, segments=20, thickness=2, color=(255, 180, 80), batch=self.batch)
+            fuse_trail.opacity = 60
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, core, fuse, fuse_trail)
             return
 
         if behavior == "tank":
@@ -251,7 +256,10 @@ class Visuals:
             plate.anchor_y = 5
             plate.opacity = 220
             eye = shapes.Circle(0, 0, 3, color=(20, 20, 20), batch=self.batch)
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, armor, plate, eye)
+            # Rotating outer shield ring
+            shield_ring = shapes.Arc(0, 0, 22, segments=24, thickness=3, color=(80, 180, 80), batch=self.batch)
+            shield_ring.opacity = 70
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, armor, plate, eye, shield_ring)
             return
 
         if behavior == "ranged":
@@ -263,7 +271,12 @@ class Visuals:
             muzzle = shapes.Circle(0, 0, 3, color=(255, 255, 255), batch=self.batch)
             muzzle.opacity = 160
             eye = shapes.Circle(0, 0, 2.5, color=(20, 20, 20), batch=self.batch)
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, cannon, muzzle, eye)
+            # Scope crosshair lines
+            scope_h = shapes.Line(0, 0, 0, 0, thickness=1, color=(180, 220, 255), batch=self.batch)
+            scope_v = shapes.Line(0, 0, 0, 0, thickness=1, color=(180, 220, 255), batch=self.batch)
+            scope_h.opacity = 100
+            scope_v.opacity = 100
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, cannon, muzzle, eye, scope_h, scope_v)
             return
 
         if behavior == "charger":
@@ -273,7 +286,12 @@ class Visuals:
             horn1.opacity = 220
             horn2.opacity = 220
             eye = shapes.Circle(0, 0, 2.5, color=(20, 20, 20), batch=self.batch)
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, horn1, horn2, eye)
+            # Speed trail lines
+            trail1 = shapes.Line(0, 0, 0, 0, thickness=2, color=(255, 200, 100), batch=self.batch)
+            trail2 = shapes.Line(0, 0, 0, 0, thickness=2, color=(255, 200, 100), batch=self.batch)
+            trail1.opacity = 0
+            trail2.opacity = 0
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, horn1, horn2, eye, trail1, trail2)
             return
 
         if behavior == "flyer":
@@ -285,7 +303,10 @@ class Visuals:
             tail = shapes.Line(0, 0, 0, 0, thickness=2, color=(230, 230, 240), batch=self.batch)
             tail.opacity = 200
             eye = shapes.Circle(0, 0, 2, color=(20, 20, 20), batch=self.batch)
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, wing1, wing2, tail, eye)
+            # Jet trail
+            jet = shapes.Line(0, 0, 0, 0, thickness=3, color=(150, 200, 255), batch=self.batch)
+            jet.opacity = 90
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, wing1, wing2, tail, eye, jet)
             return
 
         if behavior == "spitter":
@@ -296,7 +317,10 @@ class Visuals:
             sac2.opacity = 140
             mouth = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(30, 30, 30), batch=self.batch)
             mouth.opacity = 210
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, sac1, sac2, mouth)
+            # Pulsing acid glow
+            acid_glow = shapes.Circle(0, 0, 16, color=(180, 255, 80), batch=self.batch)
+            acid_glow.opacity = 25
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, sac1, sac2, mouth, acid_glow)
             return
 
         if behavior == "swarm":
@@ -309,11 +333,19 @@ class Visuals:
             dot1.opacity = 120
             dot2.opacity = 120
             dot3.opacity = 120
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, dot1, dot2, dot3)
+            # Flickering antenna lines
+            ant1 = shapes.Line(0, 0, 0, 0, thickness=1, color=(255, 200, 255), batch=self.batch)
+            ant2 = shapes.Line(0, 0, 0, 0, thickness=1, color=(255, 200, 255), batch=self.batch)
+            ant1.opacity = 110
+            ant2.opacity = 110
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, dot1, dot2, dot3, ant1, ant2)
             return
 
         if behavior == "chaser":
             body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
+            # Pulsing aura ring
+            aura = shapes.Arc(0, 0, 18, segments=32, thickness=2, color=base, batch=self.batch)
+            aura.opacity = 50
             spike1 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(250, 250, 250), batch=self.batch)
             spike2 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(250, 250, 250), batch=self.batch)
             spike3 = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(250, 250, 250), batch=self.batch)
@@ -322,7 +354,7 @@ class Visuals:
             spike3.opacity = 160
             eye1 = shapes.Circle(0, 0, 2, color=(20, 20, 20), batch=self.batch)
             eye2 = shapes.Circle(0, 0, 2, color=(20, 20, 20), batch=self.batch)
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, spike1, spike2, spike3, eye1, eye2)
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, aura, spike1, spike2, spike3, eye1, eye2)
             return
 
         if behavior == "engineer":
@@ -337,7 +369,10 @@ class Visuals:
             visor.opacity = 210
             tool = shapes.Line(0, 0, 10, 10, thickness=2, color=(240, 240, 240), batch=self.batch)
             tool2 = shapes.Line(0, 0, 10, -10, thickness=2, color=(240, 240, 240), batch=self.batch)
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, backpack, visor, tool, tool2)
+            # Rotating gear arc
+            gear = shapes.Arc(0, 0, 17, segments=16, thickness=2, color=(80, 240, 180), batch=self.batch)
+            gear.opacity = 60
+            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, backpack, visor, tool, tool2, gear)
             return
 
         body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
@@ -395,53 +430,79 @@ class Visuals:
             return
 
         if behavior == "bomber":
-            sh, body, core = h.objs
+            sh, body, core, fuse, fuse_trail = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
             core.x, core.y = sx, sy + bob
-            if bool(getattr(enemy, "ai", {}).get("bomber_exploding", False)):
+            fuse_trail.x, fuse_trail.y = sx, sy + bob
+            exploding = bool(getattr(enemy, "ai", {}).get("bomber_exploding", False))
+            if exploding:
                 pulse = 0.5 + 0.5 * math.sin(enemy.t * 30)
                 core.radius = 8 + 4 * pulse
                 core.opacity = 255
+                fuse_speed = 18.0
             else:
                 core.radius = 8
                 core.opacity = 200
+                fuse_speed = 4.0
+            # Fuse spark orbits the body
+            fr = 16
+            fuse.x = sx + math.cos(enemy.t * fuse_speed) * fr
+            fuse.y = sy + bob + math.sin(enemy.t * fuse_speed) * fr
+            fuse.opacity = 160 + int(95 * (0.5 + 0.5 * math.sin(enemy.t * 12.0)))
             self._set_depth(h, sy)
             return
 
         if behavior == "engineer":
-            sh, body, backpack, visor, tool, tool2 = h.objs
+            sh, body, backpack, visor, tool, tool2, gear = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
             backpack.x, backpack.y = sx - 12, sy + 2 + bob
             visor.x, visor.y = sx + 1, sy + 2 + bob
             tool.x, tool.y, tool.x2, tool.y2 = sx + 10, sy + 6 + bob, sx + 16, sy + 0 + bob
             tool2.x, tool2.y, tool2.x2, tool2.y2 = sx + 10, sy + 6 + bob, sx + 16, sy + 12 + bob
+            # Rotating gear arc
+            gear.x, gear.y = sx - 12, sy + 2 + bob
+            gear.radius = 17 + 1.5 * math.sin(enemy.t * 5.0)
+            gear.opacity = 40 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 3.0)))
             self._set_depth(h, sy)
             return
 
         if behavior == "tank":
-            sh, body, armor, plate, eye = h.objs
+            sh, body, armor, plate, eye, shield_ring = h.objs
             sh.x, sh.y = sx, sy - 19
             body.x, body.y = sx, sy + bob * 0.4
             armor.x, armor.y = sx, sy + bob * 0.4
             plate.x, plate.y = sx + 8, sy + 1 + bob * 0.4
             eye.x, eye.y = sx + 6, sy + 2 + bob * 0.4
+            # Rotating shield ring
+            shield_ring.x, shield_ring.y = sx, sy + bob * 0.4
+            shield_ring.radius = 22 + 1.0 * math.sin(enemy.t * 2.0)
+            shield_ring.opacity = 50 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 1.5)))
             self._set_depth(h, sy)
             return
 
         if behavior == "ranged":
-            sh, body, cannon, muzzle, eye = h.objs
+            sh, body, cannon, muzzle, eye, scope_h, scope_v = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
             cannon.x, cannon.y = sx + 6, sy + 2 + bob
             muzzle.x, muzzle.y = sx + 18, sy + 2 + bob
             eye.x, eye.y = sx + 1, sy + 2 + bob
+            # Scope crosshairs rotate slowly
+            sr = 20
+            sa = enemy.t * 1.2
+            scope_h.x, scope_h.y = sx + 18 - math.cos(sa) * sr, sy + 2 + bob
+            scope_h.x2, scope_h.y2 = sx + 18 + math.cos(sa) * sr, sy + 2 + bob
+            scope_v.x, scope_v.y = sx + 18, sy + 2 + bob - math.sin(sa) * sr
+            scope_v.x2, scope_v.y2 = sx + 18, sy + 2 + bob + math.sin(sa) * sr
+            scope_h.opacity = 60 + int(40 * (0.5 + 0.5 * math.sin(enemy.t * 3.0)))
+            scope_v.opacity = scope_h.opacity
             self._set_depth(h, sy)
             return
 
         if behavior == "charger":
-            sh, body, horn1, horn2, eye = h.objs
+            sh, body, horn1, horn2, eye, trail1, trail2 = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
             # Horns
@@ -452,11 +513,23 @@ class Visuals:
             horn2.x2, horn2.y2 = sx - 12, sy + 10 + bob
             horn2.x3, horn2.y3 = sx - 6, sy + 4 + bob
             eye.x, eye.y = sx + 2, sy + 2 + bob
+            # Speed trails — visible when charging
+            is_charging = bool(getattr(enemy, "ai", {}).get("charger_dashing", False))
+            if is_charging:
+                trail1.x, trail1.y = sx - 12, sy + 6 + bob
+                trail1.x2, trail1.y2 = sx - 32, sy + 10 + bob
+                trail2.x, trail2.y = sx - 12, sy - 2 + bob
+                trail2.x2, trail2.y2 = sx - 32, sy + 2 + bob
+                trail1.opacity = 140
+                trail2.opacity = 110
+            else:
+                trail1.opacity = 0
+                trail2.opacity = 0
             self._set_depth(h, sy)
             return
 
         if behavior == "flyer":
-            sh, body, wing1, wing2, tail, eye = h.objs
+            sh, body, wing1, wing2, tail, eye, jet = h.objs
             sh.x, sh.y = sx, sy - 17
             body.x, body.y = sx, sy + bob
             flap = 6 + 4 * math.sin(enemy.t * 10.0)
@@ -468,11 +541,15 @@ class Visuals:
             wing2.x3, wing2.y3 = sx - 10, sy + bob - 2
             tail.x, tail.y, tail.x2, tail.y2 = sx - 3, sy + bob - 6, sx - 14, sy + bob - 14
             eye.x, eye.y = sx + 2, sy + bob + 2
+            # Jet trail behind
+            jet.x, jet.y = sx - 4, sy + bob - 4
+            jet.x2, jet.y2 = sx - 18, sy + bob - 16
+            jet.opacity = 50 + int(40 * (0.5 + 0.5 * math.sin(enemy.t * 8.0)))
             self._set_depth(h, sy)
             return
 
         if behavior == "spitter":
-            sh, body, sac1, sac2, mouth = h.objs
+            sh, body, sac1, sac2, mouth, acid_glow = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
             sac1.x, sac1.y = sx - 9, sy + 2 + bob
@@ -480,34 +557,53 @@ class Visuals:
             mouth.x, mouth.y = sx + 8, sy + bob
             mouth.x2, mouth.y2 = sx + 18, sy + 4 + bob
             mouth.x3, mouth.y3 = sx + 18, sy - 4 + bob
+            # Pulsing acid glow
+            acid_glow.x, acid_glow.y = sx, sy + bob
+            acid_glow.radius = 14 + 3 * math.sin(enemy.t * 4.0)
+            acid_glow.opacity = 18 + int(14 * (0.5 + 0.5 * math.sin(enemy.t * 5.0)))
             self._set_depth(h, sy)
             return
 
         if behavior == "swarm":
-            sh, body, dot1, dot2, dot3 = h.objs
+            sh, body, dot1, dot2, dot3, ant1, ant2 = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
             r = 8
             dot1.x, dot1.y = sx + math.cos(enemy.t * 6.0) * r, sy + bob + math.sin(enemy.t * 6.0) * r
             dot2.x, dot2.y = sx + math.cos(enemy.t * 6.0 + 2.1) * r, sy + bob + math.sin(enemy.t * 6.0 + 2.1) * r
             dot3.x, dot3.y = sx + math.cos(enemy.t * 6.0 + 4.2) * r, sy + bob + math.sin(enemy.t * 6.0 + 4.2) * r
+            # Flickering antenna
+            jitter = math.sin(enemy.t * 20.0) * 3.0
+            ant1.x, ant1.y = sx - 3, sy + bob + 8
+            ant1.x2, ant1.y2 = sx - 5 + jitter, sy + bob + 15
+            ant2.x, ant2.y = sx + 3, sy + bob + 8
+            ant2.x2, ant2.y2 = sx + 5 - jitter, sy + bob + 15
+            ant1.opacity = 70 + int(50 * (0.5 + 0.5 * math.sin(enemy.t * 14.0)))
+            ant2.opacity = 70 + int(50 * (0.5 + 0.5 * math.sin(enemy.t * 14.0 + 1.5)))
             self._set_depth(h, sy)
             return
 
         if behavior == "chaser":
-            sh, body, spike1, spike2, spike3, eye1, eye2 = h.objs
+            sh, body, aura, spike1, spike2, spike3, eye1, eye2 = h.objs
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
-            # Spikes
-            spike1.x, spike1.y = sx, sy + bob + 18
-            spike1.x2, spike1.y2 = sx + 8, sy + bob + 8
-            spike1.x3, spike1.y3 = sx - 8, sy + bob + 8
-            spike2.x, spike2.y = sx + 18, sy + bob
-            spike2.x2, spike2.y2 = sx + 8, sy + bob + 8
-            spike2.x3, spike2.y3 = sx + 8, sy + bob - 8
-            spike3.x, spike3.y = sx - 18, sy + bob
-            spike3.x2, spike3.y2 = sx - 8, sy + bob + 8
-            spike3.x3, spike3.y3 = sx - 8, sy + bob - 8
+            # Pulsing aura ring
+            aura.x, aura.y = sx, sy + bob
+            aura.radius = 16 + 4 * math.sin(enemy.t * 3.5)
+            aura.opacity = 30 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 2.5)))
+            # Rotating spikes
+            t_rot = enemy.t * 1.8
+            for i, spike in enumerate((spike1, spike2, spike3)):
+                a = t_rot + i * (math.tau / 3)
+                sr = 18
+                tip_x = sx + math.cos(a) * sr
+                tip_y = sy + bob + math.sin(a) * sr
+                base_a1 = a + 0.35
+                base_a2 = a - 0.35
+                br = 10
+                spike.x, spike.y = tip_x, tip_y
+                spike.x2, spike.y2 = sx + math.cos(base_a1) * br, sy + bob + math.sin(base_a1) * br
+                spike.x3, spike.y3 = sx + math.cos(base_a2) * br, sy + bob + math.sin(base_a2) * br
             eye1.x, eye1.y = sx - 3, sy + bob + 2
             eye2.x, eye2.y = sx + 3, sy + bob + 2
             self._set_depth(h, sy)

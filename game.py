@@ -132,6 +132,9 @@ class GuideState(State):
         else:
             self.game.guide_menu.on_key_press(symbol)
 
+    def update(self, dt: float):
+        self.game.guide_menu.update(dt)
+
     def draw(self):
         self.game.guide_menu.draw()
 

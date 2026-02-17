@@ -182,23 +182,23 @@ def _boss_damage(state, base: float, wave_scale: float = 0.22, cap: int = 32) ->
 def _boss_cd(state, base: float, phase: int, floor: float, persona: str = "aggressive") -> float:
     cd = float(base)
     if phase == 1:
-        cd *= 0.92
+        cd *= 0.96
     elif phase >= 2:
-        cd *= 0.84
+        cd *= 0.90
     if str(persona) == "aggressive":
-        cd *= 0.95
+        cd *= 0.97
     d = str(getattr(state, "difficulty", "normal")).lower()
     if d == "easy":
-        cd *= 1.08
+        cd *= 1.12
     elif d == "hard":
-        cd *= 0.92
+        cd *= 0.96
     return max(float(floor), cd)
 
 
 def _boss_adds_cap(state, bonus: int) -> int:
     # Keep boss encounters tense without flooding the room.
     base = int(getattr(state, "max_enemies", 12))
-    return max(base + 1, min(base + int(bonus), base + 6))
+    return max(base + 1, min(base + int(bonus), base + 4))
 
 
 def _behavior_key(enemy: Enemy) -> str:
@@ -600,13 +600,14 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 proj_speed = 210.0 + state.wave * 2.0
                 dmg = _boss_damage(state, base=5.0, wave_scale=0.14, cap=16)
 
-                if atk_roll < 0.45 or phase >= 1:
+                if atk_roll < 0.38 or (phase >= 1 and atk_roll < 0.7):
                     # Static Storm: Call thunder lines
                     if not hasattr(state, "thunders"):
                         state.thunders = []
                     
-                    line_count = 1 + phase
-                    if persona == "aggressive": line_count += 1
+                    line_count = 1 if phase == 0 else 2
+                    if persona == "aggressive" and phase >= 2:
+                        line_count += 1
                     
                     for _ in range(line_count):
                         # Random lines across the arena
@@ -619,23 +620,22 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                         start = anchor - dirv * span
                         end = anchor + dirv * span
                         th_dmg = _boss_damage(state, base=12.0, wave_scale=0.22, cap=26)
-                        state.thunders.append(ThunderLine(start=start, end=end, damage=th_dmg, thickness=16.0, warn=0.75, ttl=0.2))
+                        state.thunders.append(ThunderLine(start=start, end=end, damage=th_dmg, thickness=14.0, warn=1.0, ttl=0.16))
 
                 if atk_roll > 0.3:
                     # Warp Burst: Ring of bullets
-                    ring_cnt = 9
-                    if phase >= 1: ring_cnt = 12
+                    ring_cnt = 8 if phase == 0 else 10
                     gun = _cycle_gun(enemy, ["plasma", "bullet"])
                     _fire_ring(state, enemy.pos, ring_cnt, proj_speed * 0.9, dmg, projectile_type=gun)
                     
-                    if phase >= 2:
+                    if phase >= 2 and random.random() < 0.45:
                         # Double burst
                         _fire_ring(state, enemy.pos, ring_cnt, proj_speed * 0.75, dmg, start_deg=15.0, projectile_type=gun)
 
                 enemy.ai[state_key] = "stalk"
-                cd_base = 2.2 - (state.wave * 0.05) - (phase * 0.3)
+                cd_base = 2.5 - (state.wave * 0.035) - (phase * 0.2)
                 if persona == "aggressive": cd_base *= 0.8
-                enemy.ai[state_timer] = max(0.8, cd_base)
+                enemy.ai[state_timer] = max(1.1, cd_base)
 
             return
 
@@ -670,7 +670,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 dvec = target - enemy.pos
                 if dvec.length() < 20 or l_timer <= 0:
                     enemy.ai["laser_state"] = "charge"
-                    enemy.ai["laser_timer"] = 0.6
+                    enemy.ai["laser_timer"] = 0.75
                 else:
                     enemy.pos = enemy.pos + dvec.normalized() * enemy.speed * 1.5 * dt
 
@@ -678,8 +678,9 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             elif l_state == "charge":
                 if l_timer <= 0:
                     enemy.ai["laser_state"] = "attack"
-                    enemy.ai["laser_timer"] = 3.0 # Attack duration
+                    enemy.ai["laser_timer"] = 2.2 # Attack duration
                     enemy.ai["sweep_angle"] = 0.0
+                    enemy.ai["laser_tick"] = 0.0
 
             # --- ATTACK: Sweep lasers or Prism Cage ---
             elif l_state == "attack":
@@ -691,35 +692,49 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 to_player = player_pos - enemy.pos
                 base_angle = math.degrees(math.atan2(to_player.y, to_player.x))
                 
-                # Sweep offset based on timer (sweep back and forth)
-                sweep_speed = 45.0 + (phase * 15.0)
-                sweep_offset = math.sin(enemy.t * 3.0) * (35.0 + phase * 10.0)
-                
-                if persona == "aggressive" and phase >= 1:
-                    # Dual sweep (V shape)
-                    offsets = [sweep_offset, -sweep_offset]
+                # Emit beam slices at a controlled cadence instead of every frame.
+                tick = float(enemy.ai.get("laser_tick", 0.0)) - dt
+                if tick > 0.0:
+                    enemy.ai["laser_tick"] = tick
                 else:
-                    offsets = [sweep_offset]
+                    sweep_offset = math.sin(enemy.t * 2.5) * (28.0 + phase * 8.0)
+
+                    if persona == "aggressive" and phase >= 2:
+                        # Dual sweep (V shape) only in the final phase.
+                        offsets = [sweep_offset, -sweep_offset]
+                    else:
+                        offsets = [sweep_offset]
                 
-                for off in offsets:
-                    angle = base_angle + off
-                    rad = math.radians(angle)
-                    beam_dir = Vec2(math.cos(rad), math.sin(rad))
-                    
-                    start = enemy.pos
-                    end = start + beam_dir * config.ROOM_RADIUS * 2.2
-                    
-                    # Short-lived beams to simulate continuous sweep
-                    dmg = _boss_damage(state, base=12.0, wave_scale=0.22, cap=24)
-                    state.lasers.append(LaserBeam(start, end, damage=dmg, thickness=14.0, warn=0.0, ttl=0.15, color=(255, 100, 255), owner="enemy"))
+                    for off in offsets:
+                        angle = base_angle + off
+                        rad = math.radians(angle)
+                        beam_dir = Vec2(math.cos(rad), math.sin(rad))
+                        
+                        start = enemy.pos
+                        end = start + beam_dir * config.ROOM_RADIUS * 2.2
+                        
+                        dmg = _boss_damage(state, base=9.5, wave_scale=0.18, cap=20)
+                        state.lasers.append(
+                            LaserBeam(
+                                start,
+                                end,
+                                damage=dmg,
+                                thickness=12.0,
+                                warn=0.22,
+                                ttl=0.13,
+                                color=(255, 100, 255),
+                                owner="enemy",
+                            )
+                        )
+                    enemy.ai["laser_tick"] = 0.22 if phase == 0 else 0.18 if phase == 1 else 0.15
                 
                 # Occasional Prism Cage (Phase 2+)
-                if phase >= 2 and random.random() < 0.02:
-                     _fire_ring(state, enemy.pos, count=8, speed=180.0, damage=10, projectile_type="plasma")
+                if phase >= 2 and random.random() < 0.01:
+                     _fire_ring(state, enemy.pos, count=6, speed=170.0, damage=8, projectile_type="plasma")
 
                 if l_timer <= 0:
                     enemy.ai["laser_state"] = "reposition"
-                    enemy.ai["laser_timer"] = 0.5
+                    enemy.ai["laser_timer"] = 0.7
             
             enemy.ai["laser_timer"] = l_timer
             return
@@ -744,7 +759,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 if not hasattr(state, "traps"):
                     state.traps = []
                 # Ring of traps around the player.
-                n = 3 if phase == 0 else 4 if phase == 1 else 5
+                n = 3 if phase == 0 else 4
                 r = 82 if phase < 2 else 92
                 base_ang = random.uniform(0, math.tau)
                 for i in range(n):
@@ -754,10 +769,10 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                         state,
                         Trap(
                             pos=pos,
-                            radius=29.0,
+                            radius=26.0,
                             damage=_boss_damage(state, base=12.5, wave_scale=0.2, cap=25),
                             ttl=7.6,
-                            armed_delay=0.6,
+                            armed_delay=0.8,
                             kind="spike",
                         ),
                     )
@@ -772,9 +787,9 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 elif phase == 1:
                     _fire_fan(state, enemy.pos, aim, count=6, spread_deg=76.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="spread")
                 else:
-                    _fire_fan(state, enemy.pos, aim, count=8, spread_deg=92.0, speed=proj_speed, damage=dmg + 2, ttl=2.65, projectile_type="spread")
+                    _fire_fan(state, enemy.pos, aim, count=7, spread_deg=88.0, speed=proj_speed, damage=dmg + 2, ttl=2.55, projectile_type="spread")
                     if persona in ("aggressive", "trickster"):
-                        _fire_fan(state, enemy.pos, _perp(aim), count=4, spread_deg=42.0, speed=proj_speed * 0.92, damage=max(1, dmg), ttl=2.4, projectile_type="spread")
+                        _fire_fan(state, enemy.pos, _perp(aim), count=3, spread_deg=38.0, speed=proj_speed * 0.9, damage=max(1, dmg), ttl=2.3, projectile_type="spread")
 
                 # Henchmen: engineers join the fight.
                 adds_cap = _boss_adds_cap(state, 2)
@@ -808,8 +823,9 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 # 1. Spawn Egg Sacs (Priority)
                 adds_cap = _boss_adds_cap(state, 4)
                 current_adds = len([e for e in getattr(state, "enemies", []) if not str(e.behavior).startswith("boss")])
+                egg_sacs = len([e for e in getattr(state, "enemies", []) if str(e.behavior) == "egg_sac"])
                 
-                if roll < 0.5 and current_adds < adds_cap:
+                if roll < 0.5 and current_adds < adds_cap and egg_sacs < (2 if phase < 2 else 3):
                     # Spawn 1-2 egg sacs
                     count = 1 + (1 if phase >= 1 else 0)
                     for _ in range(count):
@@ -826,11 +842,11 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     proj_speed = 190.0
                     dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)
                     aim = (player_pos - enemy.pos).normalized()
-                    _fire_fan(state, enemy.pos, aim, count=5 + phase, spread_deg=60.0, speed=proj_speed, damage=dmg, projectile_type="plasma")
+                    _fire_fan(state, enemy.pos, aim, count=5 + min(phase, 1), spread_deg=56.0, speed=proj_speed, damage=dmg, projectile_type="plasma")
                 
                 # 3. Swarm Call (Direct spawn)
                 else:
-                    for _ in range(3):
+                    for _ in range(2):
                          ang = random.uniform(0, math.tau)
                          pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * 60
                          state.enemies.append(Enemy(pos=pos, hp=12, speed=100, behavior="swarm"))
@@ -879,7 +895,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 # Transition to charge based on timer or proximity
                 if b_timer <= 0:
                     enemy.ai["brute_state"] = "telegraph"
-                    enemy.ai["brute_timer"] = 0.8 # Warning time
+                    enemy.ai["brute_timer"] = 1.0 # Warning time
                     enemy.ai["charge_dir_x"] = dir_to.x
                     enemy.ai["charge_dir_y"] = dir_to.y
 
@@ -901,8 +917,9 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 cy = float(enemy.ai.get("charge_dir_y", 0.0))
                 charge_dir = Vec2(cx, cy)
                 
-                charge_speed = enemy.speed * 3.2
-                if phase_boss >= 1: charge_speed *= 1.15
+                charge_speed = enemy.speed * 2.8
+                if phase_boss >= 1:
+                    charge_speed *= 1.08
                 
                 step = charge_dir * charge_speed * dt
                 enemy.pos = enemy.pos + step
@@ -915,8 +932,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     enemy.ai["brute_timer"] = 2.0 # Vulnerability window
                     
                     # Shockwave
-                    sw_dmg = _boss_damage(state, base=8.0, wave_scale=0.15, cap=20)
-                    _spawn_shockwave(state, enemy.pos, count=16 + phase_boss * 4, speed=260.0, damage=sw_dmg)
+                    sw_dmg = _boss_damage(state, base=7.0, wave_scale=0.13, cap=18)
+                    _spawn_shockwave(state, enemy.pos, count=12 + phase_boss * 3, speed=240.0, damage=sw_dmg)
                     
                     # Screen shake (via trap placeholder or just effect)
                     # We can't access screen shake directly easily, but the shockwave is good enough.
@@ -966,8 +983,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                 if not hasattr(state, "lasers"):
                     state.lasers = []
 
-                proj_speed = 225.0 + state.wave * 1.8
-                dmg = _boss_damage(state, base=6.5, wave_scale=0.15, cap=18)
+                proj_speed = 218.0 + state.wave * 1.6
+                dmg = _boss_damage(state, base=6.0, wave_scale=0.13, cap=16)
                 aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.72)
 
                 # Main curtain/fan pattern.
@@ -978,15 +995,15 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.45, start_deg=enemy.t * 30.0, projectile_type="bullet")
                 else:
                     # Dense forward curtain: multiple narrow fans to force lane changes.
-                    for off in (-18.0, -6.0, 6.0, 18.0):
+                    for off in (-14.0, 0.0, 14.0):
                         a = _rotate(aim, off)
-                        _fire_fan(state, enemy.pos, a, count=4, spread_deg=28.0, speed=proj_speed, damage=dmg + 1, ttl=2.5, projectile_type="plasma")
-                    _fire_ring(state, enemy.pos, count=10, speed=proj_speed * 0.82, damage=dmg, ttl=2.55, start_deg=enemy.t * 38.0, projectile_type="bullet")
+                        _fire_fan(state, enemy.pos, a, count=3, spread_deg=24.0, speed=proj_speed, damage=dmg + 1, ttl=2.35, projectile_type="plasma")
+                    _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.78, damage=max(1, dmg - 1), ttl=2.4, start_deg=enemy.t * 34.0, projectile_type="bullet")
 
                 # Beam checks to punish straight-line movement.
                 beam_len = config.ROOM_RADIUS * 2.0
                 if phase >= 1:
-                    offsets = (-22.0, 22.0) if phase == 1 else (-30.0, 0.0, 30.0)
+                    offsets = (-20.0, 20.0) if phase == 1 else (-24.0, 24.0)
                     for off in offsets:
                         d2 = _rotate(aim, off)
                         state.lasers.append(
@@ -994,8 +1011,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                                 start=Vec2(enemy.pos.x, enemy.pos.y),
                                 end=enemy.pos + d2 * beam_len,
                                 damage=_boss_damage(state, base=10.0, wave_scale=0.2, cap=24),
-                                thickness=8.0 if phase == 1 else 8.8,
-                                warn=0.56 if phase == 1 else 0.5,
+                                thickness=7.2 if phase == 1 else 7.8,
+                                warn=0.62 if phase == 1 else 0.58,
                                 ttl=0.12,
                                 color=(190, 210, 255),
                                 owner="enemy",
@@ -1004,13 +1021,13 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
 
                 # Minion support.
                 adds_cap = _boss_adds_cap(state, 4)
-                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < (0.14 if phase == 2 else 0.09):
+                if len(getattr(state, "enemies", [])) < adds_cap and random.random() < (0.09 if phase == 2 else 0.06):
                     pos = enemy.pos + Vec2(random.uniform(-85, 85), random.uniform(-85, 85))
                     add_behavior = "flyer" if random.random() < 0.6 else "ranged"
                     state.enemies.append(Enemy(pos=pos, hp=16 + state.wave * 2, speed=74 + state.wave * 1.8, behavior=add_behavior))
 
-                base_cd = 1.65 - state.wave * 0.008
-                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=0.86, persona=persona)
+                base_cd = 1.8 - state.wave * 0.006
+                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=1.0, persona=persona)
             return
 
         if enemy.behavior == "boss_womb_core":
@@ -1037,10 +1054,10 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     state.traps = []
 
                 # Telegraph pulse around player then strike.
-                pulse_r = 92.0 if phase < 2 else 104.0
-                pulse_dmg = _boss_damage(state, base=13.0, wave_scale=0.24, cap=28)
-                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r + 18.0, damage=0, ttl=0.86, armed_delay=0.42, kind="womb_warn"))
-                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r, damage=pulse_dmg, ttl=0.58, armed_delay=0.42, kind="womb_pulse"))
+                pulse_r = 86.0 if phase < 2 else 94.0
+                pulse_dmg = _boss_damage(state, base=11.5, wave_scale=0.2, cap=24)
+                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r + 16.0, damage=0, ttl=1.0, armed_delay=0.52, kind="womb_warn"))
+                _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r, damage=pulse_dmg, ttl=0.52, armed_delay=0.52, kind="womb_pulse"))
 
                 proj_speed = 212.0 + state.wave * 1.9
                 dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)
@@ -1054,16 +1071,14 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                     _fire_fan(state, enemy.pos, aim, count=7, spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type=gun)
                     _fire_ring(state, enemy.pos, count=7, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.5, start_deg=enemy.t * 24.0, projectile_type="bullet")
                 else:
-                    _fire_fan(state, enemy.pos, aim, count=8, spread_deg=92.0, speed=proj_speed, damage=dmg + 2, ttl=2.65, projectile_type=gun)
-                    _fire_fan(state, enemy.pos, _perp(aim), count=5, spread_deg=40.0, speed=proj_speed * 0.94, damage=dmg + 1, ttl=2.5, projectile_type="spread")
-                    _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.84, damage=dmg, ttl=2.55, start_deg=enemy.t * 32.0, projectile_type="plasma")
+                    _fire_fan(state, enemy.pos, aim, count=7, spread_deg=86.0, speed=proj_speed, damage=dmg + 1, ttl=2.5, projectile_type=gun)
+                    _fire_fan(state, enemy.pos, _perp(aim), count=4, spread_deg=34.0, speed=proj_speed * 0.9, damage=dmg, ttl=2.35, projectile_type="spread")
+                    _fire_ring(state, enemy.pos, count=6, speed=proj_speed * 0.78, damage=max(1, dmg - 1), ttl=2.35, start_deg=enemy.t * 30.0, projectile_type="plasma")
 
                 # Summon mixed rushers to keep pressure.
-                adds_cap = _boss_adds_cap(state, 4)
+                adds_cap = _boss_adds_cap(state, 3)
                 if len(getattr(state, "enemies", [])) < adds_cap:
-                    summon_n = 1 if phase == 0 else 2
-                    if phase == 2 and random.random() < 0.35:
-                        summon_n = 1
+                    summon_n = 1 if phase <= 1 else (2 if random.random() < 0.5 else 1)
                     for _ in range(summon_n):
                         if len(getattr(state, "enemies", [])) >= adds_cap:
                             break
@@ -1071,8 +1086,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
                         add_behavior = "swarm" if random.random() < 0.7 else "charger"
                         state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=86 + state.wave * 1.6, behavior=add_behavior))
 
-                base_cd = 2.05 - state.wave * 0.009
-                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=0.9, persona=persona)
+                base_cd = 2.25 - state.wave * 0.007
+                enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=1.15, persona=persona)
             return
     else:
         if hasattr(enemy.behavior, "update"):

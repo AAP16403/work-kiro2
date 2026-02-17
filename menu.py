@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 import math
 import random
 import pyglet
@@ -242,6 +242,8 @@ class Menu:
         self.screen_height = height
         self.batch = pyglet.graphics.Batch()
         self._t = 0.0
+        self._title_base_y = 0.0
+        self._button_base_positions: list[tuple[float, float]] = []
         self._orbs: list[tuple[shapes.Circle, float, float, float]] = []
 
         self._bg_a = shapes.Rectangle(0, 0, width, height, color=(9, 16, 26), batch=self.batch)
@@ -323,6 +325,18 @@ class Menu:
                 orb.y = -60
             orb.opacity = int(14 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.7 + phase)))
 
+        # Subtle, continuous menu motion to keep the screen feeling alive.
+        self.title.y = int(self._title_base_y + math.sin(self._t * 1.2) * 6.0)
+        self._panel_shine.opacity = int(10 + 16 * (0.5 + 0.5 * math.sin(self._t * 1.45)))
+        for i, btn in enumerate(self.buttons):
+            if i >= len(self._button_base_positions):
+                continue
+            base_x, base_y = self._button_base_positions[i]
+            wave = math.sin(self._t * 2.15 + i * 0.58)
+            btn.x = base_x + int(wave * 4.0)
+            btn.y = base_y + int(wave * 2.0)
+            btn.sync()
+
     def resize(self, width: int, height: int):
         self.screen_width = width
         self.screen_height = height
@@ -345,6 +359,7 @@ class Menu:
             btn.x = cx - button_w // 2
             btn.y = start_y - i * (button_h + gap)
             btn.sync()
+        self._button_base_positions = [(btn.x, btn.y) for btn in self.buttons]
 
         # Panel size wraps buttons with padding.
         pad_x = int(70 * scale)
@@ -369,6 +384,7 @@ class Menu:
         self.title.x = cx
         self.title.font_size = max(22, int(38 * scale))
         self.title.y = height - int(85 * scale)
+        self._title_base_y = self.title.y
         self.subtitle.x = cx
         self.subtitle.font_size = max(10, int(13 * scale))
         self.subtitle.y = height - int(130 * scale)
@@ -854,22 +870,22 @@ class GuideMenu:
     """In-game encyclopedia for enemies and powerups."""
 
     ENEMY_INFO = [
-        {"key": "chaser", "name": "Chaser", "icon": "CH", "what": "Rushes straight for impact.", "deal": "Strafe and burst it before contact.", "lore": "Mass-produced hound drone tuned for reckless pursuit."},
-        {"key": "ranged", "name": "Ranged", "icon": "RA", "what": "Keeps distance and fires aimed shots.", "deal": "Pressure diagonally and break line of fire.", "lore": "A perimeter sentry rebuilt for arena suppression."},
-        {"key": "charger", "name": "Charger", "icon": "CG", "what": "Telegraphs then commits to a hard dash.", "deal": "Sidestep late, punish recovery.", "lore": "Impact frame with overclocked thrusters and no brakes."},
+        {"key": "chaser", "name": "Chaser", "icon": "CH", "what": "Rushes straight in for contact damage.", "deal": "Strafe and burst it before it reaches melee.", "lore": "Mass-produced hound drone tuned for reckless pursuit."},
+        {"key": "ranged", "name": "Ranged", "icon": "RA", "what": "Holds distance and fires aimed shots.", "deal": "Pressure diagonally and break line-of-fire.", "lore": "A perimeter sentry rebuilt for arena suppression."},
+        {"key": "charger", "name": "Charger", "icon": "CG", "what": "Telegraphs then commits to a hard dash.", "deal": "Sidestep late, then punish recovery frames.", "lore": "Impact frame with overclocked thrusters and no brakes."},
         {"key": "swarm", "name": "Swarm", "icon": "SW", "what": "Light units that collapse from flanks.", "deal": "Keep moving and clear packs with spread fire.", "lore": "Fragment drones sharing a low-latency hive link."},
-        {"key": "tank", "name": "Tank", "icon": "TK", "what": "Slow frontliner with high durability.", "deal": "Kite while focus-firing weak escorts first.", "lore": "Siege chassis repurposed as a living shield."},
-        {"key": "spitter", "name": "Spitter", "icon": "SP", "what": "Lobs medium-speed corrosive volleys.", "deal": "Approach from offsets, avoid standing still.", "lore": "Bio-mech mortar node seeded with toxic payloads."},
-        {"key": "flyer", "name": "Flyer", "icon": "FL", "what": "Fast skirmisher with erratic aerial arcs.", "deal": "Track movement lead and fire in front.", "lore": "Recon interceptor tuned for vector feints."},
-        {"key": "engineer", "name": "Engineer", "icon": "EN", "what": "Deploys hazards and supports enemy tempo.", "deal": "Prioritize early to stop area denial.", "lore": "Autonomous field tech that weaponizes terrain."},
-        {"key": "bomber", "name": "Bomber", "icon": "BM", "what": "Throws bombs that explode on timer/impact.", "deal": "Do not facetank; bait throws then disengage.", "lore": "A demolition core with unstable combustion cells."},
-        {"key": "boss_thunder", "name": "Boss: Thunder", "icon": "BT", "what": "Marks lines then detonates lightning paths.", "deal": "Respect warning lanes and rotate outward.", "lore": "Storm-routing sovereign running a cracked weather array."},
-        {"key": "boss_laser", "name": "Boss: Laser", "icon": "BL", "what": "Sweeping beams plus burst volleys.", "deal": "Play near beam edges, dash through gaps.", "lore": "An orbital cutter node dropped into close quarters."},
-        {"key": "boss_trapmaster", "name": "Boss: Trapmaster", "icon": "TM", "what": "Seeds the arena with lethal trap timings.", "deal": "Track safe tiles and avoid panic routing.", "lore": "Custodian AI that turned maintenance grids into snares."},
-        {"key": "boss_swarmqueen", "name": "Boss: Swarmqueen", "icon": "SQ", "what": "Floods field with coordinated adds.", "deal": "Cut adds quickly; deny snowball pressure.", "lore": "Hive-mother process commanding distributed micro-drones."},
-        {"key": "boss_brute", "name": "Boss: Brute", "icon": "BR", "what": "Close-range slams and brawler bursts.", "deal": "Stay mobile, punish after slam windows.", "lore": "Execution platform stripped to raw kinetic violence."},
-        {"key": "boss_abyss_gaze", "name": "Boss: Abyss Gaze", "icon": "AG", "what": "Dark pulse patterns and pressure rings.", "deal": "Keep spacing disciplined, avoid center traps.", "lore": "A deep-scan optic that learned predation."},
-        {"key": "boss_womb_core", "name": "Boss: Womb Core", "icon": "WC", "what": "Spawns pulses/adds and compresses safe zones.", "deal": "Clear adds fast; save burst for pulse gaps.", "lore": "A growth reactor that treats battle as incubation."},
+        {"key": "tank", "name": "Tank", "icon": "TK", "what": "Slow frontliner with heavy durability.", "deal": "Kite and remove escorts before full commit.", "lore": "Siege chassis repurposed as a living shield."},
+        {"key": "spitter", "name": "Spitter", "icon": "SP", "what": "Lobs corrosive volleys on medium arc.", "deal": "Approach from offsets; never stand still.", "lore": "Bio-mech mortar node seeded with toxic payloads."},
+        {"key": "flyer", "name": "Flyer", "icon": "FL", "what": "Fast skirmisher with erratic aerial arcs.", "deal": "Lead shots ahead of movement, not at center.", "lore": "Recon interceptor tuned for vector feints."},
+        {"key": "engineer", "name": "Engineer", "icon": "EN", "what": "Deploys hazards and stabilizes enemy tempo.", "deal": "Prioritize early to stop area denial setups.", "lore": "Autonomous field tech that weaponizes terrain."},
+        {"key": "bomber", "name": "Bomber", "icon": "BM", "what": "Throws bombs that detonate on timer/impact.", "deal": "Bait throws, disengage, then re-enter safely.", "lore": "A demolition core with unstable combustion cells."},
+        {"key": "boss_thunder", "name": "Boss: Thunder", "icon": "BT", "what": "Marks lines then detonates lightning lanes.", "deal": "Respect warning lanes and rotate outward.", "lore": "Storm-routing sovereign running a cracked weather array."},
+        {"key": "boss_laser", "name": "Boss: Laser", "icon": "BL", "what": "Sweeping beams plus burst volleys.", "deal": "Play near beam edges and dash through gaps.", "lore": "An orbital cutter node dropped into close quarters."},
+        {"key": "boss_trapmaster", "name": "Boss: Trapmaster", "icon": "TM", "what": "Seeds arena zones with trap timings.", "deal": "Track safe tiles; avoid panic pathing.", "lore": "Custodian AI that turned maintenance grids into snares."},
+        {"key": "boss_swarmqueen", "name": "Boss: Swarmqueen", "icon": "SQ", "what": "Floods field with coordinated adds.", "deal": "Cut adds quickly to deny snowball pressure.", "lore": "Hive-mother process commanding distributed micro-drones."},
+        {"key": "boss_brute", "name": "Boss: Brute", "icon": "BR", "what": "Close-range slams and brawler bursts.", "deal": "Stay mobile and punish post-slam windows.", "lore": "Execution platform stripped to raw kinetic violence."},
+        {"key": "boss_abyss_gaze", "name": "Boss: Abyss Gaze", "icon": "AG", "what": "Dark pulse patterns and pressure rings.", "deal": "Keep spacing disciplined; avoid center traps.", "lore": "A deep-scan optic that learned predation."},
+        {"key": "boss_womb_core", "name": "Boss: Womb Core", "icon": "WC", "what": "Spawns adds and compresses safe zones.", "deal": "Clear adds fast; save burst for pulse gaps.", "lore": "A growth reactor that treats battle as incubation."},
     ]
     POWERUP_INFO = [
         {"key": "heal", "name": "Heal (+)", "icon": "+", "what": "Restores HP instantly.", "deal": "Grab when low; avoid wasting near full HP.", "lore": "Nanite med-gel distilled from station triage kits."},
@@ -890,6 +906,7 @@ class GuideMenu:
         self.tab = "enemies"
         self.page = 0
         self.rows_per_page = 6
+        self._t = 0.0
 
         self._bg_a = shapes.Rectangle(0, 0, width, height, color=(8, 14, 24), batch=self.batch)
         self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
@@ -900,6 +917,8 @@ class GuideMenu:
         self._panel.opacity = 214
         self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
         self._panel_shine.opacity = 14
+        self._scanline = shapes.Rectangle(0, 0, width, 3, color=(125, 205, 255), batch=self.batch)
+        self._scanline.opacity = 0
 
         self.title = pyglet.text.Label(
             "P L O U T O // FIELD GUIDE",
@@ -937,6 +956,10 @@ class GuideMenu:
         for _ in range(self.rows_per_page):
             bg = shapes.Rectangle(0, 0, 1, 1, color=(17, 33, 52), batch=self.batch)
             bg.opacity = 150
+            accent = shapes.Rectangle(0, 0, 1, 1, color=(110, 180, 235), batch=self.batch)
+            accent.opacity = 120
+            pic_plate = shapes.Circle(0, 0, 18, color=(18, 35, 58), batch=self.batch)
+            pic_plate.opacity = 245
             icon_ring = shapes.Circle(0, 0, 14, color=(255, 255, 255), batch=self.batch)
             icon_ring.opacity = 70
             icon = shapes.Circle(0, 0, 11, color=(160, 160, 160), batch=self.batch)
@@ -945,7 +968,8 @@ class GuideMenu:
             name = pyglet.text.Label("", font_name=UI_FONT_BODY, font_size=15, x=0, y=0, anchor_x="left", anchor_y="center", color=(230, 238, 250, 255), batch=self.batch)
             desc = pyglet.text.Label("", font_name=UI_FONT_META, font_size=11, x=0, y=0, anchor_x="left", anchor_y="center", color=(183, 197, 216, 255), batch=self.batch)
             lore = pyglet.text.Label("", font_name=UI_FONT_META, font_size=10, x=0, y=0, anchor_x="left", anchor_y="center", color=(152, 170, 194, 255), batch=self.batch)
-            self._rows.append((bg, icon_ring, icon, glyph, name, desc, lore))
+            phase = random.uniform(0.0, math.tau)
+            self._rows.append((bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, phase))
 
         self.footer = pyglet.text.Label(
             "",
@@ -979,6 +1003,12 @@ class GuideMenu:
             return config.ENEMY_COLORS.get(key, (200, 200, 200))
         return config.POWERUP_COLORS.get(key, (200, 200, 200))
 
+    def update(self, dt: float):
+        self._t += dt
+        self._panel_shine.opacity = int(8 + 14 * (0.5 + 0.5 * math.sin(self._t * 1.4)))
+        self._scanline.y = int(36 + (self.screen_height - 72) * (0.5 + 0.5 * math.sin(self._t * 0.37)))
+        self._scanline.opacity = int(12 + 26 * (0.5 + 0.5 * math.sin(self._t * 2.1)))
+
     def resize(self, width: int, height: int):
         self.screen_width = width
         self.screen_height = height
@@ -986,6 +1016,8 @@ class GuideMenu:
         self._bg_a.height = height
         self._bg_b.width = width
         self._bg_b.height = height
+        self._scanline.width = width
+        self._scanline.height = max(2, int(3 * min(_ui_scale(width, height), 1.25)))
         cx = width // 2
         scale = min(_ui_scale(width, height), 1.25)
 
@@ -1037,15 +1069,20 @@ class GuideMenu:
         row_gap = int(10 * scale)
         row_x = panel_x + int(24 * scale)
         row_w = panel_w - int(48 * scale)
-        for i, (bg, icon_ring, icon, glyph, name, desc, lore) in enumerate(self._rows):
+        for i, (bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, _) in enumerate(self._rows):
             y = row_top - i * (row_h + row_gap) - row_h
             bg.x = row_x
             bg.y = y
             bg.width = row_w
             bg.height = row_h
+            accent.x = row_x
+            accent.y = y
+            accent.width = max(4, int(5 * scale))
+            accent.height = row_h
 
             icon_x = row_x + int(28 * scale)
             icon_y = y + row_h // 2 + int(1 * scale)
+            pic_plate.x, pic_plate.y, pic_plate.radius = icon_x, icon_y, int(18 * scale)
             icon_ring.x, icon_ring.y, icon_ring.radius = icon_x, icon_y, int(15 * scale)
             icon.x, icon.y, icon.radius = icon_x, icon_y, int(12 * scale)
             glyph.x, glyph.y = icon_x, icon_y
@@ -1122,9 +1159,11 @@ class GuideMenu:
         self.btn_powerups.sync()
         entries = self._page_entries()
         for i, row in enumerate(self._rows):
-            bg, icon_ring, icon, glyph, name, desc, lore = row
+            bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, phase = row
             if i >= len(entries):
                 bg.opacity = 0
+                accent.opacity = 0
+                pic_plate.opacity = 0
                 icon.opacity = 0
                 icon_ring.opacity = 0
                 glyph.text = ""
@@ -1132,22 +1171,25 @@ class GuideMenu:
                 desc.text = ""
                 lore.text = ""
                 continue
+            pulse = 0.5 + 0.5 * math.sin(self._t * 2.8 + phase)
             e = entries[i]
-            bg.opacity = 150
-            icon_ring.opacity = 75
+            bg.opacity = int(136 + 24 * pulse)
+            accent.opacity = int(84 + 70 * pulse)
+            pic_plate.opacity = int(200 + 45 * pulse)
+            icon_ring.opacity = int(68 + 46 * pulse)
             icon.opacity = 255
             icon.color = self._entry_color(e)
             glyph.text = str(e.get("icon", "?"))
             name.text = str(e.get("name", "Unknown"))
-            desc.text = f"What: {str(e.get('what', ''))}  |  Deal: {str(e.get('deal', ''))}"
+            desc.text = f"Threat: {str(e.get('what', ''))}  |  Counter: {str(e.get('deal', ''))}"
             lore.text = f"Lore: {str(e.get('lore', ''))}"
 
         page_info = f"Page {self.page + 1}/{self._total_pages()}  |  Left/Right or buttons to browse"
         if self.tab == "enemies":
-            self.subtitle.text = "Enemy dossiers, attack patterns, and counterplay."
+            self.subtitle.text = "Enemy dossiers, threat cues, and fast counterplay."
             self.footer.text = f"{page_info}  |  {len(self.ENEMY_INFO)} entries"
         else:
-            self.subtitle.text = "Powerup effects, usage advice, and field notes."
+            self.subtitle.text = "Powerup effects, timing advice, and field notes."
             self.footer.text = f"{page_info}  |  {len(self.POWERUP_INFO)} entries"
         self.batch.draw()
         self.btn_enemies.is_hovered = False

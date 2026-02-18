@@ -11,15 +11,20 @@ ENABLE_ADVANCED_FX = True
 ADVANCED_FX_STRENGTH = 0.55
 
 # Room settings
-ROOM_RADIUS = 400.0  # Larger play area for more movement
-ARENA_MARGIN = 0.97  # Portion of the window used to fit the arena (higher = bigger arena)
+ROOM_RADIUS = 400.0
+ARENA_MARGIN = 0.97
+
+# Map Types
+MAP_CIRCLE = "circle"
+MAP_DONUT = "donut"
+MAP_CROSS = "cross"
+MAP_DIAMOND = "diamond"
 
 # Player stats
 PLAYER_SPEED = 175.0
 PLAYER_HP = 100
 PLAYER_DAMAGE = 10
 PLAYER_FIRE_RATE = 0.28
-PROJECTILE_SPEED = 360.0
 
 # Wave settings
 WAVE_COOLDOWN = 2.0

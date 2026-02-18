@@ -10,7 +10,7 @@ from layout import Obstacle
 from logic import EnemySpawnLogic, EnemyTuningLogic
 from projectile import Projectile
 from powerup import PowerUp
-from utils import Vec2, random_spawn_edge
+from utils import Vec2, random_spawn_map_edge
 from weapons import get_weapon_key_for_wave
 
 
@@ -20,6 +20,7 @@ class GameState:
     time: float = 0.0
     wave: int = 1
     difficulty: str = "normal"
+    map_type: str = "circle"
     layout_seed: int = 0
     layout_segment: int = 0
     obstacles: list[Obstacle] = field(default_factory=list)
@@ -54,7 +55,7 @@ def spawn_wave(state: GameState, center: Vec2):
     if state.wave % 5 == 0:
         behavior_name = get_boss_for_wave(state.wave)
         hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
-        pos = random_spawn_edge(center, config.ROOM_RADIUS)
+        pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type)
         e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name)
         lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
         atk_cd_scale = max(0.6, min(1.6, float(attack_mult)))
@@ -72,8 +73,7 @@ def spawn_wave(state: GameState, center: Vec2):
     for behavior_name, behavior_count in plan.behavior_counts.items():
         for _ in range(int(behavior_count)):
             hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
-            pos = random_spawn_edge(center, config.ROOM_RADIUS)
-
+            pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type)
             e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name)
             lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
             atk_cd_scale = max(0.6, min(1.6, float(attack_mult)))
@@ -104,7 +104,7 @@ def maybe_spawn_powerup(state: GameState, center: Vec2):
     chance = 0.33 * mods["powerup"]
     if force_ultra or random.random() < chance:
         kind = "ultra" if force_ultra else _pick_powerup_kind_for_wave(state, source="wave")
-        pos = random_spawn_edge(center, config.ROOM_RADIUS * 0.6)
+        pos = random_spawn_map_edge(center, config.ROOM_RADIUS * 0.6, state.map_type)
         _append_powerup(state, pos, kind)
         if kind == "ultra":
             state._last_ultra_wave = int(state.wave)

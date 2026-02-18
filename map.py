@@ -13,8 +13,9 @@ from utils import Vec2, to_iso
 class Room:
     """Game room/map."""
 
-    def __init__(self, batch, width: int, height: int):
+    def __init__(self, batch, width: int, height: int, map_type: str = config.MAP_CIRCLE):
         self.batch = batch
+        self.map_type = map_type
         self._grid: list[object] = []
         self._boundary: list[tuple[object, float]] = []
         self._pulse_lines: list[tuple[object, int, float]] = []
@@ -100,8 +101,10 @@ class Room:
         self._bg_b.height = height
         self._rebuild_floor()
 
-    def rebuild(self) -> None:
+    def rebuild(self, map_type: str = None) -> None:
         """Rebuild floor visuals (use when arena radius settings change)."""
+        if map_type:
+            self.map_type = map_type
         self._rebuild_floor()
 
     def _rebuild_floor(self):
@@ -152,17 +155,71 @@ class Room:
             p = Vec2(math.cos(angle) * float(r), math.sin(angle) * float(r))
             return to_iso(p, Vec2(0, 0))
 
-        # Create diamond shape with multiple points for smoother edges
-        points = [iso_point((i / 8) * math.tau, radius) for i in range(8)]
-        edge_points = [iso_point((i / 8) * math.tau, radius * 1.03) for i in range(8)]
+        points_list = []
+        if self.map_type == config.MAP_DIAMOND:
+            # 4 points
+            points = [iso_point(i * math.pi / 2, radius * 1.1) for i in range(4)]
+            # Fix orientation: 0 is right. We want points at (R,0), (0,R), (-R,0), (0,-R).
+            # iso_point uses standard math angles. 0 is Right. pi/2 is Up.
+            points_list.append(points)
+            
+        elif self.map_type == config.MAP_CROSS:
+            # 12 points. Two rectangles crossing.
+            # Arms width = 0.35 * R?
+            w = radius * 0.35
+            r = radius
+            # Defined in logical coords, then converted.
+            # Start top-right inner corner? 
+            # Verts: (w, w), (r, w), (r, -w), (w, -w), (w, -r), (-w, -r), (-w, -w), (-r, -w), (-r, w), (-w, w), (-w, r), (w, r)
+            # Order matters for filling.
+            logic_pts = [
+                Vec2(w, w), Vec2(r, w), Vec2(r, -w), Vec2(w, -w),
+                Vec2(w, -r), Vec2(-w, -r), Vec2(-w, -w), Vec2(-r, -w),
+                Vec2(-r, w), Vec2(-w, w), Vec2(-w, r), Vec2(w, r)
+            ]
+            points_list.append([to_iso(p, Vec2(0,0)) for p in logic_pts])
 
-        self._floor = shapes.Polygon(*points, color=FLOOR_MAIN, batch=self.batch)
-        self._edge = shapes.Polygon(*edge_points, color=FLOOR_EDGE, batch=self.batch)
+        elif self.map_type == config.MAP_DONUT:
+            # Series of trapezoids.
+            inner = radius * 0.4
+            segments = 16
+            for i in range(segments):
+                a1 = (i / segments) * math.tau
+                a2 = ((i + 1) / segments) * math.tau
+                p1 = iso_point(a1, inner)
+                p2 = iso_point(a1, radius)
+                p3 = iso_point(a2, radius)
+                p4 = iso_point(a2, inner)
+                points_list.append([p1, p2, p3, p4])
+                
+        else: # MAP_CIRCLE
+            # Create circle shape with multiple points for smoother edges
+            points_list.append([iso_point((i / 32) * math.tau, radius) for i in range(32)])
+
+        self._floor_polys = []
+        for pts in points_list:
+            self._floor_polys.append(shapes.Polygon(*pts, color=FLOOR_MAIN, batch=self.batch))
+        
+        # Edge/Border logic is complex for general shapes. 
+        # For simplicity, we just draw the floor polygons slightly larger/darker behind?
+        # Or just rely on the boundary lines.
+        # Let's drop the filled "edge" polygon for non-circles to avoid triangulation complexity,
+        # and rely on the boundary lines which we will update next.
+        
+        # Only draw edge for circle/diamond (convex) easily.
+        if self.map_type in (config.MAP_CIRCLE, config.MAP_DIAMOND):
+             edge_pts = [iso_point((i / 32) * math.tau, radius * 1.03) for i in range(32)] if self.map_type == config.MAP_CIRCLE else \
+                        [iso_point(i * math.pi / 2, radius * 1.13) for i in range(4)]
+             self._edge = shapes.Polygon(*edge_pts, color=FLOOR_EDGE, batch=self.batch)
+             self._edge.opacity = 150
 
         # Combat intensity overlay — a translucent polygon matching the floor shape.
-        self._intensity_overlay = shapes.Polygon(*points, color=(60, 30, 20), batch=self.batch)
-        self._intensity_overlay.opacity = 0
-        self._edge.opacity = 150  # Border glow
+        # We can just duplicate the floor polys.
+        self._intensity_overlays = []
+        for pts in points_list:
+            io = shapes.Polygon(*pts, color=(60, 30, 20), batch=self.batch)
+            io.opacity = 0
+            self._intensity_overlays.append(io)
 
         # Soft central lighting (screen-space; low opacity so it "just adds depth").
         cx = self._w * 0.5
@@ -215,17 +272,51 @@ class Room:
             self._grid.append(ln)
 
         # Boundary ring for visual containment (static-ish, separate pulse).
-        num_boundary_points = 40
-        for i in range(num_boundary_points):
-            angle1 = (i / num_boundary_points) * math.tau
-            angle2 = ((i + 1) / num_boundary_points) * math.tau
-            p1 = iso_point(angle1, radius * 1.01)
-            p2 = iso_point(angle2, radius * 1.01)
+        # Generate boundary lines based on points.
+        all_lines = []
+        if self.map_type == config.MAP_DONUT:
+             # Inner and outer rings
+             seg = 32
+             # Outer
+             for i in range(seg):
+                 a1 = (i/seg)*math.tau; p1 = iso_point(a1, radius)
+                 a2 = ((i+1)/seg)*math.tau; p2 = iso_point(a2, radius)
+                 all_lines.append((p1, p2))
+             # Inner
+             inner = radius * 0.4
+             for i in range(seg):
+                 a1 = (i/seg)*math.tau; p1 = iso_point(a1, inner)
+                 a2 = ((i+1)/seg)*math.tau; p2 = iso_point(a2, inner)
+                 all_lines.append((p1, p2))
+
+        elif self.map_type == config.MAP_CROSS:
+             # Follow the 12 logical points
+             w = radius * 0.35
+             r = radius
+             logic_pts = [
+                Vec2(w, w), Vec2(r, w), Vec2(r, -w), Vec2(w, -w),
+                Vec2(w, -r), Vec2(-w, -r), Vec2(-w, -w), Vec2(-r, -w),
+                Vec2(-r, w), Vec2(-w, w), Vec2(-w, r), Vec2(w, r)
+             ]
+             screen_pts = [to_iso(p, Vec2(0,0)) for p in logic_pts]
+             for i in range(len(screen_pts)):
+                 all_lines.append((screen_pts[i], screen_pts[(i+1)%len(screen_pts)]))
+        
+        elif self.map_type == config.MAP_DIAMOND:
+             pts = [iso_point(i * math.pi / 2, radius * 1.1) for i in range(4)]
+             for i in range(4):
+                 all_lines.append((pts[i], pts[(i+1)%4]))
+
+        else: # Circle
+             seg = 40
+             for i in range(seg):
+                 a1 = (i/seg)*math.tau; p1 = iso_point(a1, radius)
+                 a2 = ((i+1)/seg)*math.tau; p2 = iso_point(a2, radius)
+                 all_lines.append((p1, p2))
+
+        for p1, p2 in all_lines:
             ln = shapes.Line(
-                p1[0],
-                p1[1],
-                p2[0],
-                p2[1],
+                p1[0], p1[1], p2[0], p2[1],
                 thickness=2,
                 color=(155, 110, 180),
                 batch=self.batch,
@@ -411,14 +502,15 @@ class Room:
             self._combat_intensity = ct
 
         # Update intensity overlay color and opacity.
-        if self._intensity_overlay is not None:
-            ci = self._combat_intensity
-            # Blend from cool blue-grey (calm) to alarm red (boss).
-            r = int(30 + 100 * ci)
-            g = int(35 - 15 * ci)
-            b = int(42 - 20 * ci)
-            self._intensity_overlay.color = (r, g, b)
-            self._intensity_overlay.opacity = int(24 * ci)
+        for io in self._intensity_overlays:
+            if io is not None:
+                ci = self._combat_intensity
+                # Blend from cool blue-grey (calm) to alarm red (boss).
+                r = int(30 + 100 * ci)
+                g = int(35 - 15 * ci)
+                b = int(42 - 20 * ci)
+                io.color = (r, g, b)
+                io.opacity = int(24 * ci)
 
         # Subtle pulsing grid opacity for depth.
         pulse = 0.5 + 0.5 * math.sin(self._t * 0.8)

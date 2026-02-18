@@ -8,6 +8,7 @@ import random
 import pyglet
 from pyglet import shapes
 import config
+from config import MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
 from fonts import register_ui_fonts
 
 register_ui_fonts()
@@ -443,6 +444,7 @@ class SettingsMenu:
         on_save: Callable,
         display_size: tuple[int, int] | None = None,
         advanced_fx_enabled: bool | None = None,
+        map_type: str = MAP_CIRCLE,
     ):
         self.screen_width = width
         self.screen_height = height
@@ -450,6 +452,15 @@ class SettingsMenu:
         self.batch = pyglet.graphics.Batch()
         self._t = 0.0
         self._orbs: list[tuple[shapes.Circle, float, float, float]] = []
+
+        self.map_type = map_type
+        self.map_types = [MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND]
+        self.map_names = {
+            MAP_CIRCLE: "Circle",
+            MAP_DONUT: "Donut",
+            MAP_CROSS: "Cross",
+            MAP_DIAMOND: "Diamond"
+        }
 
         self._bg_a = shapes.Rectangle(0, 0, width, height, color=(10, 12, 20), batch=self.batch)
         self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 7, 14), batch=self.batch)
@@ -586,6 +597,27 @@ class SettingsMenu:
         )
         self.fx_button = MenuButton(0, 0, 210, 50, "", self._toggle_advanced_fx, color=(82, 122, 180), hover_color=(112, 156, 220))
         self._refresh_fx_button_text()
+
+        self.map_label = pyglet.text.Label(
+            "Arena Shape",
+            font_name=UI_FONT_BODY,
+            font_size=16,
+            x=0,
+            y=0,
+            anchor_x="left",
+            anchor_y="center",
+            color=(255, 255, 255, 255),
+            batch=self.batch,
+        )
+        # Map buttons (Grid selection)
+        self.map_buttons = []
+        for i, map_id in enumerate(self.map_types):
+            name = self.map_names.get(map_id, "Unknown")
+            btn = MenuButton(0, 0, 100, 50, name, lambda m=map_id: self._set_map_type(m), color=(110, 140, 160))
+            self.map_buttons.append(btn)
+        # self.map_button removed in favor of list
+
+
         self.menu_note = pyglet.text.Label(
             "Resolution, arena scale, and FX mode update instantly.",
             font_name=UI_FONT_META,
@@ -602,8 +634,11 @@ class SettingsMenu:
         self._selected_diff_highlight.opacity = 60
         self._selected_size_highlight = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
         self._selected_size_highlight.opacity = 60
+        self._selected_map_highlight = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
+        self._selected_map_highlight.opacity = 60
 
-        for btn in self.difficulty_buttons + self.size_buttons + [self.fx_button, self.back_button]:
+
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
             btn.ensure(self.batch)
         self.arena_slider.ensure(self.batch)
 
@@ -707,13 +742,23 @@ class SettingsMenu:
         self.screen_height = height
         cx = width // 2
         # Settings has denser content than other menus; cap scale to avoid crowding.
-        scale = min(_ui_scale(width, height), 1.26)
-
-        panel_top_pad = int(96 * scale)
-        panel_y = max(14, int(18 * scale))
-        panel_w = min(int(width * 0.92), int(1100 * scale))
-        panel_h = max(280, int(height - panel_top_pad - panel_y))
+        scale = min(_ui_scale(width, height), 1.25)
+        
+        # --- Layout Constants ---
+        panel_w = min(int(width * 0.94), int(1000 * scale))
+        panel_h = max(400, int(height * 0.85))
         panel_x = cx - panel_w // 2
+        panel_y = (height - panel_h) // 2
+        
+        content_pad_x = int(40 * scale)
+        content_top_y = panel_y + panel_h - int(60 * scale)
+        section_gap = int(25 * scale)
+        label_gap = int(8 * scale)
+        
+        btn_h = int(42 * scale)
+        btn_font = max(11, int(15 * scale))
+        
+        # --- Update Panel Geometry ---
         self._panel_border.x = panel_x - 3
         self._panel_border.y = panel_y - 3
         self._panel_border.width = panel_w + 6
@@ -727,103 +772,131 @@ class SettingsMenu:
         self._panel_shine.width = panel_w - 8
         self._panel_shine.height = max(6, int(14 * scale))
 
-        content_pad_x = int(32 * scale)
-        content_left = panel_x + content_pad_x
-        content_right = panel_x + panel_w - content_pad_x
-        content_w = max(240, content_right - content_left)
-        content_top = panel_y + panel_h - int(44 * scale)
-
-        button_h = int(52 * scale)
-        base_btn_w = int(180 * scale)
-        btn_font = max(11, int(15 * scale))
-        gap_x = max(10, int(14 * scale))
-        gap_y = max(8, int(12 * scale))
-
-        # Difficulty row aligned to the content grid.
-        diff_btn_w = max(int(120 * scale), min(base_btn_w, int((content_w - gap_x * 2) / 3)))
-        for btn in self.difficulty_buttons:
-            btn.width = diff_btn_w
-            btn.height = button_h
-            btn.font_size = btn_font
-        _sync_label_style_if_ready(self.difficulty_label, UI_FONT_BODY, max(12, int(17 * scale)))
-        self.difficulty_label.x = content_left
-        self.difficulty_label.y = content_top
-
-        diff_y = self.difficulty_label.y - int(18 * scale) - button_h
-        diff_total_w = 3 * diff_btn_w + 2 * gap_x
-        diff_start_x = content_left + max(0, (content_w - diff_total_w) // 2)
-        for i, btn in enumerate(self.difficulty_buttons):
-            btn.x = diff_start_x + i * (diff_btn_w + gap_x)
-            btn.y = diff_y
-
-        # Display options in an adaptive grid to keep spacing stable across resolutions.
-        size_cols = 3 if content_w >= int(640 * scale) else 2 if content_w >= int(430 * scale) else 1
-        size_btn_w = max(int(120 * scale), min(int((content_w - gap_x * (size_cols - 1)) / size_cols), int(280 * scale)))
-        for btn in self.size_buttons:
-            btn.width = size_btn_w
-            btn.height = button_h
-            btn.font_size = btn_font
-
-        _sync_label_style_if_ready(self.window_label, UI_FONT_BODY, max(12, int(17 * scale)))
-        self.window_label.x = content_left
-        self.window_label.y = diff_y - int(58 * scale)
-
-        size_top_y = self.window_label.y - int(18 * scale) - button_h
-        for i, btn in enumerate(self.size_buttons):
-            col = i % size_cols
-            row = i // size_cols
-            btn.x = content_left + col * (size_btn_w + gap_x)
-            btn.y = size_top_y - row * (button_h + gap_y)
-
-        self.back_button.width = max(int(180 * scale), int(min(300 * scale, content_w * 0.42)))
-        self.back_button.height = button_h
-        self.back_button.font_size = btn_font
-        self.back_button.x = cx - self.back_button.width // 2
-        self.back_button.y = panel_y + int(18 * scale)
-
-        _sync_label_style_if_ready(self.fx_label, UI_FONT_BODY, max(12, int(16 * scale)))
-        self.fx_label.x = content_left
-        self.fx_label.y = self.back_button.y + self.back_button.height + int(24 * scale)
-        self.fx_button.width = max(int(190 * scale), int(min(340 * scale, content_w * 0.5)))
-        self.fx_button.height = button_h
-        self.fx_button.font_size = btn_font
-        self.fx_button.x = content_left
-        self.fx_button.y = self.fx_label.y - int(18 * scale) - button_h
-
-        rows = max(1, (len(self.size_buttons) + size_cols - 1) // size_cols)
-        grid_bottom = size_top_y - (rows - 1) * (button_h + gap_y)
-        slider_floor_y = self.fx_button.y + self.fx_button.height + int(24 * scale)
-        slider_pref_y = grid_bottom - int(68 * scale)
-        self.arena_slider.x = content_left
-        self.arena_slider.y = max(int(slider_floor_y), int(slider_pref_y))
-        self.arena_slider.width = min(int(500 * scale), content_w)
-        self.arena_slider.font_size = max(11, int(14 * scale))
-        self.arena_slider.knob_radius = max(6.0, 9.0 * scale)
-        self.arena_slider.track_thickness = max(2.0, 3.0 * scale)
-
         self.title.x = cx
-        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(18, int(32 * scale)))
-        self.title.y = height - int(60 * scale)
-        self.menu_note.x = cx
-        self.menu_note.y = self.title.y - int(26 * scale)
-        _sync_label_style_if_ready(self.menu_note, UI_FONT_META, max(9, int(11 * scale)))
+        self.title.y = panel_y + panel_h - int(25 * scale)
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(20, int(30 * scale)))
 
-        self._bg_a.width = width
-        self._bg_a.height = height
-        self._bg_b.width = width
-        self._bg_b.height = height
-    
-    def _set_difficulty(self, level: int):
-        """Set difficulty level."""
-        self.difficulty = level
-        self.on_save(self.get_settings())
-    
-    def _set_arena_pct(self, val: float):
-        v = float(val)
-        v = max(90.0, min(99.0, v))
-        self.arena_pct = v
-        self.arena_margin = v / 100.0
-        self.on_save(self.get_settings())
+        # --- Section 1: Gameplay (Top Left) ---
+        # Difficulty
+        curr_y = content_top_y - int(30 * scale)
+        col1_x = panel_x + content_pad_x
+        col_width = (panel_w - content_pad_x * 3) // 2
+        
+        _sync_label_style_if_ready(self.difficulty_label, UI_FONT_BODY, max(12, int(18 * scale)))
+        self.difficulty_label.x = col1_x
+        self.difficulty_label.y = curr_y
+        
+        curr_y -= (int(16 * scale) + label_gap)
+        diff_btn_w = (col_width - 10 * 2) // 3
+        for i, btn in enumerate(self.difficulty_buttons):
+            btn.width = diff_btn_w
+            btn.height = btn_h
+            btn.font_size = btn_font
+            btn.x = col1_x + i * (diff_btn_w + 10)
+            btn.y = curr_y - btn_h
+            btn.sync()
+            
+        # Map Shape
+        curr_y -= (btn_h + section_gap)
+        _sync_label_style_if_ready(self.map_label, UI_FONT_BODY, max(12, int(18 * scale)))
+        self.map_label.x = col1_x
+        self.map_label.y = curr_y
+        
+        curr_y -= (int(16 * scale) + label_gap)
+        # 4 buttons in a 2x2 grid or 1 row depending on width? 
+        # Let's do 2x2 for compactness or 4 in row if fits.
+        # 4 in a row:
+        map_btn_w = (col_width - 10 * 3) // 4
+        for i, btn in enumerate(self.map_buttons):
+            btn.width = map_btn_w
+            btn.height = btn_h
+            btn.font_size = btn_font
+            btn.x = col1_x + i * (map_btn_w + 10)
+            btn.y = curr_y - btn_h
+            btn.sync()
+
+        # --- Section 2: Visuals (Bottom Left) ---
+        curr_y -= (btn_h + section_gap * 1.5)
+        _sync_label_style_if_ready(self.fx_label, UI_FONT_BODY, max(12, int(18 * scale)))
+        self.fx_label.x = col1_x
+        self.fx_label.y = curr_y
+        
+        curr_y -= (int(16 * scale) + label_gap)
+        self.fx_button.width = int(col_width * 0.4)
+        self.fx_button.height = btn_h
+        self.fx_button.font_size = btn_font
+        self.fx_button.x = col1_x
+        self.fx_button.y = curr_y - btn_h
+        self.fx_button.sync()
+        
+        # Arena Slider to the right of FX button?
+        slider_x = col1_x + self.fx_button.width + 20
+        self.arena_slider.width = col_width - self.fx_button.width - 20
+        self.arena_slider.x = slider_x
+        self.arena_slider.y = curr_y - btn_h + 10
+        self.arena_slider.font_size = btn_font
+        self.arena_slider.sync()
+
+        # --- Section 3: Display (Right Column) ---
+        col2_x = panel_x + panel_w // 2 + content_pad_x // 2
+        curr_y = content_top_y - int(30 * scale)
+        
+        _sync_label_style_if_ready(self.window_label, UI_FONT_BODY, max(12, int(18 * scale)))
+        self.window_label.x = col2_x
+        self.window_label.y = curr_y
+        
+        curr_y -= (int(16 * scale) + label_gap)
+        
+        # Window sizes grid
+        cols = 2
+        rows = (len(self.size_buttons) + cols - 1) // cols
+        size_btn_w = (col_width - 10 * (cols - 1)) // cols
+        
+        for i, btn in enumerate(self.size_buttons):
+            c = i % cols
+            r = i // cols
+            btn.width = size_btn_w
+            btn.height = btn_h
+            btn.font_size = btn_font
+            btn.x = col2_x + c * (size_btn_w + 10)
+            btn.y = curr_y - btn_h - r * (btn_h + 10)
+            btn.sync()
+            
+        # --- Footer ---
+        self.back_button.width = int(180 * scale)
+        self.back_button.height = int(50 * scale)
+        self.back_button.font_size = max(14, int(18 * scale))
+        self.back_button.x = cx - self.back_button.width // 2
+        self.back_button.y = panel_y + int(30 * scale)
+        self.back_button.sync()
+        
+        self.menu_note.x = cx
+        self.menu_note.y = panel_y + int(12 * scale)
+        _sync_label_style_if_ready(self.menu_note, UI_FONT_META, max(10, int(12 * scale)))
+        
+        # Update highlights
+        if 0 <= self.difficulty < len(self.difficulty_buttons):
+            t = self.difficulty_buttons[self.difficulty]
+            self._selected_diff_highlight.x = t.x - 2
+            self._selected_diff_highlight.y = t.y - 2
+            self._selected_diff_highlight.width = t.width + 4
+            self._selected_diff_highlight.height = t.height + 4
+            
+        if 0 <= self.window_size_idx < len(self.size_buttons):
+            t = self.size_buttons[self.window_size_idx]
+            self._selected_size_highlight.x = t.x - 2
+            self._selected_size_highlight.y = t.y - 2
+            self._selected_size_highlight.width = t.width + 4
+            self._selected_size_highlight.height = t.height + 4
+            
+        # Map highlight logic will need adding in update/draw or set method
+        # I'll add a helper for it or just let the draw loop handle it if I expose a list
+        
+        # We need a highlight for map too!
+        # Re-using diff highlight for now isn't enough as we show both.
+        # I should add _selected_map_highlight in __init__
+        # Map highlight logic is handled in draw()
+
     
     def _set_window_size(self, idx: int):
         """Set window size."""
@@ -834,6 +907,15 @@ class SettingsMenu:
         self.fx_button.text = f"Advanced FX: {'On' if self.advanced_fx else 'Off'}"
         self.fx_button.sync()
 
+    def _set_map_type(self, map_type: str):
+        self.map_type = map_type
+        self.on_save({"map_type": self.map_type})
+        self.resize(self.screen_width, self.screen_height) # Refresh highlights
+
+    def _refresh_map_button_text(self):
+        # No longer used
+        pass
+
     def _toggle_advanced_fx(self):
         self.advanced_fx = not self.advanced_fx
         self._refresh_fx_button_text()
@@ -841,7 +923,7 @@ class SettingsMenu:
     
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
-        for btn in self.difficulty_buttons + self.size_buttons + [self.fx_button, self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
             btn.is_hovered = btn.contains_point(x, y)
             btn.sync()
 
@@ -863,7 +945,7 @@ class SettingsMenu:
             self.fx_button.callback()
             return None
         
-        for btn in self.difficulty_buttons + self.size_buttons:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons:
             if btn.contains_point(x, y):
                 btn.callback()
                 return None
@@ -910,10 +992,24 @@ class SettingsMenu:
             self._selected_size_highlight.x = selected_size.x - 2
             self._selected_size_highlight.y = selected_size.y - 2
             self._selected_size_highlight.width = selected_size.width + 4
+            self._selected_size_highlight.width = selected_size.width + 4
             self._selected_size_highlight.height = selected_size.height + 4
+        
+        # Map Highlight
+        try:
+            map_idx = self.map_types.index(self.map_type)
+        except ValueError:
+            map_idx = 0
+            
+        if self.map_buttons and 0 <= map_idx < len(self.map_buttons):
+            selected_map = self.map_buttons[map_idx]
+            self._selected_map_highlight.x = selected_map.x - 2
+            self._selected_map_highlight.y = selected_map.y - 2
+            self._selected_map_highlight.width = selected_map.width + 4
+            self._selected_map_highlight.height = selected_map.height + 4
 
         self._refresh_fx_button_text()
-        for btn in self.difficulty_buttons + self.size_buttons + [self.fx_button, self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
             btn.sync()
         self.arena_slider.sync()
         self.batch.draw()

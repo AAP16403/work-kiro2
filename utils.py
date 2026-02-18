@@ -4,7 +4,7 @@ import math
 import random
 from dataclasses import dataclass
 
-from config import ISO_SCALE_X, ISO_SCALE_Y, SCREEN_H, SCREEN_W
+from config import ISO_SCALE_X, ISO_SCALE_Y, SCREEN_H, SCREEN_W, MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
 
 VIEW_W = SCREEN_W
 VIEW_H = SCREEN_H
@@ -108,18 +108,103 @@ def iso_to_world(screen_xy: tuple[float, float]) -> Vec2:
     return Vec2(x, y)
 
 
-def clamp_to_room(p: Vec2, max_r: float) -> Vec2:
-    """Clamp a position to stay within the room radius."""
-    l = p.length()
-    if l <= max_r:
-        return p
-    return p.normalized() * max_r
+def clamp_to_map(p: Vec2, radius: float, map_type: str = "circle") -> Vec2:
+    """Clamp a position to stay within the map boundaries."""
+    if map_type == MAP_CIRCLE:
+        l = p.length()
+        if l <= radius:
+            return p
+        return p.normalized() * radius
+    
+    elif map_type == MAP_DONUT:
+        inner = radius * 0.4
+        l = p.length()
+        if inner <= l <= radius:
+             return p
+        if l < inner:
+            return p.normalized() * inner
+        return p.normalized() * radius
+
+    elif map_type == MAP_DIAMOND:
+        # Diamond shape defined by |x| + |y| <= R
+        # To clamp, we find the closest point on the diamond edge if outside.
+        # But a simple approximation is often enough for movement: project point.
+        # Strict clamp:
+        limit = radius * 0.8  # Visual fix, diamond feels bigger than circle
+        if abs(p.x) + abs(p.y) <= limit:
+            return p
+        # Project back to edge
+        # sign(x)*x + sign(y)*y = limit
+        # This is surprisingly tricky to do perfectly smoothly, 
+        # so for gameplay fluidness, we might just block normal movement in game.py 
+        # but here we return a safe spot.
+        # Let's use a robust iterative approach or geometric projection.
+        # Closest point on line segment concept.
+        # For Game Jam speed:
+        ratio = limit / (abs(p.x) + abs(p.y) + 1e-6)
+        return p * ratio
+
+    elif map_type == MAP_CROSS:
+        # Cross: composed of two rectangles? 
+        # Let's say: (|x| < R*0.35 and |y| < R) OR (|x| < R and |y| < R*0.35)
+        w = radius * 0.35
+        r = radius
+        in_v = abs(p.x) < w and abs(p.y) < r
+        in_h = abs(p.x) < r and abs(p.y) < w
+        if in_v or in_h:
+            return p
+        
+        # Clamping to a non-convex shape is hard. 
+        # Simplified: push to closest valid axis?
+        # If we are in neither, we are in a corner void.
+        # Pull towards origin until valid.
+        curr = p
+        for _ in range(10):
+            in_v = abs(curr.x) < w and abs(curr.y) < r
+            in_h = abs(curr.x) < r and abs(curr.y) < w
+            if in_v or in_h:
+                return curr
+            curr = curr * 0.9
+        return curr # Fallback
+
+    return p
 
 
-def random_spawn_edge(center: Vec2, radius: float) -> Vec2:
-    """Spawn a position on the edge of a circle."""
-    ang = random.uniform(0.0, math.tau)
-    return Vec2(center.x + math.cos(ang) * radius, center.y + math.sin(ang) * radius)
+def random_spawn_map_edge(center: Vec2, radius: float, map_type: str = "circle") -> Vec2:
+    """Spawn a position on the edge of the map."""
+    while True:
+        if map_type == MAP_CIRCLE:
+            ang = random.uniform(0.0, math.tau)
+            return Vec2(center.x + math.cos(ang) * radius, center.y + math.sin(ang) * radius)
+        
+        elif map_type == MAP_DONUT:
+            # Spawn on outer edge
+            ang = random.uniform(0.0, math.tau)
+            return Vec2(center.x + math.cos(ang) * radius, center.y + math.sin(ang) * radius)
+
+        elif map_type == MAP_DIAMOND:
+            # |x| + |y| = R * 0.8
+            limit = radius * 0.8
+            side = random.randint(0, 3) # 4 quadrants
+            t = random.random()
+            x = t * limit
+            y = limit - x
+            if side == 1: x = -x
+            elif side == 2: y = -y
+            elif side == 3: x = -x; y = -y
+            return Vec2(x, y)
+
+        elif map_type == MAP_CROSS:
+            # Spawn at one of the 4 ends
+            arm = random.randint(0, 3)
+            w = radius * 0.35
+            r = radius
+            if arm == 0: return Vec2(random.uniform(-w, w), -r) # Top
+            if arm == 1: return Vec2(random.uniform(-w, w), r)  # Bottom
+            if arm == 2: return Vec2(-r, random.uniform(-w, w)) # Left
+            if arm == 3: return Vec2(r, random.uniform(-w, w))  # Right
+        
+        return center # Fallback
 
 
 def dist(a: Vec2, b: Vec2) -> float:

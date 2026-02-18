@@ -18,7 +18,7 @@ from utils import set_view_size, compute_room_radius, Vec2, clamp_to_map, enemy_
 from visuals import Visuals, GroupCache
 from weapons import get_weapon_for_wave
 from particles import ParticleSystem
-from menu import MainMenu, SettingsMenu, GuideMenu, PauseMenu, GameOverMenu
+from menu import MainMenu, SettingsMenu, GuideMenu, PauseMenu, GameOverMenu, load_fonts
 from hud import HUD
 from rpg import (
     BossRewardMenu,
@@ -75,6 +75,9 @@ class Game(DirectObject):
         self._frame_dt_cap = self.balance.frame_dt_cap
         self.advanced_fx = AdvancedFX(SCREEN_W, SCREEN_H)
         self.advanced_fx.enabled = bool(self.settings.get("advanced_fx", True))
+
+        # Load UI fonts
+        load_fonts(self.base.loader)
 
         self.main_menu = MainMenu(self)
         self.settings_menu = SettingsMenu(self)

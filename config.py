@@ -26,6 +26,10 @@ PLAYER_HP = 100
 PLAYER_DAMAGE = 10
 PLAYER_FIRE_RATE = 0.28
 
+# Projectile tuning
+# Global multiplier for projectile movement (player + enemy).
+PROJECTILE_TRAVEL_SCALE = 0.72
+
 # Wave settings
 WAVE_COOLDOWN = 2.0
 MAX_ENEMIES = 12  # Maximum concurrent enemies in a wave
@@ -51,43 +55,61 @@ ULTRA_KILL_PITY_THRESHOLD = 30
 ISO_SCALE_X = 1.0
 ISO_SCALE_Y = 0.5
 
-# Colors
-BG_TOP = (10, 15, 30)
-BG_BOTTOM = (5, 8, 20)
-FLOOR_MAIN = (30, 35, 42)       # Cool slate-grey
-FLOOR_EDGE = (50, 60, 75)       # Blue-grey edge
-FLOOR_GRID = (60, 80, 100)      # Muted steel-blue grid
-HUD_TEXT = (240, 240, 240)
+# Colors (Neon/Cyberpunk Palette)
+PALETTE = {
+    "background_top": (10, 10, 20),      # Deep void blue
+    "background_bottom": (5, 5, 12),    # Nearly black
+    "floor_main": (15, 18, 30),         # Dark sleek floor
+    "floor_edge": (40, 50, 80),         # Tech blue rim
+    "floor_grid": (40, 100, 200),       # Glowing grid lines
+    "player": (0, 255, 200),            # Cyan Neon
+    "player_projectile": (200, 255, 100), # Lime Yellow
+    "enemy_projectile": (255, 50, 100),   # Hot Pink
+    "hud_text": (255, 255, 255),
+    "vibrant_blue": (0, 190, 255),      # Electric Blue
+    "vibrant_orange": (255, 140, 20),   # Neon Orange
+    "vibrant_pink": (255, 20, 180),     # Cyber Pink
+    "vibrant_green": (50, 255, 80),     # Acid Green
+    "vibrant_purple": (180, 50, 255),   # Deep Neon Purple
+    "white_glow": (220, 235, 255),      # Bright White-Blue
+}
+
+BG_TOP = PALETTE["background_top"]
+BG_BOTTOM = PALETTE["background_bottom"]
+FLOOR_MAIN = PALETTE["floor_main"]
+FLOOR_EDGE = PALETTE["floor_edge"]
+FLOOR_GRID = PALETTE["floor_grid"]
+HUD_TEXT = PALETTE["hud_text"]
 
 # Powerup Colors
 POWERUP_COLORS = {
-    "heal": (120, 255, 120),
-    "damage": (255, 120, 120),
-    "speed": (120, 180, 255),
-    "firerate": (255, 255, 120),
-    "shield": (100, 220, 255),
-    "laser": (255, 120, 255),
-    "vortex": (200, 160, 255),
-    "weapon": (230, 230, 255),
-    "ultra": (255, 240, 180),
+    "heal": (50, 255, 150),
+    "damage": (255, 60, 60),
+    "speed": PALETTE["vibrant_blue"],
+    "firerate": (255, 220, 50),
+    "shield": (100, 200, 255),
+    "laser": PALETTE["vibrant_pink"],
+    "vortex": PALETTE["vibrant_purple"],
+    "weapon": (255, 255, 220),
+    "ultra": (255, 200, 100),
 }
 
 # Enemy Colors
 ENEMY_COLORS = {
-    "bomber": (255, 160, 50),       # Vibrant Yellow-Orange
-    "chaser": (255, 80, 80),        # Bright Red
-    "ranged": (80, 150, 255),       # Bright Blue
-    "charger": (255, 180, 80),      # Bright Orange
-    "swarm": (220, 100, 220),       # Bright Purple
-    "tank": (100, 220, 100),        # Bright Green
-    "spitter": (255, 220, 80),      # Bright Yellow
-    "flyer": (150, 180, 255),       # Light Blue
-    "engineer": (80, 240, 180),     # Bright Teal
-    "boss_thunder": (180, 210, 255),
-    "boss_laser": (255, 140, 255),
-    "boss_trapmaster": (255, 180, 100),
-    "boss_swarmqueen": (230, 140, 255),
-    "boss_brute": (255, 100, 100),
-    "boss_abyss_gaze": (185, 220, 255),
-    "boss_womb_core": (255, 105, 135),
+    "bomber": PALETTE["vibrant_orange"],
+    "chaser": (255, 40, 40),        # Red
+    "ranged": PALETTE["vibrant_blue"],
+    "charger": (255, 100, 0),       # Orange-Red
+    "swarm": PALETTE["vibrant_purple"],
+    "tank": PALETTE["vibrant_green"],
+    "spitter": (255, 220, 0),       # Yellow
+    "flyer": (120, 200, 255),       # Sky Blue
+    "engineer": (0, 255, 180),      # Teal
+    "boss_thunder": (150, 200, 255),
+    "boss_laser": PALETTE["vibrant_pink"],
+    "boss_trapmaster": PALETTE["vibrant_orange"],
+    "boss_swarmqueen": (200, 80, 255),
+    "boss_brute": (255, 50, 50),
+    "boss_abyss_gaze": (100, 150, 255),
+    "boss_womb_core": (255, 80, 120),
 }

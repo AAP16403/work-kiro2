@@ -8,25 +8,41 @@
       "date": "2026-02-18 16:41"
     },
     {
+      "score": 57891,
+      "wave": 9,
+      "kills": 72,
+      "best_combo": 6.72,
+      "date": "2026-02-18 19:47"
+    },
+    {
+      "score": 27147,
+      "wave": 7,
+      "kills": 43,
+      "best_combo": 2.75,
+      "date": "2026-02-18 19:41"
+    },
+    {
+      "score": 21954,
+      "wave": 6,
+      "kills": 33,
+      "best_combo": 3.18,
+      "date": "2026-02-18 21:23"
+    },
+    {
       "score": 9697,
       "wave": 5,
       "kills": 28,
       "best_combo": 2.0,
       "date": "2026-02-18 18:46"
-    },
+    }
+  ],
+  "hard": [
     {
-      "score": 7889,
+      "score": 8221,
       "wave": 4,
-      "kills": 19,
-      "best_combo": 2.25,
-      "date": "2026-02-18 18:50"
-    },
-    {
-      "score": 7804,
-      "wave": 4,
-      "kills": 19,
-      "best_combo": 2.5,
-      "date": "2026-02-18 18:37"
+      "kills": 25,
+      "best_combo": 2.0,
+      "date": "2026-02-18 21:15"
     }
   ]
 }

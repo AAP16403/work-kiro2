@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 from typing import TYPE_CHECKING
 
+import config
 from utils import Vec2
 
 if TYPE_CHECKING:
@@ -21,7 +22,8 @@ class Projectile:
 
     def update(self, dt: float) -> bool:
         """Update projectile position and TTL. Returns False if expired."""
-        self.pos = self.pos + self.vel * dt
+        travel_scale = float(getattr(config, "PROJECTILE_TRAVEL_SCALE", 1.0))
+        self.pos = self.pos + self.vel * (dt * max(0.05, travel_scale))
         self.ttl -= dt
         return self.ttl > 0
 

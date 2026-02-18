@@ -50,7 +50,7 @@ class Room:
         self.floor.setTransparency(True)
         # Gradient or Grid simulation via vertex colors?
         # For now, just a better base color.
-        self.floor.setColor(0.15, 0.18, 0.22, 1.0) 
+        self.floor.setColor(0.11, 0.14, 0.18, 1.0)
         self.floor.setTwoSided(True)
         self.floor.setColorScaleOff(1)
         
@@ -58,9 +58,9 @@ class Room:
         self._add_grid(radius)
 
         self.boundary = self.root.attachNewNode("room_boundary")
-        self._append_boundary(self.boundary, radius, self.map_type, z=0.6, color=(0.4, 0.5, 0.62, 0.9), thickness=2.5)
+        self._append_boundary(self.boundary, radius, self.map_type, z=0.6, color=(0.34, 0.46, 0.58, 0.86), thickness=2.6)
         if str(self.map_type) == config.MAP_DONUT:
-            self._append_boundary(self.boundary, radius * 0.4, config.MAP_CIRCLE, z=0.62, color=(0.55, 0.62, 0.72, 0.85), thickness=2.0)
+            self._append_boundary(self.boundary, radius * 0.4, config.MAP_CIRCLE, z=0.62, color=(0.48, 0.58, 0.7, 0.8), thickness=2.0)
         self.boundary.setTransparency(True)
 
     def _boundary_points(self, radius: float, map_type: str) -> list[tuple[float, float]]:
@@ -99,7 +99,7 @@ class Room:
         if not self.floor:
             return
         pulse = 0.06 * self.combat_intensity * (0.5 + 0.5 * math.sin(self._t * 6.0))
-        self.floor.setColor(0.12 + pulse, 0.14 + pulse * 0.9, 0.17 + pulse * 0.8, 1.0)
+        self.floor.setColor(0.1 + pulse * 0.65, 0.125 + pulse * 0.72, 0.16 + pulse * 0.76, 1.0)
 
     def resize(self, width: int, height: int):
         self.width = int(width)
@@ -116,9 +116,9 @@ class Room:
         # Create a simple grid drawing
         ls = LineSegs("room_grid")
         ls.setThickness(1.0)
-        ls.setColor(0.3, 0.35, 0.4, 0.3)
+        ls.setColor(0.22, 0.28, 0.34, 0.24)
         
-        step = 50.0
+        step = 56.0
         r = radius
         # Horizontal lines
         y = -r

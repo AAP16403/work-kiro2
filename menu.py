@@ -26,17 +26,13 @@ def _ui_scale(width: int, height: int) -> float:
 
 def _sync_label_style_if_ready(label, font_name: str, font_size: int) -> None:
     """Avoid pyglet font style updates when GL context is temporarily unavailable."""
-    try:
-        from pyglet import gl
-        if getattr(gl, "current_context", None) is None:
-            return
-        if getattr(label, "font_name", None) != font_name:
-            label.font_name = font_name
-        if int(getattr(label, "font_size", 0)) != int(font_size):
-            label.font_size = int(font_size)
-    except Exception:
-        # Style sync can safely be retried on the next frame.
+    from pyglet import gl
+    if getattr(gl, "current_context", None) is None:
         return
+    if getattr(label, "font_name", None) != font_name:
+        label.font_name = font_name
+    if int(getattr(label, "font_size", 0)) != int(font_size):
+        label.font_size = int(font_size)
 
 
 @dataclass

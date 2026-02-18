@@ -703,11 +703,8 @@ class Game(pyglet.window.Window):
         """Start in fullscreen while preserving the current windowed size."""
         self.settings["window_size"] = (self.width, self.height)
         self._windowed_size = (self.width, self.height)
-        try:
-            self.settings_menu.window_size_idx = len(self.settings_menu.window_sizes) - 1
-            self._on_settings_change({"fullscreen": True, "window_size": self._windowed_size})
-        except Exception:
-            self.settings["fullscreen"] = False
+        self.settings_menu.window_size_idx = len(self.settings_menu.window_sizes) - 1
+        self._on_settings_change({"fullscreen": True, "window_size": self._windowed_size})
 
     def _reset_input_flags(self) -> None:
         self.mouse_down = False
@@ -727,10 +724,7 @@ class Game(pyglet.window.Window):
 
     def _prune_dead_weak_handlers(self) -> None:
         """Remove collected WeakMethod handlers to prevent pyglet assertions on dispatch."""
-        try:
-            from pyglet.event import WeakMethod
-        except Exception:
-            return
+        from pyglet.event import WeakMethod
 
         stack = getattr(self, "_event_stack", None)
         if not stack:
@@ -1106,10 +1100,7 @@ class Game(pyglet.window.Window):
         fullscreen = value.get("fullscreen")
         arena_margin = value.get("arena_margin")
         if arena_margin is not None:
-            try:
-                config.ARENA_MARGIN = float(arena_margin)
-            except Exception:
-                pass
+            config.ARENA_MARGIN = float(arena_margin)
             self._update_room_radius_from_view()
             if self.room:
                 self.room.rebuild()

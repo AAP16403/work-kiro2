@@ -10,29 +10,26 @@ from projectile import Projectile
 import config
 from utils import Vec2
 from enemy_behaviors.base import Behavior
-try:
-    from enemy_behaviors.chase import Chase
-    from enemy_behaviors.ranged import Ranged
-    from enemy_behaviors.swarm import Swarm
-    from enemy_behaviors.charger import Charger
-    from enemy_behaviors.tank import Tank
-    from enemy_behaviors.spitter import Spitter
-    from enemy_behaviors.flyer import Flyer
-    from enemy_behaviors.engineer import Engineer
-    from enemy_behaviors.bomber import Bomber
-except Exception:
-    Chase = Ranged = Swarm = Charger = Tank = Spitter = Flyer = Engineer = Bomber = None
+from enemy_behaviors.chase import Chase
+from enemy_behaviors.ranged import Ranged
+from enemy_behaviors.swarm import Swarm
+from enemy_behaviors.charger import Charger
+from enemy_behaviors.tank import Tank
+from enemy_behaviors.spitter import Spitter
+from enemy_behaviors.flyer import Flyer
+from enemy_behaviors.engineer import Engineer
+from enemy_behaviors.bomber import Bomber
 
 _BEHAVIOR_IMPLS = {
-    "chaser": Chase() if Chase else None,
-    "ranged": Ranged() if Ranged else None,
-    "swarm": Swarm() if Swarm else None,
-    "charger": Charger() if Charger else None,
-    "tank": Tank() if Tank else None,
-    "spitter": Spitter() if Spitter else None,
-    "flyer": Flyer() if Flyer else None,
-    "engineer": Engineer() if Engineer else None,
-    "bomber": Bomber() if Bomber else None,
+    "chaser": Chase(),
+    "ranged": Ranged(),
+    "swarm": Swarm(),
+    "charger": Charger(),
+    "tank": Tank(),
+    "spitter": Spitter(),
+    "flyer": Flyer(),
+    "engineer": Engineer(),
+    "bomber": Bomber(),
 }
 
 
@@ -1088,40 +1085,11 @@ def _dispatch_behavior_update(behavior_impl, enemy: Enemy, player_pos: Vec2, sta
         return
 
     kwargs = {}
-    try:
-        params = inspect.signature(updater).parameters
-    except Exception:
-        params = {}
+    params = inspect.signature(updater).parameters
 
     if "game" in params:
         kwargs["game"] = game
     if "player_vel" in params:
         kwargs["player_vel"] = player_vel
 
-    try:
-        updater(enemy, player_pos, state, dt, **kwargs)
-        return
-    except TypeError as exc:
-        msg = str(exc)
-        arg_mismatch = (
-            "positional argument" in msg
-            or "unexpected keyword argument" in msg
-            or "required positional argument" in msg
-        )
-        if not arg_mismatch:
-            raise
-
-    # Legacy fallbacks for behavior modules with non-uniform signatures.
-    for args in (
-        (enemy, player_pos, state, dt, player_vel),
-        (enemy, player_pos, state, dt, game, player_vel),
-        (enemy, player_pos, state, dt),
-    ):
-        try:
-            updater(*args)
-            return
-        except TypeError:
-            continue
-
-    # Let the original updater error surface if all compatibility calls failed.
     updater(enemy, player_pos, state, dt, **kwargs)

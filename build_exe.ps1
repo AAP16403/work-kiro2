@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 Push-Location $PSScriptRoot
 try {
   if (-not (Test-Path ".\\.venv\\Scripts\\python.exe")) {
-    throw "Missing .venv. Create it first: py -m venv .venv ; .\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt (or pyglet + pyinstaller)."
+    throw "Missing .venv. Create it first: py -m venv .venv ; .\\.venv\\Scripts\\python.exe -m pip install panda3d pyinstaller."
   }
 
   $py = ".\\.venv\\Scripts\\python.exe"

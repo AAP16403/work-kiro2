@@ -2,15 +2,12 @@
 
 import random
 import math
-import pyglet
-from pyglet import shapes
 
 from config import WAVE_COOLDOWN, ENEMY_COLORS, POWERUP_COLORS, ROOM_RADIUS, ENABLE_OBSTACLES
 import config
 from utils import (
     Vec2,
     clamp_to_map,
-    iso_to_world,
     dist,
     point_segment_distance,
     resolve_circle_obstacles,
@@ -27,127 +24,46 @@ from hazards import LaserBeam
 from player import perform_dash, recharge_dash, format_dash_hud
 from rpg import format_temp_hud, format_perm_hud
 
-# Import helper functions from rpg module that might be needed or used via game instance but 
-# some logic was in PlayingState directly? Checking usage...
-# PlayingState uses game.rpg_menu, game._advance_temp_rewards, etc.
-
-def _draw_playing_scene(game) -> None:
-    # We access the state from the FSM map to avoid circular import issues if we tried to import PlayingState class
-    # But since we are in states.py, we can just look it up on the game.fsm or pass it.
-    # The original code did: game.fsm._states["PlayingState"].draw()
-    # We can keep that pattern.
-    if "PlayingState" in game.fsm._states:
-        game.fsm._states["PlayingState"].draw()
-
 class MenuState(State):
     def enter(self):
-        self.game._reset_input_flags()
-
-    def on_mouse_press(self, x, y, button, modifiers):
-        action = self.game.main_menu.on_mouse_press(x, y, button)
-        if action == "start_game":
-            self.game._init_game()
-            self.game.fsm.set_state("PlayingState")
-        elif action == "guide":
-            self.game.fsm.set_state("GuideState")
-        elif action == "settings":
-            self.game.fsm.set_state("SettingsState")
-        elif action == "quit":
-            self.game._quit_game()
-
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.game.main_menu.on_mouse_motion(x, y)
-
+        print("DEBUG: Entering MenuState")
+        self.game.main_menu.show()
+    def exit(self):
+        self.game.main_menu.hide()
     def update(self, dt: float):
-        self.game.main_menu.update(dt)
-
+        pass
     def draw(self):
-        self.game.main_menu.draw()
-
+        pass
 
 class SettingsState(State):
-    def on_mouse_press(self, x, y, button, modifiers):
-        action = self.game.settings_menu.on_mouse_press(x, y, button)
-        if action == "back":
-            self.game.fsm.set_state("MenuState")
-
-    def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
-        self.game.settings_menu.on_mouse_drag(x, y, dx, dy)
-
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.game.settings_menu.on_mouse_motion(x, y)
-
-    def on_mouse_release(self, x, y, button, modifiers):
-        self.game.settings_menu.on_mouse_release(x, y, button)
-
-    def on_key_press(self, symbol, modifiers):
-        if symbol == pyglet.window.key.ESCAPE:
-            self.game.fsm.set_state("MenuState")
-
+    def enter(self):
+        self.game.settings_menu.show()
+    def exit(self):
+        self.game.settings_menu.hide()
     def update(self, dt: float):
-        self.game.settings_menu.update(dt)
-
-    def draw(self):
-        self.game.settings_menu.draw()
-
+        pass
 
 class GuideState(State):
     def enter(self):
-        self.game._reset_input_flags()
-
-    def on_mouse_press(self, x, y, button, modifiers):
-        action = self.game.guide_menu.on_mouse_press(x, y, button)
-        if action == "back":
-            self.game.fsm.set_state("MenuState")
-
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.game.guide_menu.on_mouse_motion(x, y)
-
-    def on_key_press(self, symbol, modifiers):
-        if symbol == pyglet.window.key.ESCAPE:
-            self.game.fsm.set_state("MenuState")
-        else:
-            self.game.guide_menu.on_key_press(symbol)
-
+        self.game.guide_menu.show()
+    def exit(self):
+        self.game.guide_menu.hide()
     def update(self, dt: float):
-        self.game.guide_menu.update(dt)
-
-    def draw(self):
-        self.game.guide_menu.draw()
-
+        pass
 
 class PlayingState(State):
     def enter(self):
-        if not self.game.state:
-            self.game._init_game()
-        self.game._reset_input_flags()
+        print("DEBUG: Entering PlayingState")
+        if hasattr(self.game, "_init_game"):
+             if not self.game.state:
+                 self.game._init_game()
+        # Show HUD
+        if hasattr(self.game, "hud"):
+            self.game.hud.show()
 
-    def on_key_press(self, symbol, modifiers):
-        if symbol == pyglet.window.key.ESCAPE:
-            self.game.fsm.set_state("PausedState")
-        elif symbol == pyglet.window.key.Q:
-            self.game._use_ultra()
-        elif symbol == pyglet.window.key.SPACE:
-            self.game._dash()
-
-    def on_mouse_press(self, x, y, button, modifiers):
-        self.game.mouse_xy = (x, y)
-        if button == pyglet.window.mouse.LEFT:
-            self.game.auto_shoot = not self.game.auto_shoot
-        elif button == pyglet.window.mouse.RIGHT:
-            self.game._rmb_down = True
-            self.game._use_ultra()
-
-    def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
-        self.game.mouse_xy = (x, y)
-        rmb_pressed = bool(buttons & pyglet.window.mouse.RIGHT)
-        if rmb_pressed and not self.game._rmb_down:
-            self.game._use_ultra()
-        self.game._rmb_down = rmb_pressed
-
-    def on_mouse_release(self, x, y, button, modifiers):
-        if button == pyglet.window.mouse.RIGHT:
-            self.game._rmb_down = False
+    def exit(self):
+        if hasattr(self.game, "hud"):
+            self.game.hud.hide()
 
     @staticmethod
     def _remove_projectile(game, s, p) -> None:
@@ -170,7 +86,6 @@ class PlayingState(State):
 
     @staticmethod
     def _kill_enemy(game, s, e, death_particles: bool = True) -> None:
-        """Centralized enemy kill: visuals cleanup, particles, loot, and score."""
         behavior_name = enemy_behavior_name(e)
         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
         if e in s.enemies:
@@ -192,10 +107,15 @@ class PlayingState(State):
 
         s = game.state
         s.time += dt
+        
+        if hasattr(game, "hud"):
+            game.hud.update(game.player, s)
+
         if game.player.invincibility_timer > 0:
             game.player.invincibility_timer -= dt
 
         if not s.wave_active and (s.time - s.last_wave_clear) >= WAVE_COOLDOWN:
+            print(f"DEBUG: Spawning wave {s.wave} at {s.time}")
             spawn_wave(s, Vec2(0.0, 0.0))
 
         if s.time < game.player.vortex_until:
@@ -250,7 +170,6 @@ class PlayingState(State):
                 game.player.pos = game.player.pos + nd * game._effective_player_speed() * dt
                 game.particle_system.add_step_dust(game.player.pos, nd)
 
-        # Recharge dash charges
         recharge_dash(
             game.player, s.time, game.balance,
             float(getattr(game, "_dash_cd_difficulty", 1.0)),
@@ -267,8 +186,7 @@ class PlayingState(State):
 
         weapon_cd = get_effective_fire_rate(game.player.current_weapon, game._effective_player_fire_rate())
         if game.auto_shoot and (s.time - game.player.last_shot) >= weapon_cd:
-            world_mouse = iso_to_world(game.mouse_xy)
-            aim = (world_mouse - game.player.pos).normalized()
+            aim = game.get_aim_direction(game.player.pos)
             muzzle = game.player.pos + aim * 14.0
 
             if s.time < game.player.laser_until:
@@ -306,24 +224,7 @@ class PlayingState(State):
         prev_projectile_pos: dict[int, Vec2] = {}
         for p in list(s.projectiles):
             prev_projectile_pos[id(p)] = Vec2(p.pos.x, p.pos.y)
-            p.update(dt) # Use method now! Or custom logic? 
-            # Original: p.pos = p.pos + p.vel * dt; p.ttl -= dt;
-            # Projectile update method I added does this.
-            # But wait, original code also handled obstacles specifically.
-            # I can rely on p.update(dt) for movement/ttl, but obstacle checks need to be here or moved to physics/projectile.
-            
-            # Since I already updated projectile.py to include update method, let's use it, 
-            # BUT I need to check the exact implementation in game.py vs projectile.py.
-            # game.py handles collision.
-            # I'll stick to manual update in game.py for now to be safe, OR invoke p.update(dt) and verify return.
-            # Actually, `projectile.py` `update` returns bool (alive).
-            # I'll keep the logic as is in PlayingState (copied from game.py) but replace the movement lines with `if not p.update(dt): ...` if consistent.
-            # For this copy, I will PRESERVE original logic to minimize risk, just ensuring variables are correct.
-            # Reverting to manual pos update for safety in this copy.
-            
-            # Wait, I copied the code verbatim from game.py, so it has p.pos += ...
-            # game.py line 335: p.pos = p.pos + p.vel * dt
-            # p.ttl -= dt
+            p.update(dt)
             
             if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
                 blocked = False
@@ -353,11 +254,9 @@ class PlayingState(State):
                     if point_segment_distance(e.pos, p_prev, p.pos) <= pr + game._enemy_radius(e):
                         e.hp -= p.damage
                         s.shake = max(s.shake, 4.0)
-
                         behavior_name = enemy_behavior_name(e)
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
                         game.particle_system.add_hit_particles(e.pos, enemy_color)
-
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e)
                             if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
@@ -416,22 +315,17 @@ class PlayingState(State):
         if s.shake > 0:
             s.shake = max(0.0, s.shake - dt * 20)
 
+        # Update sub-systems
         game.particle_system.update(dt)
         if getattr(game, 'score', None):
             game.score.update(dt)
         if game.room:
-            # Compute combat intensity from game state.
+            # Sync combat intensity
             n_enemies = len(s.enemies)
-            has_boss = any(
-                str(getattr(e, "behavior", "")).startswith("boss_")
-                for e in s.enemies
-            )
-            if n_enemies == 0:
-                ci = 0.0
-            elif has_boss:
-                ci = 0.8 + 0.2 * min(1.0, n_enemies / 4.0)
-            else:
-                ci = min(0.55, 0.08 * n_enemies)
+            has_boss = any(str(getattr(e, "behavior", "")).startswith("boss_") for e in s.enemies)
+            if n_enemies == 0: ci = 0.0
+            elif has_boss: ci = 0.8 + 0.2 * min(1.0, n_enemies / 4.0)
+            else: ci = min(0.55, 0.08 * n_enemies)
             game.room.set_combat_intensity(ci)
             game.room.update(dt)
 
@@ -450,126 +344,29 @@ class PlayingState(State):
         if game.player.hp <= 0:
             game.fsm.set_state("GameOverState")
 
-    def draw(self):
-        game = self.game
-        if not game.state:
-            return
-
-        s = game.state
-        shake = Vec2(0.0, 0.0)
-        if s.shake > 0:
-            shake = Vec2(random.uniform(-1, 1), random.uniform(-1, 1)) * s.shake
-
-        game.visuals.sync_scene(s.time, shake, combat_intensity=float(getattr(game.room, "combat_intensity", 0.0)))
-
-        if config.ENABLE_OBSTACLES:
-            for ob in getattr(game.state, "obstacles", []):
-                game.visuals.ensure_obstacle(ob)
-                game.visuals.sync_obstacle(ob, shake)
-
-        aim_dir = (iso_to_world(game.mouse_xy) - game.player.pos).normalized()
-        game.visuals.sync_player(game.player, shake, t=s.time, aim_dir=aim_dir)
-
-        for e in game.state.enemies:
-            game.visuals.ensure_enemy(e)
-            game.visuals.sync_enemy(e, shake)
-
-        for p in game.state.projectiles:
-            game.visuals.ensure_projectile(p)
-            game.visuals.sync_projectile(p, shake)
-
-        for pu in game.state.powerups:
-            game.visuals.ensure_powerup(pu)
-            game.visuals.sync_powerup(pu, shake)
-
-        for tr in getattr(game.state, "traps", []):
-            game.visuals.ensure_trap(tr)
-            game.visuals.sync_trap(tr, shake)
-
-        for lb in getattr(game.state, "lasers", []):
-            game.visuals.ensure_laser(lb)
-            game.visuals.sync_laser(lb, shake)
-
-        for th in getattr(game.state, "thunders", []):
-            game.visuals.ensure_thunder(th)
-            game.visuals.sync_thunder(th, shake)
-
-        game.batch.draw()
-        game.particle_system.render(shake)
-
-        # Update HUD
-        laser_left = max(0.0, game.player.laser_until - game.state.time)
-        laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
-        vortex_left = max(0.0, game.player.vortex_until - game.state.time)
-        vortex_txt = f"Vortex {vortex_left:.0f}s" if vortex_left > 0 else ""
-        ultra_charges = int(getattr(game.player, "ultra_charges", 0))
-        ultra_cd = max(0.0, float(getattr(game.player, "ultra_cd_until", 0.0)) - game.state.time)
-        ultra_txt = ""
-        if ultra_charges > 0:
-            ultra_txt = f"Ultra {ultra_charges} [{game._ultra_variant_name(game.player)}]"
-            if ultra_cd > 0:
-                ultra_txt += f" {ultra_cd:.0f}s"
-        boss = next((e for e in game.state.enemies if enemy_behavior_name(e).startswith("boss_")), None)
-        boss_txt = ""
-        if boss:
-            boss_name = enemy_behavior_name(boss)
-            boss_txt = f"BOSS {boss_name[5:].replace('_', ' ').title()} HP {boss.hp}"
-        
-        dash_txt = format_dash_hud(game.player, game.state.time)
-        temp_txt = format_temp_hud(game._active_temp_rewards)
-        perm_txt = format_perm_hud(game._run_permanent_rewards)
-        status_parts = [p for p in (dash_txt, laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt, boss_txt) if p]
-        status_text = "   |   ".join(status_parts) if status_parts else "No active effects"
-
-        game.hud.update_bars(game.player, game.state, score=getattr(game, 'score', None), status_text=status_text)
-        game.hud.draw()
-
-        if game._pause_hint:
-            game._pause_hint.draw()
-
 
 class PausedState(State):
     def enter(self):
-        self.game._reset_input_flags()
-
-    def on_key_press(self, symbol, modifiers):
-        if symbol == pyglet.window.key.ESCAPE:
-            self.game.fsm.set_state("PlayingState")
-
-    def on_mouse_press(self, x, y, button, modifiers):
-        action = self.game.pause_menu.on_mouse_press(x, y, button)
-        if action == "resume":
-            self.game.fsm.set_state("PlayingState")
-        elif action == "quit_to_menu":
-            self.game._return_to_menu()
-            self.game.fsm.set_state("MenuState")
-
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.game.pause_menu.on_mouse_motion(x, y)
-
-    def draw(self):
-        _draw_playing_scene(self.game)
-        self.game.pause_menu.draw()
-
+        self.game.pause_menu.show()
+    def exit(self):
+        self.game.pause_menu.hide()
+    def update(self, dt: float):
+        pass
 
 class BossRewardState(State):
     def enter(self):
-        self.game._reset_input_flags()
+        if hasattr(self.game, "rpg_menu"):
+            self.game.rpg_menu.complete = False
+            self.game.rpg_menu.active = True
 
-    def on_mouse_press(self, x, y, button, modifiers):
-        chosen = self.game.rpg_menu.on_mouse_press(x, y, button)
-        if chosen == "done":
-            if self.game.state:
-                self.game.state.last_wave_clear = self.game.state.time - float(WAVE_COOLDOWN)
+    def update(self, dt: float):
+        menu = getattr(self.game, "rpg_menu", None)
+        if not menu:
+            self.game.consume_pending_boss_rewards(temp_index=0, perm_index=0)
             self.game.fsm.set_state("PlayingState")
-
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.game.rpg_menu.on_mouse_motion(x, y)
-
-    def draw(self):
-        _draw_playing_scene(self.game)
-        self.game.rpg_menu.draw()
-
+            return
+        if menu.complete:
+            self.game.fsm.set_state("PlayingState")
 
 class GameOverState(State):
     def enter(self):
@@ -581,21 +378,13 @@ class GameOverState(State):
         if score_obj:
             is_new_high = score_obj.submit_score(wave)
             high_score = score_obj.get_high_score()
-        self.game.game_over_menu.set_results(wave, final_score, high_score, is_new_high)
-        self.game._reset_input_flags()
+        if hasattr(self.game, "game_over_menu"):
+            self.game.game_over_menu.set_results(wave, final_score, high_score, is_new_high)
+            self.game.game_over_menu.show()
+            
+    def exit(self):
+        if hasattr(self.game, "game_over_menu"):
+            self.game.game_over_menu.hide()
 
-    def on_mouse_press(self, x, y, button, modifiers):
-        action = self.game.game_over_menu.on_mouse_press(x, y, button)
-        if action == "retry":
-            self.game._init_game()
-            self.game.fsm.set_state("PlayingState")
-        elif action == "quit_to_menu":
-            self.game._return_to_menu()
-            self.game.fsm.set_state("MenuState")
-
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.game.game_over_menu.on_mouse_motion(x, y)
-
-    def draw(self):
-        _draw_playing_scene(self.game)
-        self.game.game_over_menu.draw()
+    def update(self, dt: float):
+        pass

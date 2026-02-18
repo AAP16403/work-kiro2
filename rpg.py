@@ -1,21 +1,8 @@
 """Boss reward menu: temporary cards + permanent run boosts."""
 
 from __future__ import annotations
-
 import random
-from typing import TYPE_CHECKING
-
-import pyglet
-from pyglet import shapes
-
-from menu import (
-    MenuButton,
-    _ui_scale,
-    UI_FONT_HEAD,
-    UI_FONT_BODY,
-    UI_FONT_META,
-    _sync_label_style_if_ready,
-)
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from player import Player
@@ -215,194 +202,118 @@ def format_perm_hud(run_perms: list[str]) -> str:
 
 
 class BossRewardMenu:
-    """Two-step reward menu shown after boss waves."""
+    """Panda3D boss reward picker UI."""
 
     def __init__(self, width: int, height: int, on_pick_temp, on_pick_perm):
         self.screen_width = width
         self.screen_height = height
         self._on_pick_temp = on_pick_temp
         self._on_pick_perm = on_pick_perm
-        self.batch = pyglet.graphics.Batch()
-
-        self.overlay = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
-        self.overlay.opacity = 220
-        self._panel_border = shapes.Rectangle(0, 0, 1, 1, color=(164, 214, 255), batch=self.batch)
-        self._panel_border.opacity = 52
-        self._panel = shapes.Rectangle(0, 0, 1, 1, color=(10, 20, 34), batch=self.batch)
-        self._panel.opacity = 228
-        self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
-        self._panel_shine.opacity = 16
-
-        self.title = pyglet.text.Label(
-            "P L O U T O // BOSS REWARD",
-            font_name=UI_FONT_HEAD,
-            font_size=30,
-            x=width // 2,
-            y=height - 90,
-            anchor_x="center",
-            anchor_y="center",
-            color=(230, 240, 255, 255),
-            batch=self.batch,
-        )
-        self.subtitle = pyglet.text.Label(
-            "",
-            font_name=UI_FONT_BODY,
-            font_size=14,
-            x=width // 2,
-            y=height - 128,
-            anchor_x="center",
-            anchor_y="center",
-            color=(170, 185, 210, 255),
-            batch=self.batch,
-        )
-        self.tip = pyglet.text.Label(
-            "",
-            font_name=UI_FONT_META,
-            font_size=11,
-            x=width // 2,
-            y=height - 152,
-            anchor_x="center",
-            anchor_y="center",
-            color=(145, 160, 190, 255),
-            batch=self.batch,
-        )
-
-        self.buttons: list[MenuButton] = [
-            MenuButton(0, 0, 300, 72, "Option 1", lambda: None, color=(36, 132, 186), hover_color=(86, 188, 236)),
-            MenuButton(0, 0, 300, 72, "Option 2", lambda: None, color=(36, 132, 186), hover_color=(86, 188, 236)),
-            MenuButton(0, 0, 300, 72, "Option 3", lambda: None, color=(36, 132, 186), hover_color=(86, 188, 236)),
-        ]
-        self.desc_labels: list[pyglet.text.Label] = []
-        for _ in range(3):
-            self.desc_labels.append(
-                pyglet.text.Label(
-                    "",
-                    font_name=UI_FONT_META,
-                    font_size=11,
-                    x=0,
-                    y=0,
-                    anchor_x="left",
-                    anchor_y="center",
-                    color=(165, 175, 195, 255),
-                    batch=self.batch,
-                )
-            )
-
-        for b in self.buttons:
-            b.ensure(self.batch)
-
-        self._temp_opts: list[dict] = []
-        self._perm_opts: list[dict] = []
-        self._stage = "temp"
-        self.resize(width, height)
+        self._frame = None
+        self._title = None
+        self._temp_buttons = []
+        self._perm_buttons = []
+        self._temp_options = []
+        self._perm_options = []
+        self._temp_picked = False
+        self._perm_picked = False
+        self.active = False
+        self.complete = False
 
     def begin(self, temp_options: list[dict], perm_options: list[dict]) -> None:
-        self._temp_opts = list(temp_options or [])[:3]
-        self._perm_opts = list(perm_options or [])[:3]
-        self._stage = "temp"
-        self._sync_stage_labels()
-        self._sync_buttons()
+        from direct.gui.DirectGui import DirectFrame, DirectButton, DirectLabel
 
-    def _sync_stage_labels(self) -> None:
-        if self._stage == "temp":
-            self.subtitle.text = "Pick 1 Temporary Card (2-3 waves)"
-            self.tip.text = "After this, you will pick 1 small permanent run boost."
-        else:
-            self.subtitle.text = "Pick 1 Permanent Run Boost"
-            self.tip.text = "Applies for the rest of this run."
+        self._temp_options = list(temp_options or [])
+        self._perm_options = list(perm_options or [])
+        self._temp_picked = False
+        self._perm_picked = False
+        self.complete = False
+        self.active = True
 
-    def _sync_buttons(self) -> None:
-        options = self._temp_opts if self._stage == "temp" else self._perm_opts
-        while len(options) < 3:
-            options.append({"key": "", "title": "--", "desc": ""})
-        for i in range(3):
-            opt = options[i]
-            self.buttons[i].text = str(opt.get("title", "--"))
-            self.desc_labels[i].text = str(opt.get("desc", ""))
-            self.buttons[i].sync()
+        if self._frame:
+            self._frame.destroy()
+
+        self._frame = DirectFrame(frameColor=(0.02, 0.02, 0.03, 0.85), frameSize=(-1.0, 1.0, -1.0, 1.0))
+        self._title = DirectLabel(parent=self._frame, text="BOSS REWARD", pos=(0, 0, 0.78), scale=0.11, text_fg=(1, 0.95, 0.8, 1), frameColor=(0, 0, 0, 0))
+
+        DirectLabel(parent=self._frame, text="Pick TEMP buff", pos=(-0.52, 0, 0.55), scale=0.06, text_fg=(0.8, 0.93, 1.0, 1), frameColor=(0, 0, 0, 0))
+        DirectLabel(parent=self._frame, text="Pick RUN buff", pos=(0.52, 0, 0.55), scale=0.06, text_fg=(0.8, 0.93, 1.0, 1), frameColor=(0, 0, 0, 0))
+
+        self._temp_buttons = []
+        self._perm_buttons = []
+
+        for idx, option in enumerate(self._temp_options[:3]):
+            label = f"{option.get('title', 'Temp')}\n{option.get('desc', '')}"
+            btn = DirectButton(
+                parent=self._frame,
+                text=label,
+                text_scale=0.042,
+                frameSize=(-0.36, 0.36, -0.1, 0.1),
+                frameColor=(0.12, 0.18, 0.26, 0.88),
+                pos=(-0.52, 0, 0.35 - idx * 0.24),
+                command=self._pick_temp,
+                extraArgs=[idx],
+            )
+            self._temp_buttons.append(btn)
+
+        for idx, option in enumerate(self._perm_options[:3]):
+            label = f"{option.get('title', 'Run')}\n{option.get('desc', '')}"
+            btn = DirectButton(
+                parent=self._frame,
+                text=label,
+                text_scale=0.042,
+                frameSize=(-0.36, 0.36, -0.1, 0.1),
+                frameColor=(0.2, 0.14, 0.12, 0.88),
+                pos=(0.52, 0, 0.35 - idx * 0.24),
+                command=self._pick_perm,
+                extraArgs=[idx],
+            )
+            self._perm_buttons.append(btn)
 
     def resize(self, width: int, height: int):
-        self.screen_width = width
-        self.screen_height = height
-        self.overlay.width = width
-        self.overlay.height = height
-        cx = width // 2
-        cy = height // 2
-        scale = min(_ui_scale(width, height), 1.45)
-
-        panel_w = min(int(width * 0.9), int(980 * scale))
-        panel_h = min(int(height * 0.82), int(520 * scale))
-        panel_x = cx - panel_w // 2
-        panel_y = cy - panel_h // 2
-
-        self._panel_border.x = panel_x - 3
-        self._panel_border.y = panel_y - 3
-        self._panel_border.width = panel_w + 6
-        self._panel_border.height = panel_h + 6
-        self._panel.x = panel_x
-        self._panel.y = panel_y
-        self._panel.width = panel_w
-        self._panel.height = panel_h
-        self._panel_shine.x = panel_x + 4
-        self._panel_shine.y = panel_y + panel_h - max(8, int(22 * scale))
-        self._panel_shine.width = panel_w - 8
-        self._panel_shine.height = max(6, int(14 * scale))
-
-        self.title.x = cx
-        self.title.y = panel_y + panel_h - int(54 * scale)
-        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(18, int(31 * scale)))
-        self.subtitle.x = cx
-        self.subtitle.y = self.title.y - int(34 * scale)
-        _sync_label_style_if_ready(self.subtitle, UI_FONT_BODY, max(11, int(14 * scale)))
-        self.tip.x = cx
-        self.tip.y = self.subtitle.y - int(24 * scale)
-        _sync_label_style_if_ready(self.tip, UI_FONT_META, max(9, int(11 * scale)))
-
-        bw = min(int(panel_w * 0.84), int(680 * scale))
-        bh = int(78 * scale)
-        gap = int(16 * scale)
-        y0 = self.tip.y - int(54 * scale) - bh
-        for i, btn in enumerate(self.buttons):
-            btn.width = bw
-            btn.height = bh
-            btn.font_size = max(12, int(17 * scale))
-            btn.x = cx - bw // 2
-            btn.y = y0 - i * (bh + gap)
-            btn.sync()
-            self.desc_labels[i].x = btn.x + int(12 * scale)
-            self.desc_labels[i].y = btn.y + int(bh * 0.28)
-            _sync_label_style_if_ready(self.desc_labels[i], UI_FONT_META, max(9, int(11 * scale)))
+        self.screen_width = int(width)
+        self.screen_height = int(height)
 
     def on_mouse_motion(self, x: float, y: float):
-        for btn in self.buttons:
-            btn.is_hovered = btn.contains_point(x, y)
-            btn.sync()
+        return
 
     def on_mouse_press(self, x: float, y: float, button: int) -> Optional[str]:
-        if button != pyglet.window.mouse.LEFT:
-            return None
-        options = self._temp_opts if self._stage == "temp" else self._perm_opts
-        for i, btn in enumerate(self.buttons):
-            if not btn.contains_point(x, y):
-                continue
-            if i >= len(options):
-                return None
-            chosen = options[i]
-            key = str(chosen.get("key", "")).strip()
-            if not key:
-                return None
-            if self._stage == "temp":
-                duration = int(chosen.get("duration", 2))
-                self._on_pick_temp(key, duration)
-                self._stage = "perm"
-                self._sync_stage_labels()
-                self._sync_buttons()
-                return None
-            self._on_pick_perm(key)
-            return "done"
         return None
 
     def draw(self):
-        for b in self.buttons:
-            b.sync()
-        self.batch.draw()
+        return
+
+    def _pick_temp(self, idx: int) -> None:
+        if self._temp_picked or not (0 <= idx < len(self._temp_options)):
+            return
+        option = self._temp_options[idx]
+        self._on_pick_temp(str(option.get("key", "")), int(option.get("duration", 2)))
+        self._temp_picked = True
+        for btn in self._temp_buttons:
+            btn["state"] = "disabled"
+        self._try_finish()
+
+    def _pick_perm(self, idx: int) -> None:
+        if self._perm_picked or not (0 <= idx < len(self._perm_options)):
+            return
+        option = self._perm_options[idx]
+        self._on_pick_perm(str(option.get("key", "")))
+        self._perm_picked = True
+        for btn in self._perm_buttons:
+            btn["state"] = "disabled"
+        self._try_finish()
+
+    def _try_finish(self) -> None:
+        if self._temp_picked and self._perm_picked:
+            self.complete = True
+            self.active = False
+            self.hide()
+
+    def hide(self) -> None:
+        if self._frame:
+            self._frame.hide()
+
+    def destroy(self) -> None:
+        if self._frame:
+            self._frame.destroy()
+            self._frame = None

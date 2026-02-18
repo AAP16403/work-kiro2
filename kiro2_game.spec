@@ -1,4 +1,4 @@
-# PyInstaller spec for the pyglet game.
+# PyInstaller spec for the Panda3D game.
 # Build: .\.venv\Scripts\python.exe -m PyInstaller .\kiro2_game.spec
 
 from PyInstaller.utils.hooks import collect_submodules
@@ -6,10 +6,11 @@ from PyInstaller.utils.hooks import collect_submodules
 block_cipher = None
 
 hiddenimports = []
-hiddenimports += collect_submodules("pyglet")
+hiddenimports += collect_submodules("panda3d")
+hiddenimports += collect_submodules("direct")
 
 a = Analysis(
-    ["main.py"],
+    ["main_panda.py"],
     pathex=[],
     binaries=[],
     datas=[

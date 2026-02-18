@@ -1,6 +1,6 @@
 # PLOUTO (Stellar Survival)
 
-Fast-paced isometric wave survival built with `pyglet`.
+Fast-paced isometric wave survival built with `Panda3D`.
 
 ## Current Highlights
 
@@ -17,14 +17,14 @@ Fast-paced isometric wave survival built with `pyglet`.
 
 ```powershell
 py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -U pip pyglet pyinstaller
-.\.venv\Scripts\python.exe main.py
+.\.venv\Scripts\python.exe -m pip install -U pip panda3d pyinstaller
+.\.venv\Scripts\python.exe main_panda.py
 ```
 
 Or:
 
 ```powershell
-py main.py
+py main_panda.py
 ```
 
 ## Controls
@@ -56,7 +56,7 @@ build_all.bat
 What it does:
 
 1. Ensures `.venv` exists
-2. Installs/updates `pip`, `pyglet`, `pyinstaller`
+2. Installs/updates `pip`, `panda3d`, `pyinstaller`
 3. Runs syntax validation
 4. Builds with PyInstaller (`kiro2_game.spec`)
 5. Creates `dist\Plouto.zip`
@@ -69,7 +69,7 @@ Outputs:
 
 ## Important Files
 
-- `main.py`: entry point
+- `main_panda.py`: entry point
 - `game.py`: game loop, FSM states, RPG reward integration
 - `rpg.py`: boss reward menu and card selection UI
 - `enemy.py`: enemy AI and boss behavior logic

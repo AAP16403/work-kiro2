@@ -40,14 +40,15 @@ def compute_room_radius(view_w: int, view_h: int, margin: float = 0.92) -> float
     h = max(1, int(view_h))
     m = max(0.5, min(0.98, float(margin)))
 
-    # For a world circle of radius R: max |x-y| ~= 2R, max |x+y| ~= 2R.
-    # to_iso: ix = (x-y)*ISO_SCALE_X, iy = (x+y)*ISO_SCALE_Y.
-    # We fit within half-viewport with margin: 2R*ISO_SCALE <= (view/2)*margin.
-    max_r_x = (w * 0.5 * m) / (2.0 * ISO_SCALE_X)
-    max_r_y = (h * 0.5 * m) / (2.0 * ISO_SCALE_Y)
+    # For a world circle of radius R:
+    # Max isometric width span is approx 2.828 * R (diagonal of square bounding box).
+    # Previous logic assumed 4.0 * R which was too conservative.
+    # We use 1.5 as divisor (approx 3.0 total span) to be safe but utilize more screen.
+    max_r_x = (w * 0.5 * m) / (1.5 * ISO_SCALE_X)
+    max_r_y = (h * 0.5 * m) / (1.5 * ISO_SCALE_Y)
 
     r = min(max_r_x, max_r_y)
-    return max(120.0, min(1200.0, float(r)))
+    return max(150.0, min(1400.0, float(r)))
 
 
 @dataclass
@@ -92,20 +93,7 @@ class Vec2:
         return Vec2(self.x / l, self.y / l)
 
 
-def to_iso(world: Vec2, shake: Vec2) -> tuple[float, float]:
-    """Convert world coordinates to isometric screen coordinates."""
-    ix = (world.x - world.y) * ISO_SCALE_X
-    iy = (world.x + world.y) * ISO_SCALE_Y
-    return (ix + VIEW_W / 2 + shake.x, iy + VIEW_H / 2 + shake.y)
-
-
-def iso_to_world(screen_xy: tuple[float, float]) -> Vec2:
-    """Convert isometric screen coordinates to world coordinates."""
-    ix = screen_xy[0] - VIEW_W / 2
-    iy = screen_xy[1] - VIEW_H / 2
-    x = (ix / ISO_SCALE_X + iy / ISO_SCALE_Y) * 0.5
-    y = (iy / ISO_SCALE_Y - ix / ISO_SCALE_X) * 0.5
-    return Vec2(x, y)
+# Isometric conversion functions removed - handled by Panda3D Camera.
 
 
 def clamp_to_map(p: Vec2, radius: float, map_type: str = "circle") -> Vec2:
@@ -126,48 +114,36 @@ def clamp_to_map(p: Vec2, radius: float, map_type: str = "circle") -> Vec2:
         return p.normalized() * radius
 
     elif map_type == MAP_DIAMOND:
-        # Diamond shape defined by |x| + |y| <= R
-        # To clamp, we find the closest point on the diamond edge if outside.
-        # But a simple approximation is often enough for movement: project point.
-        # Strict clamp:
-        limit = radius * 0.8  # Visual fix, diamond feels bigger than circle
-        if abs(p.x) + abs(p.y) <= limit:
-            return p
-        # Project back to edge
-        # sign(x)*x + sign(y)*y = limit
-        # This is surprisingly tricky to do perfectly smoothly, 
-        # so for gameplay fluidness, we might just block normal movement in game.py 
-        # but here we return a safe spot.
-        # Let's use a robust iterative approach or geometric projection.
-        # Closest point on line segment concept.
-        # For Game Jam speed:
-        ratio = limit / (abs(p.x) + abs(p.y) + 1e-6)
-        return p * ratio
+        # Diamond visuals = World Square.
+        # Clamp to axis-aligned square box.
+        limit = radius * 0.707  # R / sqrt(2) approx
+        x = max(-limit, min(limit, p.x))
+        y = max(-limit, min(limit, p.y))
+        return Vec2(x, y)
 
     elif map_type == MAP_CROSS:
-        # Cross: composed of two rectangles? 
-        # Let's say: (|x| < R*0.35 and |y| < R) OR (|x| < R and |y| < R*0.35)
+        # Cross: composed of two rectangles (arms).
         w = radius * 0.35
         r = radius
-        in_v = abs(p.x) < w and abs(p.y) < r
-        in_h = abs(p.x) < r and abs(p.y) < w
-        if in_v or in_h:
-            return p
         
-        # Clamping to a non-convex shape is hard. 
-        # Simplified: push to closest valid axis?
-        # If we are in neither, we are in a corner void.
-        # Pull towards origin until valid.
-        curr = p
-        for _ in range(10):
-            in_v = abs(curr.x) < w and abs(curr.y) < r
-            in_h = abs(curr.x) < r and abs(curr.y) < w
-            if in_v or in_h:
-                return curr
-            curr = curr * 0.9
-        return curr # Fallback
+        # First clamp to outer bounding box
+        rx = max(-r, min(r, p.x))
+        ry = max(-r, min(r, p.y))
+        
+        # If inside center square or arms, we are good.
+        in_v = abs(rx) <= w
+        in_h = abs(ry) <= w
+        
+        if in_v or in_h:
+            return Vec2(rx, ry)
+            
+        # If in corner voids, clamp to the corner of the center square.
+        cx = math.copysign(w, rx)
+        cy = math.copysign(w, ry)
+        return Vec2(cx, cy)
 
     return p
+
 
 
 def random_spawn_map_edge(center: Vec2, radius: float, map_type: str = "circle") -> Vec2:
@@ -183,16 +159,14 @@ def random_spawn_map_edge(center: Vec2, radius: float, map_type: str = "circle")
             return Vec2(center.x + math.cos(ang) * radius, center.y + math.sin(ang) * radius)
 
         elif map_type == MAP_DIAMOND:
-            # |x| + |y| = R * 0.8
-            limit = radius * 0.8
-            side = random.randint(0, 3) # 4 quadrants
-            t = random.random()
-            x = t * limit
-            y = limit - x
-            if side == 1: x = -x
-            elif side == 2: y = -y
-            elif side == 3: x = -x; y = -y
-            return Vec2(x, y)
+            # Square box edges: x=+/-L or y=+/-L
+            limit = radius * 0.707
+            side = random.randint(0, 3)
+            # 0: Top (y=L), 1: Bottom (y=-L), 2: Left (x=-L), 3: Right (x=L)
+            if side == 0: return Vec2(random.uniform(-limit, limit), limit)
+            if side == 1: return Vec2(random.uniform(-limit, limit), -limit)
+            if side == 2: return Vec2(-limit, random.uniform(-limit, limit))
+            if side == 3: return Vec2(limit, random.uniform(-limit, limit))
 
         elif map_type == MAP_CROSS:
             # Spawn at one of the 4 ends

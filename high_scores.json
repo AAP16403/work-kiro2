@@ -6,6 +6,27 @@
       "kills": 127,
       "best_combo": 4.25,
       "date": "2026-02-18 16:41"
+    },
+    {
+      "score": 9697,
+      "wave": 5,
+      "kills": 28,
+      "best_combo": 2.0,
+      "date": "2026-02-18 18:46"
+    },
+    {
+      "score": 7889,
+      "wave": 4,
+      "kills": 19,
+      "best_combo": 2.25,
+      "date": "2026-02-18 18:50"
+    },
+    {
+      "score": 7804,
+      "wave": 4,
+      "kills": 19,
+      "best_combo": 2.5,
+      "date": "2026-02-18 18:37"
     }
   ]
 }

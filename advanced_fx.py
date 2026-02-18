@@ -202,6 +202,12 @@ class AdvancedFX:
         base = float(getattr(config, "ADVANCED_FX_STRENGTH", 0.55))
         u_intensity = max(0.0, min(1.0, base * (0.45 + 0.55 * intensity)))
         try:
+            # Pyglet draw calls can alter GL state between frames. Re-assert blend
+            # state here so the fullscreen FX quad layers over the scene instead of
+            # replacing it.
+            self._ctx.screen.use()
+            self._ctx.enable(moderngl.BLEND)
+            self._ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
             self._ctx.viewport = (0, 0, self.width, self.height)
             self._prog["u_time"].value = float(time_s)
             self._prog["u_intensity"].value = u_intensity

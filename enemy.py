@@ -170,17 +170,11 @@ def _cycle_gun(enemy: Enemy, guns: list[str]) -> str:
     return str(guns[idx % len(guns)])
 
 
-def _difficulty_mult(state) -> float:
-    d = str(getattr(state, "difficulty", "normal")).lower()
-    if d == "easy":
-        return 0.88
-    if d == "hard":
-        return 1.12
-    return 1.0
-
-
 def _boss_damage(state, base: float, wave_scale: float = 0.22, cap: int = 32) -> int:
-    dmg = (float(base) + float(getattr(state, "wave", 1)) * float(wave_scale)) * _difficulty_mult(state)
+    from level import get_difficulty_mods
+    d_mods = get_difficulty_mods(str(getattr(state, "difficulty", "normal")))
+    mult = float(d_mods.get("hp", 1.0))
+    dmg = (float(base) + float(getattr(state, "wave", 1)) * float(wave_scale)) * mult
     return max(1, min(int(round(dmg)), int(cap)))
 
 

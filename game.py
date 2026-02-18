@@ -57,6 +57,8 @@ from level import get_difficulty_mods
 from player import Player, perform_dash, recharge_dash, format_dash_hud
 from fsm import State, StateMachine
 from advanced_fx import AdvancedFX
+from score import ScoreTracker
+from hud import HUD
 
 
 def _draw_playing_scene(game) -> None:
@@ -192,6 +194,21 @@ class PlayingState(State):
             game._damage_player(blast_dmg)
             s.shake = max(s.shake, 12.0)
 
+    @staticmethod
+    def _kill_enemy(game, s, e, death_particles: bool = True) -> None:
+        """Centralized enemy kill: visuals cleanup, particles, loot, and score."""
+        behavior_name = enemy_behavior_name(e)
+        enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
+        if e in s.enemies:
+            s.enemies.remove(e)
+        if game.visuals:
+            game.visuals.drop_enemy(e)
+        if death_particles and game.particle_system:
+            game.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
+        spawn_loot_on_enemy_death(s, behavior_name, e.pos)
+        if getattr(game, 'score', None):
+            game.score.on_enemy_kill(behavior_name)
+
     def update(self, dt: float):
         game = self.game
         if not game.state:
@@ -219,9 +236,7 @@ class PlayingState(State):
                         e.hp -= dmg
                         s.shake = max(s.shake, 2.5)
                         if e.hp <= 0:
-                            s.enemies.remove(e)
-                            game.visuals.drop_enemy(e)
-                            spawn_loot_on_enemy_death(s, enemy_behavior_name(e), e.pos)
+                            self._kill_enemy(game, s, e, death_particles=False)
 
         for tr in list(getattr(s, "traps", [])):
             tr.t += dt
@@ -294,9 +309,7 @@ class PlayingState(State):
                         e.hp -= dmg
                         s.shake = max(s.shake, 4.0)
                         if e.hp <= 0:
-                            s.enemies.remove(e)
-                            game.visuals.drop_enemy(e)
-                            spawn_loot_on_enemy_death(s, enemy_behavior_name(e), e.pos)
+                            self._kill_enemy(game, s, e, death_particles=False)
             else:
                 weapon = game.player.current_weapon
                 projectiles = spawn_weapon_projectiles(muzzle, aim, weapon, s.time, game._effective_player_damage())
@@ -313,10 +326,8 @@ class PlayingState(State):
                 e.pos = clamp_to_room(e.pos, config.ROOM_RADIUS * 0.96)
             if dist(e.pos, game.player.pos) <= game._enemy_radius(e) + game._player_radius():
                 game._damage_player(game.balance.enemy_contact_damage)
-                s.enemies.remove(e)
-                game.visuals.drop_enemy(e)
+                self._kill_enemy(game, s, e, death_particles=False)
                 s.shake = 9.0
-                spawn_loot_on_enemy_death(s, enemy_behavior_name(e), game.player.pos)
 
         prev_projectile_pos: dict[int, Vec2] = {}
         for p in list(s.projectiles):
@@ -357,13 +368,10 @@ class PlayingState(State):
                         game.particle_system.add_hit_particles(e.pos, enemy_color)
 
                         if e.hp <= 0:
-                            s.enemies.remove(e)
-                            game.visuals.drop_enemy(e)
-                            game.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
+                            self._kill_enemy(game, s, e)
                             if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
                                 game._damage_player(game.balance.tank_death_blast_damage)
                                 s.shake = 15.0
-                            spawn_loot_on_enemy_death(s, behavior_name, e.pos)
                         self._remove_projectile(game, s, p)
                         break
             else:
@@ -411,11 +419,15 @@ class PlayingState(State):
             if cleared_wave % 5 == 0:
                 game._roll_boss_rewards()
                 game.fsm.set_state("BossRewardState")
+            if getattr(game, 'score', None):
+                game.score.on_wave_clear(cleared_wave)
 
         if s.shake > 0:
             s.shake = max(0.0, s.shake - dt * 20)
 
         game.particle_system.update(dt)
+        if getattr(game, 'score', None):
+            game.score.update(dt)
         if game.room:
             # Compute combat intensity from game state.
             n_enemies = len(s.enemies)
@@ -495,39 +507,6 @@ class PlayingState(State):
         game.particle_system.render(shake)
 
         # Update HUD
-        hp_cap = max(1, int(getattr(game.player, "max_hp", 100)))
-        hp_now = max(0, int(game.player.hp))
-        hp_frac = max(0.0, min(1.0, hp_now / hp_cap))
-        game.hud_hp_bar.width = game._hud_bar_w * hp_frac
-        game.hud_hp_bar.color = (
-            int(210 - 120 * hp_frac),
-            int(80 + 155 * hp_frac),
-            int(82 + 50 * hp_frac),
-        )
-        game.hud_hp_value_label.text = f"{hp_now}/{hp_cap}"
-
-        shield_cap = 100
-        shield_now = max(0, int(game.player.shield))
-        shield_frac = max(0.0, min(1.0, shield_now / max(1, shield_cap)))
-        game.hud_shield_bar.width = game._hud_bar_w * shield_frac
-        game.hud_shield_bar.color = (
-            int(48 + 36 * shield_frac),
-            int(122 + 88 * shield_frac),
-            int(202 + 42 * shield_frac),
-        )
-        game.hud_shield_value_label.text = f"{shield_now}/{shield_cap}"
-        game.hud_wave_label.text = f"WAVE {int(game.state.wave):02d}"
-        combo_value = int(getattr(game.state, "enemy_combo_value", 0))
-        combo_text = str(getattr(game.state, "enemy_combo_text", "")).strip()
-        if combo_text:
-            game.hud_meta_label.text = (
-                f"{str(getattr(game.state, 'difficulty', 'normal')).upper()}  "
-                f"T+{int(game.state.time):03d}s  "
-                f"CMB {combo_value}  {combo_text}"
-            )
-        else:
-            game.hud_meta_label.text = f"{str(getattr(game.state, 'difficulty', 'normal')).upper()}  T+{int(game.state.time):03d}s"
-
         laser_left = max(0.0, game.player.laser_until - game.state.time)
         laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
         vortex_left = max(0.0, game.player.vortex_until - game.state.time)
@@ -550,12 +529,9 @@ class PlayingState(State):
         perm_txt = format_perm_hud(game._run_permanent_rewards)
         status_parts = [p for p in (dash_txt, laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt, boss_txt) if p]
         status_text = "   |   ".join(status_parts) if status_parts else "No active effects"
-        max_chars = int(getattr(game, "_hud_status_max_chars", 120))
-        if len(status_text) > max_chars:
-            status_text = status_text[: max(3, max_chars - 3)].rstrip() + "..."
-        game.hud_status_label.text = status_text
-        
-        game.hud_batch.draw()
+
+        game.hud.update_bars(game.player, game.state, score=getattr(game, 'score', None), status_text=status_text)
+        game.hud.draw()
 
         if game._pause_hint:
             game._pause_hint.draw()
@@ -606,7 +582,15 @@ class BossRewardState(State):
 
 class GameOverState(State):
     def enter(self):
-        self.game.game_over_menu.set_wave(self.game.state.wave)
+        wave = int(self.game.state.wave)
+        score_obj = getattr(self.game, 'score', None)
+        final_score = score_obj.score if score_obj else 0
+        is_new_high = False
+        high_score = 0
+        if score_obj:
+            is_new_high = score_obj.submit_score(wave)
+            high_score = score_obj.get_high_score()
+        self.game.game_over_menu.set_results(wave, final_score, high_score, is_new_high)
         self.game._reset_input_flags()
 
     def on_mouse_press(self, x, y, button, modifiers):
@@ -818,226 +802,8 @@ class Game(pyglet.window.Window):
         
         self.particle_system = ParticleSystem()
 
-        self._init_hud()
-
-    def _init_hud(self):
-        self.hud_batch = pyglet.graphics.Batch()
-        self._hud_bar_w = 240
-
-        self.hud_panel_shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.hud_batch)
-        self.hud_panel_shadow.opacity = 78
-        self.hud_panel_bg = shapes.Rectangle(0, 0, 1, 1, color=(14, 21, 30), batch=self.hud_batch)
-        self.hud_panel_bg.opacity = 216
-        self.hud_panel_border = shapes.BorderedRectangle(
-            0, 0, 1, 1, border=2, color=(20, 28, 40), border_color=(82, 146, 212), batch=self.hud_batch
-        )
-        self.hud_panel_border.opacity = 228
-
-        self.hud_hp_bar_bg = shapes.Rectangle(0, 0, 1, 1, color=(42, 45, 55), batch=self.hud_batch)
-        self.hud_hp_bar = shapes.Rectangle(0, 0, 1, 1, color=(120, 210, 120), batch=self.hud_batch)
-        self.hud_shield_bar_bg = shapes.Rectangle(0, 0, 1, 1, color=(36, 44, 58), batch=self.hud_batch)
-        self.hud_shield_bar = shapes.Rectangle(0, 0, 1, 1, color=(84, 176, 232), batch=self.hud_batch)
-
-        self.hud_wave_chip_shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.hud_batch)
-        self.hud_wave_chip_shadow.opacity = 86
-        self.hud_wave_chip_bg = shapes.Rectangle(0, 0, 1, 1, color=(18, 28, 42), batch=self.hud_batch)
-        self.hud_wave_chip_bg.opacity = 230
-        self.hud_wave_chip_border = shapes.BorderedRectangle(
-            0, 0, 1, 1, border=2, color=(18, 28, 42), border_color=(110, 186, 255), batch=self.hud_batch
-        )
-
-        self.hud_status_bg = shapes.Rectangle(0, 0, 1, 1, color=(10, 16, 24), batch=self.hud_batch)
-        self.hud_status_bg.opacity = 196
-        self.hud_status_border = shapes.BorderedRectangle(
-            0, 0, 1, 1, border=1, color=(10, 16, 24), border_color=(70, 128, 184), batch=self.hud_batch
-        )
-
-        self.hud_hp_label = pyglet.text.Label(
-            "HULL",
-            font_name=UI_FONT_META,
-            font_size=10,
-            x=0,
-            y=0,
-            anchor_x="left",
-            anchor_y="bottom",
-            color=(214, 225, 238, 220),
-            batch=self.hud_batch,
-        )
-        self.hud_hp_value_label = pyglet.text.Label(
-            "",
-            font_name=UI_FONT_BODY,
-            font_size=11,
-            x=0,
-            y=0,
-            anchor_x="right",
-            anchor_y="bottom",
-            color=(244, 250, 255, 255),
-            batch=self.hud_batch,
-        )
-        self.hud_shield_label = pyglet.text.Label(
-            "SHIELD",
-            font_name=UI_FONT_META,
-            font_size=10,
-            x=0,
-            y=0,
-            anchor_x="left",
-            anchor_y="bottom",
-            color=(188, 210, 232, 220),
-            batch=self.hud_batch,
-        )
-        self.hud_shield_value_label = pyglet.text.Label(
-            "",
-            font_name=UI_FONT_BODY,
-            font_size=11,
-            x=0,
-            y=0,
-            anchor_x="right",
-            anchor_y="bottom",
-            color=(232, 244, 255, 255),
-            batch=self.hud_batch,
-        )
-
-        self.hud_wave_label = pyglet.text.Label(
-            "",
-            font_name=UI_FONT_HEAD,
-            font_size=22,
-            x=0,
-            y=0,
-            anchor_x="center",
-            anchor_y="center",
-            color=(238, 245, 255, 255),
-            batch=self.hud_batch,
-        )
-        self.hud_meta_label = pyglet.text.Label(
-            "",
-            font_name=UI_FONT_META,
-            font_size=10,
-            x=0,
-            y=0,
-            anchor_x="center",
-            anchor_y="top",
-            color=(168, 194, 222, 230),
-            batch=self.hud_batch,
-        )
-
-        self.hud_status_label = pyglet.text.Label(
-            "",
-            font_name=UI_FONT_BODY,
-            font_size=12,
-            x=0,
-            y=0,
-            anchor_x="center",
-            anchor_y="center",
-            color=(170, 186, 206, 255),
-            batch=self.hud_batch,
-        )
-        self._layout_hud()
-
-    def _layout_hud(self) -> None:
-        if not getattr(self, "hud_batch", None):
-            return
-
-        margin = 14
-        panel_w = max(220, min(360, int(self.width * 0.33)))
-        panel_h = 88
-        panel_x = margin
-        panel_y = self.height - margin - panel_h
-
-        self.hud_panel_shadow.x = panel_x + 3
-        self.hud_panel_shadow.y = panel_y - 3
-        self.hud_panel_shadow.width = panel_w
-        self.hud_panel_shadow.height = panel_h
-        self.hud_panel_bg.x = panel_x
-        self.hud_panel_bg.y = panel_y
-        self.hud_panel_bg.width = panel_w
-        self.hud_panel_bg.height = panel_h
-        self.hud_panel_border.x = panel_x
-        self.hud_panel_border.y = panel_y
-        self.hud_panel_border.width = panel_w
-        self.hud_panel_border.height = panel_h
-
-        bar_margin_x = 14
-        self._hud_bar_w = panel_w - (bar_margin_x * 2)
-        bar_h = 12
-        hp_y = panel_y + 44
-        sh_y = panel_y + 22
-        bar_x = panel_x + bar_margin_x
-
-        self.hud_hp_bar_bg.x = bar_x
-        self.hud_hp_bar_bg.y = hp_y
-        self.hud_hp_bar_bg.width = self._hud_bar_w
-        self.hud_hp_bar_bg.height = bar_h
-
-        self.hud_hp_bar.x = bar_x
-        self.hud_hp_bar.y = hp_y
-        self.hud_hp_bar.height = bar_h
-
-        self.hud_shield_bar_bg.x = bar_x
-        self.hud_shield_bar_bg.y = sh_y
-        self.hud_shield_bar_bg.width = self._hud_bar_w
-        self.hud_shield_bar_bg.height = bar_h
-
-        self.hud_shield_bar.x = bar_x
-        self.hud_shield_bar.y = sh_y
-        self.hud_shield_bar.height = bar_h
-
-        self.hud_hp_label.x = bar_x
-        self.hud_hp_label.y = hp_y + bar_h + 3
-        self.hud_hp_value_label.x = bar_x + self._hud_bar_w
-        self.hud_hp_value_label.y = hp_y + bar_h + 2
-        self.hud_shield_label.x = bar_x
-        self.hud_shield_label.y = sh_y + bar_h + 3
-        self.hud_shield_value_label.x = bar_x + self._hud_bar_w
-        self.hud_shield_value_label.y = sh_y + bar_h + 2
-
-        chip_w = max(160, min(320, int(self.width * 0.26)))
-        chip_h = 46
-        chip_x = (self.width - chip_w) // 2
-        chip_y = self.height - margin - chip_h
-        min_gap = 12
-        panel_right = panel_x + panel_w
-        chip_left = chip_x
-        chip_right = chip_x + chip_w
-        chip_overlaps_panel = not (chip_left >= panel_right + min_gap or chip_right <= panel_x - min_gap)
-        if chip_overlaps_panel:
-            chip_y = panel_y - chip_h - 8
-        self.hud_wave_chip_shadow.x = chip_x + 3
-        self.hud_wave_chip_shadow.y = chip_y - 3
-        self.hud_wave_chip_shadow.width = chip_w
-        self.hud_wave_chip_shadow.height = chip_h
-        self.hud_wave_chip_bg.x = chip_x
-        self.hud_wave_chip_bg.y = chip_y
-        self.hud_wave_chip_bg.width = chip_w
-        self.hud_wave_chip_bg.height = chip_h
-        self.hud_wave_chip_border.x = chip_x
-        self.hud_wave_chip_border.y = chip_y
-        self.hud_wave_chip_border.width = chip_w
-        self.hud_wave_chip_border.height = chip_h
-
-        self.hud_wave_label.x = chip_x + chip_w // 2
-        self.hud_wave_label.y = chip_y + int(chip_h * 0.62)
-        self.hud_meta_label.x = chip_x + chip_w // 2
-        self.hud_meta_label.y = chip_y + int(chip_h * 0.28)
-
-        is_stacked = chip_y < panel_y
-        if is_stacked:
-            status_w = max(220, min(700, int(self.width * 0.9)))
-        else:
-            status_w = max(240, min(640, int(self.width * 0.58)))
-        status_h = 28
-        status_x = (self.width - status_w) // 2
-        status_y = max(6, chip_y - status_h - 10)
-        self.hud_status_bg.x = status_x
-        self.hud_status_bg.y = status_y
-        self.hud_status_bg.width = status_w
-        self.hud_status_bg.height = status_h
-        self.hud_status_border.x = status_x
-        self.hud_status_border.y = status_y
-        self.hud_status_border.width = status_w
-        self.hud_status_border.height = status_h
-        self.hud_status_label.x = status_x + status_w // 2
-        self.hud_status_label.y = status_y + status_h // 2
-        self._hud_status_max_chars = max(24, int((status_w - 28) / 7.2))
+        self.score = ScoreTracker(difficulty=difficulty)
+        self.hud = HUD(self.width, self.height)
 
 
 
@@ -1152,6 +918,8 @@ class Game(pyglet.window.Window):
             self.player.hp -= amount
             if getattr(self, "advanced_fx", None):
                 self.advanced_fx.trigger_hit(min(1.0, 0.28 + amount * 0.03))
+            if getattr(self, 'score', None):
+                self.score.on_player_hit()
 
     def _use_ultra(self):
         if not self.state or not self.player:
@@ -1180,12 +948,15 @@ class Game(pyglet.window.Window):
             if self.particle_system:
                 self.particle_system.add_hit_particles(e.pos, enemy_color)
             if e.hp <= 0:
-                s.enemies.remove(e)
+                if e in s.enemies:
+                    s.enemies.remove(e)
                 if self.visuals:
                     self.visuals.drop_enemy(e)
                 if self.particle_system:
                     self.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
                 spawn_loot_on_enemy_death(s, behavior_name, e.pos)
+                if getattr(self, 'score', None):
+                    self.score.on_enemy_kill(behavior_name)
 
         def _spawn_player_beam(start: Vec2, direction: Vec2, length: float, damage: int, thickness: float, color):
             end = start + direction * length
@@ -1388,8 +1159,8 @@ class Game(pyglet.window.Window):
         if getattr(self, "_pause_hint", None):
             self._pause_hint.x = width - 10
             self._pause_hint.y = height - 14
-        if getattr(self, "hud_batch", None):
-            self._layout_hud()
+        if getattr(self, "hud", None):
+            self.hud.layout(width, height)
 
         if self.room:
             self.room.resize(width, height)

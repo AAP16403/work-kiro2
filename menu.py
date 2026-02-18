@@ -1400,6 +1400,42 @@ class GameOverMenu:
             color=(255, 255, 255, 255),
             batch=self.batch,
         )
+
+        self.final_score_label = pyglet.text.Label(
+            "Score: 0",
+            font_name=UI_FONT_HEAD,
+            font_size=28,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(255, 240, 180, 255),
+            batch=self.batch,
+        )
+
+        self.high_score_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=14,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(188, 210, 232, 220),
+            batch=self.batch,
+        )
+
+        self.new_high_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_HEAD,
+            font_size=18,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(255, 200, 60, 255),
+            batch=self.batch,
+        )
         self.resize(width, height)
 
     def resize(self, width: int, height: int):
@@ -1410,10 +1446,23 @@ class GameOverMenu:
         self.overlay.height = height
         self.title.x = cx
         _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(24, int(46 * scale)))
-        self.title.y = height - int(115 * scale)
+        self.title.y = height - int(95 * scale)
+
+        self.final_score_label.x = cx
+        _sync_label_style_if_ready(self.final_score_label, UI_FONT_HEAD, max(16, int(30 * scale)))
+        self.final_score_label.y = height - int(155 * scale)
+
         self.score_label.x = cx
-        _sync_label_style_if_ready(self.score_label, UI_FONT_BODY, max(12, int(22 * scale)))
-        self.score_label.y = cy + int(78 * scale)
+        _sync_label_style_if_ready(self.score_label, UI_FONT_BODY, max(12, int(18 * scale)))
+        self.score_label.y = height - int(195 * scale)
+
+        self.high_score_label.x = cx
+        _sync_label_style_if_ready(self.high_score_label, UI_FONT_META, max(10, int(14 * scale)))
+        self.high_score_label.y = height - int(225 * scale)
+
+        self.new_high_label.x = cx
+        _sync_label_style_if_ready(self.new_high_label, UI_FONT_HEAD, max(12, int(18 * scale)))
+        self.new_high_label.y = height - int(255 * scale)
 
         button_w = int(260 * scale)
         button_h = int(62 * scale)
@@ -1424,14 +1473,23 @@ class GameOverMenu:
             btn.font_size = font
 
         gap = int(18 * scale)
-        ys = [cy - int(10 * scale), cy - int(10 * scale) - (button_h + gap)]
+        btn_start_y = cy - int(10 * scale)
+        ys = [btn_start_y, btn_start_y - (button_h + gap)]
         for btn, y in zip(self.buttons, ys):
             btn.x = cx - btn.width // 2
             btn.y = y
             btn.sync()
 
     def set_wave(self, wave: int):
+        """Legacy compat."""
+        self.set_results(wave, 0, 0, False)
+
+    def set_results(self, wave: int, score: int, high_score: int, is_new_high: bool):
+        """Set game-over data with score info."""
         self.score_label.text = f"You reached Wave {wave}"
+        self.final_score_label.text = f"Score: {score:,}"
+        self.high_score_label.text = f"High Score: {high_score:,}"
+        self.new_high_label.text = "\u2605 NEW HIGH SCORE! \u2605" if is_new_high else ""
 
     def on_mouse_motion(self, x: float, y: float):
         for button in self.buttons:

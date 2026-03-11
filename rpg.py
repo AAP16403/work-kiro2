@@ -1,4 +1,4 @@
-"""Boss reward menu: temporary cards + permanent run boosts."""
+﻿"""Boss reward menu: temporary cards + permanent run boosts."""
 
 from __future__ import annotations
 

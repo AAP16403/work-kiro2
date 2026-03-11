@@ -1,4 +1,4 @@
-# Pyglet isometric room survival prototype
+﻿# Pyglet isometric room survival prototype
 # Controls: WASD/Arrows move, LMB toggles auto-fire, SPACE dash, ESC menu.
 # Install: py -m pip install pyglet
 
@@ -6,6 +6,7 @@ import math
 import random
 
 import pyglet
+from pyglet import shapes
 
 pyglet.options["shadow_window"] = False
 

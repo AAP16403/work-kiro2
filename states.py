@@ -1,4 +1,4 @@
-"""Game states logic."""
+﻿"""Game states logic."""
 
 import random
 import math
@@ -150,6 +150,18 @@ class PlayingState(State):
     def _is_enemy_bomb(p) -> bool:
         return p.owner == "enemy" and str(getattr(p, "projectile_type", "bullet")) == "bomb"
 
+    @staticmethod
+    def _segment_hits_circle(psd2, center: Vec2, prev: Vec2, pos: Vec2, hit_r2: float) -> bool:
+        return psd2(center, prev, pos) <= hit_r2
+
+    @staticmethod
+    def _projectile_hits_obstacle(psd2, prev: Vec2, pos: Vec2, pr: float, obstacles) -> bool:
+        for ob in obstacles:
+            hit_r2 = (float(ob.radius) + float(pr)) ** 2
+            if psd2(ob.pos, prev, pos) <= hit_r2:
+                return True
+        return False
+
     def _explode_enemy_bomb(self, game, s, p) -> None:
         blast_r = game.balance.bomb_blast_radius
         blast_dmg = game.balance.bomb_blast_damage(int(getattr(p, "damage", 0)))
@@ -203,6 +215,7 @@ class PlayingState(State):
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e, death_particles=False)
 
+        player_radius = game._player_radius()
         for tr in list(getattr(s, "traps", [])):
             tr.t += dt
             tr.ttl -= dt
@@ -210,7 +223,7 @@ class PlayingState(State):
                 s.traps.remove(tr)
                 game.visuals.drop_trap(tr)
                 continue
-            if tr.damage > 0 and tr.t >= tr.armed_delay and dist(tr.pos, game.player.pos) <= tr.radius + game._player_radius():
+            if tr.damage > 0 and tr.t >= tr.armed_delay and dist(tr.pos, game.player.pos) <= tr.radius + player_radius:
                 game._damage_player(tr.damage)
                 s.shake = max(s.shake, 10.0)
                 s.traps.remove(tr)
@@ -219,7 +232,7 @@ class PlayingState(State):
         for th in list(getattr(s, "thunders", [])):
             th.t += dt
             if th.t >= th.warn and not th.hit_done:
-                if point_segment_distance(game.player.pos, th.start, th.end) <= th.thickness * 0.6 + game._player_radius() * 0.35:
+                if point_segment_distance(game.player.pos, th.start, th.end) <= th.thickness * 0.6 + player_radius * 0.35:
                     th.hit_done = True
                     game._damage_player(th.damage)
                     s.shake = max(s.shake, 14.0)
@@ -249,7 +262,7 @@ class PlayingState(State):
         )
         game.player.pos = clamp_to_map(game.player.pos, config.ROOM_RADIUS * 0.9, s.map_type)
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
-            game.player.pos = resolve_circle_obstacles(game.player.pos, game._player_radius(), s.obstacles)
+            game.player.pos = resolve_circle_obstacles(game.player.pos, player_radius, s.obstacles)
             game.player.pos = clamp_to_map(game.player.pos, config.ROOM_RADIUS * 0.9, s.map_type)
         if dt > 1e-6:
             player_vel = (game.player.pos - old_pos) * (1.0 / dt)
@@ -285,28 +298,28 @@ class PlayingState(State):
 
         for e in list(s.enemies):
             update_enemy(e, game.player.pos, s, dt, game, player_vel=player_vel)
+            behavior_name = enemy_behavior_name(e)
+            e._behavior_name = behavior_name
+            e._radius = game.balance.enemy_radius(behavior_name)
             e.pos = clamp_to_map(e.pos, config.ROOM_RADIUS * 0.96, s.map_type)
             if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
-                e.pos = resolve_circle_obstacles(e.pos, game._enemy_radius(e), s.obstacles)
+                e.pos = resolve_circle_obstacles(e.pos, e._radius, s.obstacles)
                 e.pos = clamp_to_map(e.pos, config.ROOM_RADIUS * 0.96, s.map_type)
-            if dist(e.pos, game.player.pos) <= game._enemy_radius(e) + game._player_radius():
+            if dist(e.pos, game.player.pos) <= e._radius + player_radius:
                 game._damage_player(game.balance.enemy_contact_damage)
                 self._kill_enemy(game, s, e, death_particles=False)
                 s.shake = 9.0
 
+        psd2 = point_segment_distance_sq
+        projectile_radius = game._projectile_radius
+        obstacles = s.obstacles if (config.ENABLE_OBSTACLES and getattr(s, "obstacles", None)) else None
+
         for p in list(s.projectiles):
             p.update(dt)
-            
-            if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
-                blocked = False
-                pr = game._projectile_radius(p)
+            if obstacles:
+                pr = projectile_radius(p)
                 prev = p.prev_pos or p.pos
-                for ob in s.obstacles:
-                    limit = (float(ob.radius) + float(pr)) ** 2
-                    if point_segment_distance_sq(ob.pos, prev, p.pos) <= limit:
-                        blocked = True
-                        break
-                if blocked:
+                if self._projectile_hits_obstacle(psd2, prev, p.pos, pr, obstacles):
                     if self._is_enemy_bomb(p):
                         self._explode_enemy_bomb(game, s, p)
                     self._remove_projectile(game, s, p)
@@ -319,16 +332,17 @@ class PlayingState(State):
                 continue
 
         for p in list(s.projectiles):
+            pr = projectile_radius(p)
+            p_prev = p.prev_pos or p.pos
             if p.owner == "player":
-                pr = game._projectile_radius(p)
-                p_prev = p.prev_pos or p.pos
                 for e in list(s.enemies):
-                    hit_r2 = (float(pr) + float(game._enemy_radius(e))) ** 2
-                    if point_segment_distance_sq(e.pos, p_prev, p.pos) <= hit_r2:
+                    er = getattr(e, "_radius", game._enemy_radius(e))
+                    hit_r2 = (float(pr) + float(er)) ** 2
+                    if self._segment_hits_circle(psd2, e.pos, p_prev, p.pos, hit_r2):
                         e.hp -= p.damage
                         s.shake = max(s.shake, 4.0)
 
-                        behavior_name = enemy_behavior_name(e)
+                        behavior_name = getattr(e, "_behavior_name", enemy_behavior_name(e))
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
                         game.particle_system.add_hit_particles(e.pos, enemy_color)
 
@@ -341,18 +355,15 @@ class PlayingState(State):
                         break
             else:
                 ptype = str(getattr(p, "projectile_type", "bullet"))
-                p_prev = p.prev_pos or p.pos
+                hit_r2 = (float(pr) + float(player_radius)) ** 2
                 if ptype == "bomb":
-                    hit_r2 = (float(game._projectile_radius(p)) + float(game._player_radius())) ** 2
-                    if point_segment_distance_sq(game.player.pos, p_prev, p.pos) <= hit_r2:
+                    if self._segment_hits_circle(psd2, game.player.pos, p_prev, p.pos, hit_r2):
                         self._explode_enemy_bomb(game, s, p)
                         self._remove_projectile(game, s, p)
-                else:
-                    hit_r2 = (float(game._projectile_radius(p)) + float(game._player_radius())) ** 2
-                    if point_segment_distance_sq(game.player.pos, p_prev, p.pos) <= hit_r2:
-                        game._damage_player(p.damage)
-                        s.shake = max(s.shake, 6.0)
-                        self._remove_projectile(game, s, p)
+                elif self._segment_hits_circle(psd2, game.player.pos, p_prev, p.pos, hit_r2):
+                    game._damage_player(p.damage)
+                    s.shake = max(s.shake, 6.0)
+                    self._remove_projectile(game, s, p)
 
         for pu in list(s.powerups):
             dpu = dist(pu.pos, game.player.pos)

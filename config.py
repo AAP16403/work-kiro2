@@ -1,4 +1,4 @@
-# Game Configuration Constants
+﻿# Game Configuration Constants
 
 # Screen dimensions
 SCREEN_W = 980

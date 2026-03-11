@@ -1,4 +1,4 @@
-"""Game map/room and isometric rendering."""
+﻿"""Game map/room and isometric rendering."""
 
 import math
 import random

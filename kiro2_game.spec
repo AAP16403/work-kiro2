@@ -1,4 +1,4 @@
-# PyInstaller spec for the pyglet game.
+﻿# PyInstaller spec for the pyglet game.
 # Build: .\.venv\Scripts\python.exe -m PyInstaller .\kiro2_game.spec
 
 from PyInstaller.utils.hooks import collect_submodules

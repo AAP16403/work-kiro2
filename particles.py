@@ -1,4 +1,4 @@
-"""Particle system for visual effects."""
+﻿"""Particle system for visual effects."""
 
 from dataclasses import dataclass
 import random

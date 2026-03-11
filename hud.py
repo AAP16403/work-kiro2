@@ -1,4 +1,4 @@
-"""HUD (Heads-Up Display) – health, shield, wave, status, and score readout."""
+﻿"""HUD (Heads-Up Display) – health, shield, wave, status, and score readout."""
 
 import pyglet
 from pyglet import shapes

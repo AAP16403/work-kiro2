@@ -1,4 +1,4 @@
-"""Menu system for game configuration and navigation."""
+﻿"""Menu system for game configuration and navigation."""
 
 from dataclasses import dataclass, field
 from collections.abc import Callable

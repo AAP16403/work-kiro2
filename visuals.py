@@ -1,4 +1,4 @@
-"""Visual rendering system."""
+﻿"""Visual rendering system."""
 
 from __future__ import annotations
 

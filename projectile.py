@@ -1,4 +1,4 @@
-"""Projectile entity and related functionality."""
+﻿"""Projectile entity and related functionality."""
 
 from dataclasses import dataclass
 import math

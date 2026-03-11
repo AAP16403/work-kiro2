@@ -1,4 +1,4 @@
-"""Advanced post-FX overlay using moderngl.
+﻿"""Advanced post-FX overlay using moderngl.
 
 This module is additive: it renders on top of the existing pyglet pipeline.
 Requires moderngl. Errors propagate instead of being silently swallowed.

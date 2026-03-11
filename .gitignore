@@ -6,6 +6,7 @@ __pycache__/
 build/
 dist/
 release/
+_build_*/
 
 .pytest_cache/
 .mypy_cache/

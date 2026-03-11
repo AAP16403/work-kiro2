@@ -1,4 +1,4 @@
-"""UI font registration for local runs and packaged builds."""
+﻿"""UI font registration for local runs and packaged builds."""
 
 from __future__ import annotations
 

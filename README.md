@@ -1,4 +1,4 @@
-# PLOUTO (Stellar Survival)
+﻿# PLOUTO (Stellar Survival)
 
 Fast-paced isometric wave survival built with `pyglet`.
 

@@ -1,4 +1,4 @@
-"""Desktop entrypoint."""
+﻿"""Desktop entrypoint."""
 
 from game import main as game_main
 

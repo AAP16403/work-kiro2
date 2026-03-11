@@ -3,9 +3,8 @@
 import random
 import math
 import pyglet
-from pyglet import shapes
 
-from config import WAVE_COOLDOWN, ENEMY_COLORS, POWERUP_COLORS, ROOM_RADIUS, ENABLE_OBSTACLES
+from config import WAVE_COOLDOWN, ENEMY_COLORS, POWERUP_COLORS
 import config
 from utils import (
     Vec2,
@@ -13,6 +12,7 @@ from utils import (
     iso_to_world,
     dist,
     point_segment_distance,
+    point_segment_distance_sq,
     resolve_circle_obstacles,
     enemy_behavior_name,
 )
@@ -21,21 +21,12 @@ from enemy import update_enemy
 from powerup import apply_powerup
 from weapons import get_weapon_for_wave, get_effective_fire_rate
 from projectile import spawn_projectiles
-from particles import ParticleSystem
 from fsm import State
 from hazards import LaserBeam
 from player import perform_dash, recharge_dash, format_dash_hud
 from rpg import format_temp_hud, format_perm_hud
 
-# Import helper functions from rpg module that might be needed or used via game instance but 
-# some logic was in PlayingState directly? Checking usage...
-# PlayingState uses game.rpg_menu, game._advance_temp_rewards, etc.
-
 def _draw_playing_scene(game) -> None:
-    # We access the state from the FSM map to avoid circular import issues if we tried to import PlayingState class
-    # But since we are in states.py, we can just look it up on the game.fsm or pass it.
-    # The original code did: game.fsm._states["PlayingState"].draw()
-    # We can keep that pattern.
     if "PlayingState" in game.fsm._states:
         game.fsm._states["PlayingState"].draw()
 
@@ -303,34 +294,16 @@ class PlayingState(State):
                 self._kill_enemy(game, s, e, death_particles=False)
                 s.shake = 9.0
 
-        prev_projectile_pos: dict[int, Vec2] = {}
         for p in list(s.projectiles):
-            prev_projectile_pos[id(p)] = Vec2(p.pos.x, p.pos.y)
-            p.update(dt) # Use method now! Or custom logic? 
-            # Original: p.pos = p.pos + p.vel * dt; p.ttl -= dt;
-            # Projectile update method I added does this.
-            # But wait, original code also handled obstacles specifically.
-            # I can rely on p.update(dt) for movement/ttl, but obstacle checks need to be here or moved to physics/projectile.
-            
-            # Since I already updated projectile.py to include update method, let's use it, 
-            # BUT I need to check the exact implementation in game.py vs projectile.py.
-            # game.py handles collision.
-            # I'll stick to manual update in game.py for now to be safe, OR invoke p.update(dt) and verify return.
-            # Actually, `projectile.py` `update` returns bool (alive).
-            # I'll keep the logic as is in PlayingState (copied from game.py) but replace the movement lines with `if not p.update(dt): ...` if consistent.
-            # For this copy, I will PRESERVE original logic to minimize risk, just ensuring variables are correct.
-            # Reverting to manual pos update for safety in this copy.
-            
-            # Wait, I copied the code verbatim from game.py, so it has p.pos += ...
-            # game.py line 335: p.pos = p.pos + p.vel * dt
-            # p.ttl -= dt
+            p.update(dt)
             
             if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
                 blocked = False
                 pr = game._projectile_radius(p)
-                prev = prev_projectile_pos.get(id(p), p.pos)
+                prev = p.prev_pos or p.pos
                 for ob in s.obstacles:
-                    if point_segment_distance(ob.pos, prev, p.pos) <= ob.radius + pr:
+                    limit = (float(ob.radius) + float(pr)) ** 2
+                    if point_segment_distance_sq(ob.pos, prev, p.pos) <= limit:
                         blocked = True
                         break
                 if blocked:
@@ -348,9 +321,10 @@ class PlayingState(State):
         for p in list(s.projectiles):
             if p.owner == "player":
                 pr = game._projectile_radius(p)
-                p_prev = prev_projectile_pos.get(id(p), p.pos)
+                p_prev = p.prev_pos or p.pos
                 for e in list(s.enemies):
-                    if point_segment_distance(e.pos, p_prev, p.pos) <= pr + game._enemy_radius(e):
+                    hit_r2 = (float(pr) + float(game._enemy_radius(e))) ** 2
+                    if point_segment_distance_sq(e.pos, p_prev, p.pos) <= hit_r2:
                         e.hp -= p.damage
                         s.shake = max(s.shake, 4.0)
 
@@ -367,15 +341,18 @@ class PlayingState(State):
                         break
             else:
                 ptype = str(getattr(p, "projectile_type", "bullet"))
-                p_prev = prev_projectile_pos.get(id(p), p.pos)
+                p_prev = p.prev_pos or p.pos
                 if ptype == "bomb":
-                    if point_segment_distance(game.player.pos, p_prev, p.pos) <= game._projectile_radius(p) + game._player_radius():
+                    hit_r2 = (float(game._projectile_radius(p)) + float(game._player_radius())) ** 2
+                    if point_segment_distance_sq(game.player.pos, p_prev, p.pos) <= hit_r2:
                         self._explode_enemy_bomb(game, s, p)
                         self._remove_projectile(game, s, p)
-                elif point_segment_distance(game.player.pos, p_prev, p.pos) <= game._projectile_radius(p) + game._player_radius():
-                    game._damage_player(p.damage)
-                    s.shake = max(s.shake, 6.0)
-                    self._remove_projectile(game, s, p)
+                else:
+                    hit_r2 = (float(game._projectile_radius(p)) + float(game._player_radius())) ** 2
+                    if point_segment_distance_sq(game.player.pos, p_prev, p.pos) <= hit_r2:
+                        game._damage_player(p.damage)
+                        s.shake = max(s.shake, 6.0)
+                        self._remove_projectile(game, s, p)
 
         for pu in list(s.powerups):
             dpu = dist(pu.pos, game.player.pos)

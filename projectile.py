@@ -18,9 +18,11 @@ class Projectile:
     ttl: float = 2.0
     owner: str = "player"  # "player" or "enemy"
     projectile_type: str = "bullet"  # "bullet", "spread", "missile", "plasma", "bomb"
+    prev_pos: Vec2 | None = None
 
     def update(self, dt: float) -> bool:
         """Update projectile position and TTL. Returns False if expired."""
+        self.prev_pos = self.pos
         self.pos = self.pos + self.vel * dt
         self.ttl -= dt
         return self.ttl > 0

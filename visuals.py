@@ -12,6 +12,9 @@ from pyglet.graphics import Group
 from config import ENEMY_COLORS, SCREEN_H
 from utils import to_iso, Vec2, enemy_behavior_name
 
+# Reduce group churn by bucketing depth values.
+DEPTH_BUCKET = 4
+
 
 class GroupCache:
     """Cache for rendering groups for depth sorting."""
@@ -32,12 +35,19 @@ class RenderHandle:
 
     def __init__(self, *objs):
         self.objs = list(objs)
+        self._depth_order = None
 
     def set_group(self, group):
         if group is None:
             return
         for o in self.objs:
             o.group = group
+
+    def set_depth(self, order: int, group_cache: GroupCache) -> None:
+        if self._depth_order == order:
+            return
+        self._depth_order = order
+        self.set_group(group_cache.get(order))
 
     def delete(self):
         for o in self.objs:
@@ -109,7 +119,8 @@ class Visuals:
             self._vignette.append(vg)
 
     def _set_depth(self, handle: RenderHandle, y: float) -> None:
-        handle.set_group(self.groups.get(int(SCREEN_H + 1000 - y)))
+        order = int((SCREEN_H + 1000 - y) / DEPTH_BUCKET)
+        handle.set_depth(order, self.groups)
 
     def sync_scene(self, t: float, shake: Vec2, combat_intensity: float = 0.0) -> None:
         center_x, center_y = to_iso(Vec2(0.0, 0.0), shake)
@@ -877,6 +888,7 @@ class Visuals:
         # Different visuals for different projectile types
         projectile_type = getattr(proj, 'projectile_type', 'bullet')
         is_enemy = str(getattr(proj, "owner", "player")) == "enemy"
+        simple_dot = projectile_type in ("bullet", "spread")
         
         if projectile_type == "bomb":
             # Bomb: heavy orange core with dark casing.
@@ -914,8 +926,15 @@ class Visuals:
             else:
                 sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch)
                 core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
-        
-        # Clean projectile rendering: light streak + core, without heavy blob glow.
+
+        if simple_dot:
+            # Tight dot (no trailing streak) to avoid "sperm" look.
+            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch)
+            flare.opacity = 90 if is_enemy else 130
+            self._proj_handles[id(proj)] = RenderHandle(sh, core, flare)
+            return
+
+        # Streaked projectile for heavier types.
         trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=sh.color, batch=self.batch)
         trail.opacity = 95 if is_enemy else 125
         flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch)
@@ -925,20 +944,31 @@ class Visuals:
     def sync_projectile(self, proj, shake: Vec2):
         """Update projectile visual position."""
         h = self._proj_handles[id(proj)]
-        trail, sh, core, flare = h.objs
+        if len(h.objs) == 3:
+            sh, core, flare = h.objs
+            trail = None
+        else:
+            trail, sh, core, flare = h.objs
         sx, sy = to_iso(proj.pos, shake)
         v = getattr(proj, "vel", Vec2(0.0, 0.0))
         v2 = Vec2(v.x, v.y)
-        if v2.length() <= 1e-6:
-            v2 = Vec2(1.0, 0.0)
-        vd = v2.normalized()
-        trail_len = 8 + min(16.0, v2.length() * 0.03)
-        trail.x, trail.y = sx, sy
-        trail.x2, trail.y2 = sx - vd.x * trail_len, sy - vd.y * trail_len * 0.65
-        trail.opacity = 95 if str(getattr(proj, "owner", "player")) == "enemy" else 125
+        speed = v2.length()
+        if trail is not None:
+            if speed <= 1e-6:
+                v2 = Vec2(1.0, 0.0)
+                speed = 1.0
+            vd = v2.normalized()
+            trail_len = 8 + min(16.0, speed * 0.03)
+            trail.x, trail.y = sx, sy
+            trail.x2, trail.y2 = sx - vd.x * trail_len, sy - vd.y * trail_len * 0.65
+            trail.opacity = 95 if str(getattr(proj, "owner", "player")) == "enemy" else 125
         sh.x, sh.y = sx, sy
         core.x, core.y = sx, sy
-        flare.x, flare.y = sx + vd.x * 1.8, sy + vd.y * 1.2
+        if speed <= 1e-6:
+            flare.x, flare.y = sx, sy
+        else:
+            vd = v2.normalized()
+            flare.x, flare.y = sx + vd.x * 1.8, sy + vd.y * 1.2
         flare.opacity = 90 if str(getattr(proj, "owner", "player")) == "enemy" else 130
         self._set_depth(h, sy)
 

@@ -225,6 +225,24 @@ def point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> float:
     return (p - closest).length()
 
 
+def point_segment_distance_sq(p: Vec2, a: Vec2, b: Vec2) -> float:
+    """Squared distance from point p to segment ab."""
+    ab = b - a
+    ap = p - a
+    ab_len2 = ab.x * ab.x + ab.y * ab.y
+    if ab_len2 <= 1e-9:
+        return ap.x * ap.x + ap.y * ap.y
+    t = (ap.x * ab.x + ap.y * ab.y) / ab_len2
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    closest = Vec2(a.x + ab.x * t, a.y + ab.y * t)
+    dx = p.x - closest.x
+    dy = p.y - closest.y
+    return dx * dx + dy * dy
+
+
 def resolve_circle_obstacles(pos: Vec2, radius: float, obstacles, iterations: int = 4) -> Vec2:
     """Push a circle out of overlapping circular obstacles.
 

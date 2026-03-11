@@ -7,6 +7,7 @@ import math
 import pyglet
 from pyglet import shapes
 
+import config
 from utils import to_iso, Vec2
 
 @dataclass
@@ -26,6 +27,7 @@ class ParticleSystem:
         self.batch = batch or pyglet.graphics.Batch()
         self.particles: list[Particle] = []
         self._shapes: list[shapes.Circle] = []
+        self._last_active = 0
         
     def emit(
         self,
@@ -40,6 +42,24 @@ class ParticleSystem:
         spread_angle: float = None,
         decay: bool = True,
     ):
+        if count <= 0:
+            return
+        soft_cap = int(getattr(config, "PARTICLE_SOFT_CAP", 550))
+        hard_cap = int(getattr(config, "PARTICLE_HARD_CAP", 800))
+        current = len(self.particles)
+        if current >= hard_cap:
+            return
+        if current > soft_cap:
+            headroom = max(1, hard_cap - soft_cap)
+            overload = min(headroom, current - soft_cap)
+            scale = max(0.15, 1.0 - (overload / float(headroom)))
+            count = int(count * scale)
+            if count <= 0:
+                return
+        if current + count > hard_cap:
+            count = max(0, hard_cap - current)
+            if count <= 0:
+                return
         base_angle = 0.0
         if direction:
             base_angle = math.atan2(direction.y, direction.x)
@@ -80,7 +100,15 @@ class ParticleSystem:
         self.emit(pos, (200, 200, 200), count=2, speed=30.0, life=0.3, size=2.0, direction=-move_dir, spread_angle=1.0)
 
     def add_powerup_collection(self, pos: Vec2, color: tuple[int, int, int]):
-         self.emit(pos, color, count=16, speed=120.0, life=0.8, size=3.5)
+        self.emit(pos, color, count=16, speed=120.0, life=0.8, size=3.5)
+
+    def add_shield_hit(self, pos: Vec2, amount: int):
+        strength = max(4, min(18, int(amount) // 4))
+        self.emit(pos, (120, 210, 255), count=strength, speed=90.0, life=0.35, size=2.6)
+
+    def add_dash_effect(self, pos: Vec2, dash_dir: Vec2):
+        back = -dash_dir
+        self.emit(pos, (160, 220, 255), count=8, speed=140.0, life=0.25, size=2.4, direction=back, spread_angle=0.4)
 
     def add_laser_beam(self, start: Vec2, end: Vec2, color: tuple[int, int, int]):
         # Emit particles along the line
@@ -111,6 +139,8 @@ class ParticleSystem:
          return math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
 
     def update(self, dt: float):
+        if not self.particles:
+            return
         keep = []
         for p in self.particles:
             p.life -= dt
@@ -122,8 +152,15 @@ class ParticleSystem:
         self.particles = keep
 
     def render(self, shake: Vec2):
+        if not self.particles:
+            if self._last_active:
+                for sh in self._shapes:
+                    sh.opacity = 0
+                self._last_active = 0
+            return
         # Rebuild shapes pool if needed
         needed = len(self.particles)
+        self._last_active = needed
         if len(self._shapes) < needed:
             diff = needed - len(self._shapes)
             for _ in range(diff):

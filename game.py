@@ -6,7 +6,6 @@ import math
 import random
 
 import pyglet
-from pyglet import shapes
 
 pyglet.options["shadow_window"] = False
 
@@ -247,7 +246,7 @@ class Game(pyglet.window.Window):
         self.visuals = Visuals(self.batch, self.groups)
         self.visuals.make_player()
         
-        self.particle_system = ParticleSystem()
+        self.particle_system = ParticleSystem(self.batch)
 
         self.score = ScoreTracker(difficulty=difficulty)
         self.hud = HUD(self.width, self.height)

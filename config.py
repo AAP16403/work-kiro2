@@ -72,6 +72,10 @@ POWERUP_COLORS = {
     "ultra": (255, 240, 180),
 }
 
+# Particle budget (prevents spikes when the screen is saturated).
+PARTICLE_SOFT_CAP = 550
+PARTICLE_HARD_CAP = 800
+
 # Enemy Colors
 ENEMY_COLORS = {
     "bomber": (255, 160, 50),       # Vibrant Yellow-Orange

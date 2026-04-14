@@ -25,6 +25,7 @@ class ParticleSystem:
 
     def __init__(self, batch=None):
         self.batch = batch or pyglet.graphics.Batch()
+        self.group = pyglet.graphics.Group(order=15000)
         self.particles: list[Particle] = []
         self._shapes: list[shapes.Circle] = []
         self._last_active = 0
@@ -164,7 +165,7 @@ class ParticleSystem:
         if len(self._shapes) < needed:
             diff = needed - len(self._shapes)
             for _ in range(diff):
-                self._shapes.append(shapes.Circle(0, 0, 1, color=(255, 255, 255), batch=self.batch))
+                self._shapes.append(shapes.Circle(0, 0, 1, color=(255, 255, 255), batch=self.batch, group=self.group))
         
         # Hide unused
         for i in range(needed, len(self._shapes)):

@@ -108,6 +108,19 @@ def iso_to_world(screen_xy: tuple[float, float]) -> Vec2:
     return Vec2(x, y)
 
 
+def perp(v: Vec2) -> Vec2:
+    return Vec2(-v.y, v.x)
+
+
+def cycle_gun(enemy, guns: list[str]) -> str:
+    """Cycle through a list of projectile types for variety."""
+    if not guns:
+        return "bullet"
+    idx = int(enemy.ai.get("gun_idx", 0))
+    enemy.ai["gun_idx"] = idx + 1
+    return str(guns[idx % len(guns)])
+
+
 def clamp_to_map(p: Vec2, radius: float, map_type: str = "circle") -> Vec2:
     """Clamp a position to stay within the map boundaries."""
     if map_type == MAP_CIRCLE:
@@ -170,23 +183,27 @@ def clamp_to_map(p: Vec2, radius: float, map_type: str = "circle") -> Vec2:
     return p
 
 
-def random_spawn_map_edge(center: Vec2, radius: float, map_type: str = "circle") -> Vec2:
-    """Spawn a position on the edge of the map."""
+def random_spawn_map_edge(center: Vec2, radius: float, map_type: str = "circle", rng: random.Random | None = None) -> Vec2:
+    """Spawn a position on the edge of the map.
+
+    If an RNG is provided, it will be used for reproducible results.
+    """
+    rng = rng or random
     while True:
         if map_type == MAP_CIRCLE:
-            ang = random.uniform(0.0, math.tau)
+            ang = rng.uniform(0.0, math.tau)
             return Vec2(center.x + math.cos(ang) * radius, center.y + math.sin(ang) * radius)
         
         elif map_type == MAP_DONUT:
             # Spawn on outer edge
-            ang = random.uniform(0.0, math.tau)
+            ang = rng.uniform(0.0, math.tau)
             return Vec2(center.x + math.cos(ang) * radius, center.y + math.sin(ang) * radius)
 
         elif map_type == MAP_DIAMOND:
             # |x| + |y| = R * 0.8
             limit = radius * 0.8
-            side = random.randint(0, 3) # 4 quadrants
-            t = random.random()
+            side = rng.randint(0, 3) # 4 quadrants
+            t = rng.random()
             x = t * limit
             y = limit - x
             if side == 1: x = -x
@@ -196,13 +213,13 @@ def random_spawn_map_edge(center: Vec2, radius: float, map_type: str = "circle")
 
         elif map_type == MAP_CROSS:
             # Spawn at one of the 4 ends
-            arm = random.randint(0, 3)
+            arm = rng.randint(0, 3)
             w = radius * 0.35
             r = radius
-            if arm == 0: return Vec2(random.uniform(-w, w), -r) # Top
-            if arm == 1: return Vec2(random.uniform(-w, w), r)  # Bottom
-            if arm == 2: return Vec2(-r, random.uniform(-w, w)) # Left
-            if arm == 3: return Vec2(r, random.uniform(-w, w))  # Right
+            if arm == 0: return Vec2(rng.uniform(-w, w), -r) # Top
+            if arm == 1: return Vec2(rng.uniform(-w, w), r)  # Bottom
+            if arm == 2: return Vec2(-r, rng.uniform(-w, w)) # Left
+            if arm == 3: return Vec2(r, rng.uniform(-w, w))  # Right
         
         return center # Fallback
 
@@ -210,6 +227,13 @@ def random_spawn_map_edge(center: Vec2, radius: float, map_type: str = "circle")
 def dist(a: Vec2, b: Vec2) -> float:
     """Calculate distance between two positions."""
     return (a - b).length()
+
+
+def dist_sq(a: Vec2, b: Vec2) -> float:
+    """Squared distance between two positions."""
+    dx = a.x - b.x
+    dy = a.y - b.y
+    return dx * dx + dy * dy
 
 
 def point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> float:
@@ -243,31 +267,8 @@ def point_segment_distance_sq(p: Vec2, a: Vec2, b: Vec2) -> float:
     return dx * dx + dy * dy
 
 
-def resolve_circle_obstacles(pos: Vec2, radius: float, obstacles, iterations: int = 4) -> Vec2:
-    """Push a circle out of overlapping circular obstacles.
-
-    `obstacles` is expected to have `pos` and `radius` attributes.
-    """
-    p = Vec2(pos.x, pos.y)
-    for _ in range(max(1, iterations)):
-        moved = False
-        for o in obstacles:
-            op = o.pos
-            r = radius + float(o.radius)
-            d = p - op
-            l = d.length()
-            if l >= r:
-                continue
-            if l <= 1e-6:
-                # Nudge in a stable direction.
-                d = Vec2(1.0, 0.0)
-                l = 1.0
-            push = (r - l) / l
-            p = Vec2(p.x + d.x * push, p.y + d.y * push)
-            moved = True
-        if not moved:
-            break
-    return p
+# NOTE: resolve_circle_obstacles has moved to physics.py to avoid duplicate implementations.
+# Import it from physics when needed.
 
 
 def enemy_behavior_name(enemy) -> str:

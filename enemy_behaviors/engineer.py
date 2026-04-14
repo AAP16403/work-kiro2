@@ -1,12 +1,9 @@
 """Engineer behavior for enemies."""
 from enemy_behaviors.base import Behavior
-from utils import Vec2
+from utils import Vec2, perp
 from hazards import Trap
 import random
 import config
-
-def _perp(v: Vec2) -> Vec2:
-    return Vec2(-v.y, v.x)
 
 def _append_trap_capped(state, trap: Trap) -> bool:
     """Append trap only if construction cap has room."""
@@ -21,7 +18,7 @@ def _append_trap_capped(state, trap: Trap) -> bool:
 class Engineer(Behavior):
     """An engineer behavior."""
 
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
         dvec = player_pos - enemy.pos
         d = dvec.length()
@@ -34,7 +31,7 @@ class Engineer(Behavior):
         elif d < 180:
             enemy.pos = enemy.pos - dir_to * enemy.speed * dt * 0.95
         else:
-            strafe = _perp(dir_to) * (1.0 if (id(enemy) % 2) else -1.0)
+            strafe = perp(dir_to) * (1.0 if (id(enemy) % 2) else -1.0)
             move = (strafe * 0.8 + sep + dir_to * 0.1).normalized()
             enemy.vel = move * (enemy.speed * 0.85)
             enemy.pos = enemy.pos + enemy.vel * dt

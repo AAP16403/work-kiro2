@@ -1,16 +1,13 @@
 """Chase behavior for enemies."""
 from enemy_behaviors.base import Behavior
-from utils import Vec2
+from utils import Vec2, perp
 import math
 import random
-
-def _perp(v: Vec2) -> Vec2:
-    return Vec2(-v.y, v.x)
 
 class Chase(Behavior):
     """A simple chase behavior."""
 
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
         if "lunge_cd" not in enemy.ai:
             enemy.ai["lunge_cd"] = random.uniform(0.4, 1.2)
@@ -24,8 +21,8 @@ class Chase(Behavior):
         predicted_player_pos = player_pos + player_vel * look_ahead_time
 
         dir_to = (predicted_player_pos - enemy.pos).normalized()
-        orbit = _perp(dir_to) * enemy.ai["orbit_sign"]
-        zig = _perp(dir_to) * (0.18 * math.sin(enemy.t * 2.6 + enemy.seed))
+        orbit = perp(dir_to) * enemy.ai["orbit_sign"]
+        zig = perp(dir_to) * (0.18 * math.sin(enemy.t * 2.6 + enemy.seed))
         dodge = self._dodge_player_projectiles(enemy, getattr(state, "projectiles", []))
         sep = self._separation(enemy, state.enemies, radius=44.0, weight=1.1)
 
@@ -92,7 +89,7 @@ class Chase(Behavior):
             toward = rel.dot(v.normalized())
             if toward >= 0.0:
                 continue
-            evade = _perp(v.normalized())
+            evade = perp(v.normalized())
             side = 1.0 if rel.dot(evade) >= 0.0 else -1.0
             weight = 1.0 - (math.sqrt(d2) / danger_radius)
             steer += evade * (side * weight)

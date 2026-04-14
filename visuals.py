@@ -622,42 +622,42 @@ class Visuals:
         bob = math.sin(enemy.t * 6.0) * 1.5
 
         if behavior.startswith("boss_"):
-            objs = h.objs
-            sh = objs[0]
+            sh = h.objs[0]
             sh.x, sh.y = sx, sy - 26
-            # common: glow, ring, crown, body
-            if len(objs) >= 5:
-                glow, ring, crown, body = objs[1], objs[2], objs[3], objs[4]
-                glow.x, glow.y = sx, sy + bob
-                ring.x, ring.y = sx, sy + bob
-                crown.x, crown.y = sx, sy + bob
-                body.x, body.y = sx, sy + bob
-                crown.radius = 24 + 2.0 * (0.5 + 0.5 * math.sin(enemy.t * 4.0))
 
             if behavior == "boss_thunder":
-                sig = objs[5]
+                sh, glow, ring, crown, body, sig = h.objs
                 sig.x, sig.y = sx - 10, sy + 20 + bob
                 sig.x2, sig.y2 = sx + 10, sy + 10 + bob
             elif behavior == "boss_laser":
-                eye, iris = objs[5], objs[6]
+                sh, glow, ring, crown, body, eye, iris = h.objs
                 eye.x, eye.y = sx + 6, sy + 8 + bob
                 iris.x, iris.y = sx + 6 + 2.0 * math.sin(enemy.t * 9.0), sy + 8 + bob
             elif behavior == "boss_trapmaster":
-                gear = objs[5]
+                sh, glow, ring, crown, body, gear = h.objs
                 gear.x, gear.y = sx, sy + bob
                 gear.radius = 26 + 1.5 * math.sin(enemy.t * 3.2)
             elif behavior == "boss_swarmqueen":
-                orb1, orb2, orb3 = objs[5], objs[6], objs[7]
+                sh, glow, ring, crown, body, orb1, orb2, orb3 = h.objs
                 r = 20
                 orb1.x, orb1.y = sx + math.cos(enemy.t * 2.2) * r, sy + bob + math.sin(enemy.t * 2.2) * r
                 orb2.x, orb2.y = sx + math.cos(enemy.t * 2.2 + 2.1) * r, sy + bob + math.sin(enemy.t * 2.2 + 2.1) * r
                 orb3.x, orb3.y = sx + math.cos(enemy.t * 2.2 + 4.2) * r, sy + bob + math.sin(enemy.t * 2.2 + 4.2) * r
             elif behavior == "boss_brute":
-                horn, scar = objs[5], objs[6]
+                sh, glow, ring, crown, body, horn, scar = h.objs
                 horn.x, horn.y = sx, sy + bob + 26
                 horn.x2, horn.y2 = sx + 18, sy + bob + 16
                 horn.x3, horn.y3 = sx - 18, sy + bob + 16
                 scar.x, scar.y, scar.x2, scar.y2 = sx - 10, sy + bob + 2, sx + 10, sy + bob - 6
+            else:
+                sh, glow, ring, crown, body = h.objs
+
+            glow.x, glow.y = sx, sy + bob
+            ring.x, ring.y = sx, sy + bob
+            crown.x, crown.y = sx, sy + bob
+            body.x, body.y = sx, sy + bob
+            crown.radius = 24 + 2.0 * (0.5 + 0.5 * math.sin(enemy.t * 4.0))
+
             self._set_depth(h, sy)
             return
 
@@ -1249,4 +1249,3 @@ class Visuals:
         h = self._thunder_handles.pop(id(th), None)
         if h:
             h.delete()
-

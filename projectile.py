@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import math
+import random
 from typing import TYPE_CHECKING
 
 from utils import Vec2
@@ -38,18 +39,24 @@ def spawn_projectiles(
     aim_direction: Vec2,
     weapon: "Weapon",
     current_time: float,
-    base_damage: int
+    base_damage: int,
+    recoil_deg: float = 0.0,
+    rng: random.Random | None = None,
 ) -> list[Projectile]:
     """Spawn projectiles based on weapon type."""
     projectiles = []
+    rng = rng or random
     
     # Weapon damage = weapon base damage + player damage bonus (50%)
     final_damage = weapon.damage + int(base_damage * 0.5)
+
+    recoil = float(recoil_deg) if recoil_deg and recoil_deg > 0 else 0.0
     
     if weapon.projectile_type == "bullet":
         for i in range(weapon.projectile_count):
             angle_offset = (i - weapon.projectile_count / 2 + 0.5) * weapon.spread_angle
-            d = _rotate_dir(aim_direction, angle_offset)
+            jitter = rng.uniform(-recoil, recoil) if recoil else 0.0
+            d = _rotate_dir(aim_direction, angle_offset + jitter)
             vel = d * weapon.projectile_speed
             projectiles.append(Projectile(
                 muzzle, vel, final_damage,
@@ -59,7 +66,8 @@ def spawn_projectiles(
     elif weapon.projectile_type == "spread":
         for i in range(weapon.projectile_count):
             angle_offset = (i - weapon.projectile_count / 2 + 0.5) * weapon.spread_angle
-            d = _rotate_dir(aim_direction, angle_offset)
+            jitter = rng.uniform(-recoil, recoil) if recoil else 0.0
+            d = _rotate_dir(aim_direction, angle_offset + jitter)
             vel = d * weapon.projectile_speed
             projectiles.append(Projectile(
                 muzzle, vel, final_damage,
@@ -67,15 +75,28 @@ def spawn_projectiles(
             ))
     
     elif weapon.projectile_type == "missile":
-        vel = aim_direction * weapon.projectile_speed
+        jitter = rng.uniform(-recoil, recoil) if recoil else 0.0
+        d = _rotate_dir(aim_direction, jitter) if jitter else aim_direction
+        vel = d * weapon.projectile_speed
         muzzle_extended = muzzle + aim_direction * 4.0
         projectiles.append(Projectile(muzzle_extended, vel, final_damage, ttl=3.0, owner="player", projectile_type="missile"))
     
     elif weapon.projectile_type == "plasma":
         for i in range(weapon.projectile_count):
             angle_offset = (i - weapon.projectile_count / 2 + 0.5) * weapon.spread_angle
-            d = _rotate_dir(aim_direction, angle_offset)
+            jitter = rng.uniform(-recoil, recoil) if recoil else 0.0
+            d = _rotate_dir(aim_direction, angle_offset + jitter)
             vel = d * weapon.projectile_speed
             projectiles.append(Projectile(muzzle, vel, final_damage, ttl=2.5, owner="player", projectile_type="plasma"))
     
+    elif weapon.projectile_type == "laser":
+        # Fast moving visual beam
+        vel = aim_direction * 2000.0
+        projectiles.append(Projectile(
+            muzzle, vel, final_damage,
+            ttl=0.05, owner="player", projectile_type="laser"
+        ))
+    
+        return projectiles
+
     return projectiles

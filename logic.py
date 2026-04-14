@@ -58,6 +58,27 @@ class BalanceLogic:
     pickup_pull_base_speed: float = 220.0
     pickup_pull_nearby_gain: float = 2.0
 
+    # Wave / spawn settings
+    wave_cooldown: float = 2.0
+    max_enemies: int = 12
+    max_active_constructions: int = 14
+
+    # Ultra ability (special powerup -> right click)
+    ultra_max_charges: int = 2
+    ultra_cooldown: float = 10.0
+    ultra_damage_base: int = 55
+    ultra_damage_mult: float = 2.7
+    ultra_beam_thickness: float = 16.0
+    ultra_beam_ttl: float = 0.12
+    ultra_beam_color: tuple[int, int, int] = (255, 230, 170)
+    ultra_spawn_min_wave: int = 4
+    ultra_guarantee_wave_gap: int = 4
+    ultra_wave_spawn_base: float = 0.03
+    ultra_wave_spawn_per_wave: float = 0.004
+    ultra_wave_spawn_max: float = 0.2
+    ultra_kill_base_chance: float = 0.015
+    ultra_kill_pity_threshold: int = 30
+
     # Dash
     dash_cooldown: float = 1.5
 

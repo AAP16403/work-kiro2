@@ -44,6 +44,20 @@ class State:
         pass
 
 
+from enum import Enum
+
+
+def _normalize_state_name(state_name) -> str:
+    """Normalize the given state identifier into a string key."""
+    if isinstance(state_name, Enum):
+        return state_name.value
+    if isinstance(state_name, type) and issubclass(state_name, State):
+        return state_name.__name__
+    if isinstance(state_name, State):
+        return state_name.__class__.__name__
+    return str(state_name)
+
+
 class StateMachine:
     """A simple finite state machine."""
     def __init__(self, initial_state: State):
@@ -51,14 +65,15 @@ class StateMachine:
         self._states = {}
         if initial_state:
             self.add_state(initial_state)
-            self.set_state(initial_state.__class__.__name__)
+            self.set_state(initial_state)
 
     def add_state(self, state: State):
         """Adds a state to the machine."""
-        self._states[state.__class__.__name__] = state
+        self._states[_normalize_state_name(state)] = state
 
-    def set_state(self, state_name: str):
+    def set_state(self, state_name):
         """Transitions to a new state."""
+        state_name = _normalize_state_name(state_name)
         if self.current_state:
             self.current_state.exit()
         

@@ -5,6 +5,6 @@ class Behavior(ABC):
     """Abstract base class for enemy behaviors."""
 
     @abstractmethod
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
         pass

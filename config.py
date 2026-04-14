@@ -1,4 +1,4 @@
-﻿# Game Configuration Constants
+﻿ # Game Configuration Constants
 
 # Screen dimensions
 SCREEN_W = 980
@@ -25,8 +25,12 @@ PLAYER_SPEED = 175.0
 PLAYER_HP = 100
 PLAYER_DAMAGE = 10
 PLAYER_FIRE_RATE = 0.28
+FIRE_RATE_MIN = 0.08
+FIRE_RATE_RATIO_MIN = 0.65
+FIRE_RATE_RATIO_MAX = 1.65
+FIRE_RATE_CURVE = 0.85
 
-# Wave settings
+# Gameplay tuning
 WAVE_COOLDOWN = 2.0
 MAX_ENEMIES = 12  # Maximum concurrent enemies in a wave
 MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter

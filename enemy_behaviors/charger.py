@@ -14,7 +14,7 @@ class Charger(Behavior):
         self.cooldown_time = cooldown_time
         self.reposition_dist = reposition_dist
 
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
 
         # -- Initialize AI state --

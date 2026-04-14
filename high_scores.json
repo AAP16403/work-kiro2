@@ -1,6 +1,13 @@
 {
   "normal": [
     {
+      "score": 136235,
+      "wave": 19,
+      "kills": 165,
+      "best_combo": 3.75,
+      "date": "2026-04-14 16:10"
+    },
+    {
       "score": 98829,
       "wave": 15,
       "kills": 127,
@@ -27,13 +34,6 @@
       "kills": 33,
       "best_combo": 3.18,
       "date": "2026-02-18 21:23"
-    },
-    {
-      "score": 9697,
-      "wave": 5,
-      "kills": 28,
-      "best_combo": 2.0,
-      "date": "2026-02-18 18:46"
     }
   ],
   "hard": [

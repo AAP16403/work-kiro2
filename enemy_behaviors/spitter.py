@@ -1,12 +1,9 @@
 """Spitter behavior for enemies."""
 from enemy_behaviors.base import Behavior
-from utils import Vec2
+from utils import Vec2, perp
 from projectile import Projectile
 import math
 import random
-
-def _perp(v: Vec2) -> Vec2:
-    return Vec2(-v.y, v.x)
 
 def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed: float, mult: float = 0.75) -> Vec2:
     d = (target_pos - shooter_pos).length()
@@ -17,7 +14,7 @@ def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed:
 class Spitter(Behavior):
     """A spitter behavior."""
 
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
         if "strafe_sign" not in enemy.ai:
             enemy.ai["strafe_sign"] = 1.0 if (id(enemy) % 2) else -1.0
@@ -41,7 +38,7 @@ class Spitter(Behavior):
             enemy.vel = move * (enemy.speed * 0.95)
             enemy.pos = enemy.pos + enemy.vel * dt
         else:
-            strafe = _perp(dir_to) * sign
+            strafe = perp(dir_to) * sign
             move = (strafe * 0.9 + sep * 0.8 + dir_to * 0.1 + dodge).normalized()
             enemy.vel = move * (enemy.speed * 0.95)
             enemy.pos = enemy.pos + enemy.vel * dt
@@ -104,7 +101,7 @@ class Spitter(Behavior):
             toward = rel.dot(vel.normalized())
             if toward >= 0.0:
                 continue
-            evade = _perp(vel.normalized())
+            evade = perp(vel.normalized())
             side = 1.0 if rel.dot(evade) >= 0 else -1.0
             steer += evade * side * (1.0 - (math.sqrt(d2) / danger_radius))
             count += 1

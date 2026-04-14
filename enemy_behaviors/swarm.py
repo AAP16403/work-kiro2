@@ -16,7 +16,7 @@ class Swarm(Behavior):
         self.align_weight = align_weight
         self.cohesion_weight = cohesion_weight
 
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         allies = self._get_swarm_allies(getattr(state, "enemies", []))
         if not allies:
             return

@@ -27,13 +27,13 @@ def _difficulty_layout_mult(difficulty: str) -> float:
     return 1.0
 
 
-def generate_obstacles(seed: int, segment: int, room_radius: float, difficulty: str = "normal") -> List[Obstacle]:
+def generate_obstacles(seed: int, segment: int, room_radius: float, difficulty: str = "normal") -> list[Obstacle]:
     """Generate a new set of obstacles for the given segment (group of waves)."""
     rng = random.Random(int(seed) + int(segment) * 1337)
     r = float(room_radius)
     mult = _difficulty_layout_mult(difficulty)
 
-    obstacles: List[Obstacle] = []
+    obstacles: list[Obstacle] = []
 
     # Keep center and edges playable.
     center_keepout = max(70.0, r * 0.18)
@@ -147,4 +147,3 @@ def generate_obstacles(seed: int, segment: int, room_radius: float, difficulty: 
         place(p, pr, kind)
 
     return obstacles
-

@@ -22,6 +22,8 @@ class Player:
     damage: int = PLAYER_DAMAGE
     fire_rate: float = PLAYER_FIRE_RATE
     last_shot: float = 0.0
+    next_shot_time: float = 0.0
+    recoil: float = 0.0
     laser_until: float = 0.0
     vortex_until: float = 0.0
     vortex_radius: float = 70.0

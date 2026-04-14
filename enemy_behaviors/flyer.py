@@ -1,10 +1,7 @@
 """Flyer behavior for enemies."""
 from enemy_behaviors.base import Behavior
-from utils import Vec2
+from utils import Vec2, perp
 import random
-
-def _perp(v: Vec2) -> Vec2:
-    return Vec2(-v.y, v.x)
 
 class Flyer(Behavior):
     """
@@ -25,7 +22,7 @@ class Flyer(Behavior):
         self.dash_speed_mult = dash_speed_mult
         self.circling_dist = circling_dist
 
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
         
         # -- Initialize AI state if it's not there --
@@ -61,7 +58,7 @@ class Flyer(Behavior):
                 dir_to_circle_pos = -dir_to_player # Move away from player
 
             # Circling motion (strafe)
-            strafe_dir = _perp(dir_to_player)
+            strafe_dir = perp(dir_to_player)
             
             # Combine movement vectors
             move_dir = (dir_to_circle_pos * 0.6 + strafe_dir * 0.4 + sep * 0.5).normalized()

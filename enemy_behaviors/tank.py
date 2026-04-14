@@ -14,7 +14,7 @@ def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed:
 class Tank(Behavior):
     """A tank behavior."""
 
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
         if "brace_t" not in enemy.ai:
             enemy.ai["brace_t"] = random.uniform(0.0, 0.9)

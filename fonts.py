@@ -31,4 +31,6 @@ def register_ui_fonts() -> None:
         path = resource_path("assets", "fonts", filename)
         if os.path.exists(path):
             pyglet.font.add_file(path)
+        else:
+            print(f"Warning: Font file missing: {path}")
     _loaded = True

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from collections.abc import Callable
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 import math
 import random
 import pyglet
@@ -992,7 +992,6 @@ class SettingsMenu:
             self._selected_size_highlight.x = selected_size.x - 2
             self._selected_size_highlight.y = selected_size.y - 2
             self._selected_size_highlight.width = selected_size.width + 4
-            self._selected_size_highlight.width = selected_size.width + 4
             self._selected_size_highlight.height = selected_size.height + 4
         
         # Map Highlight
@@ -1385,7 +1384,7 @@ class PauseMenu:
         self.overlay = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
         self.overlay.opacity = 172
 
-        self.buttons: List[MenuButton] = [
+        self.buttons: list[MenuButton] = [
             MenuButton(0, 0, 160, 50, "Resume", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)),
             MenuButton(0, 0, 160, 50, "Quit to Menu", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)),
         ]
@@ -1462,7 +1461,7 @@ class GameOverMenu:
         self.overlay = shapes.Rectangle(0, 0, width, height, color=(22, 5, 10), batch=self.batch)
         self.overlay.opacity = 216
 
-        self.buttons: List[MenuButton] = [
+        self.buttons: list[MenuButton] = [
             MenuButton(0, 0, 160, 50, "Try Again", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)),
             MenuButton(0, 0, 160, 50, "Main Menu", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)),
         ]
@@ -1603,4 +1602,3 @@ class GameOverMenu:
         for btn in self.buttons:
             btn.sync()
         self.batch.draw()
-

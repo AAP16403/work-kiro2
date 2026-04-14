@@ -1,12 +1,9 @@
 """Ranged behavior for enemies."""
 from enemy_behaviors.base import Behavior
-from utils import Vec2
+from utils import Vec2, perp
 from projectile import Projectile
 import math
 import random
-
-def _perp(v: Vec2) -> Vec2:
-    return Vec2(-v.y, v.x)
 
 def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed: float, mult: float = 0.75) -> Vec2:
     d = (target_pos - shooter_pos).length()
@@ -22,7 +19,7 @@ class Ranged(Behavior):
         self.desired_max_dist = desired_max_dist
         self.hiding_enabled = hiding_enabled
 
-    def update(self, enemy, player_pos, state, dt, player_vel):
+    def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
         if "burst_left" not in enemy.ai:
             enemy.ai["burst_left"] = 0
@@ -85,7 +82,7 @@ class Ranged(Behavior):
         dvec = player_pos - enemy.pos
         d = dvec.length()
         dir_to = dvec.normalized() if d > 1e-6 else Vec2(1.0, 0.0)
-        strafe = _perp(dir_to) * float(enemy.ai.get("strafe_sign", 1.0))
+        strafe = perp(dir_to) * float(enemy.ai.get("strafe_sign", 1.0))
         wobble = Vec2(math.sin(enemy.t * 1.4 + enemy.seed), math.cos(enemy.t * 1.7 + enemy.seed)) * 0.25
         dodge = self._dodge_player_projectiles(enemy, getattr(state, "projectiles", []))
         relocate_t = float(enemy.ai.get("relocate_t", 0.0))
@@ -168,7 +165,7 @@ class Ranged(Behavior):
             toward = rel.dot(vel.normalized())
             if toward >= 0.0:
                 continue
-            side = _perp(vel.normalized())
+            side = perp(vel.normalized())
             side_sign = 1.0 if rel.dot(side) >= 0 else -1.0
             steer += side * side_sign * (1.0 - (math.sqrt(d2) / danger_radius))
             count += 1

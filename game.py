@@ -3,7 +3,6 @@
 # Install: py -m pip install pyglet
 
 import math
-import random
 
 import pyglet
 from pyglet import shapes
@@ -11,7 +10,7 @@ from pyglet import shapes
 pyglet.options["shadow_window"] = False
 
 import config
-from config import SCREEN_W, SCREEN_H, FPS, WAVE_COOLDOWN, MAP_CIRCLE, ENEMY_COLORS
+from config import SCREEN_W, SCREEN_H, FPS, MAP_CIRCLE, ENEMY_COLORS
 
 from map import Room
 from level import GameState as GameStateData, get_difficulty_mods, spawn_loot_on_enemy_death
@@ -187,12 +186,7 @@ class Game(pyglet.window.Window):
             if not isinstance(frame, dict):
                 continue
             for event_name, handler in list(frame.items()):
-                is_pyglet_weakmethod = isinstance(handler, WeakMethod)
-                is_weakmethod_like = (
-                    handler.__class__.__name__ == "WeakMethod"
-                    and callable(getattr(handler, "__call__", None))
-                )
-                if (is_pyglet_weakmethod or is_weakmethod_like) and handler() is None:
+                if isinstance(handler, WeakMethod) and handler() is None:
                     del frame[event_name]
 
     def dispatch_event(self, *args):
@@ -212,6 +206,9 @@ class Game(pyglet.window.Window):
 
         difficulty = str(self.settings.get("difficulty", "normal")).lower()
         self.state = GameStateData(difficulty=difficulty, map_type=self.settings.get("map_type", MAP_CIRCLE))
+        # Deterministic RNG for this run (seed stored on state for reproducibility).
+        self.state.init_rng()
+
         if difficulty == "easy":
             self.state.max_enemies = 10
             self._incoming_damage_mult = 0.85
@@ -222,7 +219,7 @@ class Game(pyglet.window.Window):
             self.state.max_enemies = 12
             self._incoming_damage_mult = 1.0
         if config.ENABLE_OBSTACLES:
-            self.state.layout_seed = random.randint(0, 1_000_000_000)
+            self.state.layout_seed = self.state.rng.randint(0, 1_000_000_000)
             self.state.layout_segment = 0
             self.state.obstacles = generate_obstacles(
                 self.state.layout_seed, self.state.layout_segment, config.ROOM_RADIUS, difficulty=self.state.difficulty

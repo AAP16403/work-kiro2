@@ -181,8 +181,8 @@ def roll_boss_rewards(
     if len(perm_candidates) < 3:
         perm_candidates = list(PERM_REWARD_POOL)
 
-    temp_opts = random.sample(temp_candidates, k=3)
-    perm_opts = random.sample(perm_candidates, k=3)
+    temp_opts = random.sample(temp_candidates, k=min(3, len(temp_candidates)))
+    perm_opts = random.sample(perm_candidates, k=min(3, len(perm_candidates)))
     return temp_opts, perm_opts
 
 

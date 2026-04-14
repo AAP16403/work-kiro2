@@ -2,20 +2,22 @@
 
 import random
 import math
+from enum import Enum
 import pyglet
 
-from config import WAVE_COOLDOWN, ENEMY_COLORS, POWERUP_COLORS
+from config import ENEMY_COLORS, POWERUP_COLORS
 import config
 from utils import (
     Vec2,
     clamp_to_map,
     iso_to_world,
     dist,
+    dist_sq,
     point_segment_distance,
     point_segment_distance_sq,
-    resolve_circle_obstacles,
     enemy_behavior_name,
 )
+from physics import resolve_circle_obstacles
 from level import spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death, get_difficulty_mods
 from enemy import update_enemy
 from powerup import apply_powerup
@@ -26,9 +28,20 @@ from hazards import LaserBeam
 from player import perform_dash, recharge_dash, format_dash_hud
 from rpg import format_temp_hud, format_perm_hud
 
+
+class GameStateName(str, Enum):
+    MENU = "MenuState"
+    SETTINGS = "SettingsState"
+    GUIDE = "GuideState"
+    PLAYING = "PlayingState"
+    PAUSED = "PausedState"
+    BOSS_REWARD = "BossRewardState"
+    GAME_OVER = "GameOverState"
+
+
 def _draw_playing_scene(game) -> None:
-    if "PlayingState" in game.fsm._states:
-        game.fsm._states["PlayingState"].draw()
+    if GameStateName.PLAYING.value in game.fsm._states:
+        game.fsm._states[GameStateName.PLAYING.value].draw()
 
 class MenuState(State):
     def enter(self):
@@ -38,11 +51,11 @@ class MenuState(State):
         action = self.game.main_menu.on_mouse_press(x, y, button)
         if action == "start_game":
             self.game._init_game()
-            self.game.fsm.set_state("PlayingState")
+            self.game.fsm.set_state(GameStateName.PLAYING)
         elif action == "guide":
-            self.game.fsm.set_state("GuideState")
+            self.game.fsm.set_state(GameStateName.GUIDE)
         elif action == "settings":
-            self.game.fsm.set_state("SettingsState")
+            self.game.fsm.set_state(GameStateName.SETTINGS)
         elif action == "quit":
             self.game._quit_game()
 
@@ -60,7 +73,7 @@ class SettingsState(State):
     def on_mouse_press(self, x, y, button, modifiers):
         action = self.game.settings_menu.on_mouse_press(x, y, button)
         if action == "back":
-            self.game.fsm.set_state("MenuState")
+            self.game.fsm.set_state(GameStateName.MENU)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
         self.game.settings_menu.on_mouse_drag(x, y, dx, dy)
@@ -73,7 +86,7 @@ class SettingsState(State):
 
     def on_key_press(self, symbol, modifiers):
         if symbol == pyglet.window.key.ESCAPE:
-            self.game.fsm.set_state("MenuState")
+            self.game.fsm.set_state(GameStateName.MENU)
 
     def update(self, dt: float):
         self.game.settings_menu.update(dt)
@@ -89,14 +102,14 @@ class GuideState(State):
     def on_mouse_press(self, x, y, button, modifiers):
         action = self.game.guide_menu.on_mouse_press(x, y, button)
         if action == "back":
-            self.game.fsm.set_state("MenuState")
+            self.game.fsm.set_state(GameStateName.MENU)
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.game.guide_menu.on_mouse_motion(x, y)
 
     def on_key_press(self, symbol, modifiers):
         if symbol == pyglet.window.key.ESCAPE:
-            self.game.fsm.set_state("MenuState")
+            self.game.fsm.set_state(GameStateName.MENU)
         else:
             self.game.guide_menu.on_key_press(symbol)
 
@@ -115,7 +128,7 @@ class PlayingState(State):
 
     def on_key_press(self, symbol, modifiers):
         if symbol == pyglet.window.key.ESCAPE:
-            self.game.fsm.set_state("PausedState")
+            self.game.fsm.set_state(GameStateName.PAUSED)
         elif symbol == pyglet.window.key.Q:
             self.game._use_ultra()
         elif symbol == pyglet.window.key.SPACE:
@@ -164,10 +177,11 @@ class PlayingState(State):
 
     def _explode_enemy_bomb(self, game, s, p) -> None:
         blast_r = game.balance.bomb_blast_radius
+        blast_r2 = float(blast_r) * float(blast_r)
         blast_dmg = game.balance.bomb_blast_damage(int(getattr(p, "damage", 0)))
         if game.particle_system:
             game.particle_system.add_death_explosion(p.pos, (255, 145, 90), "bomber")
-        if dist(p.pos, game.player.pos) <= blast_r:
+        if dist_sq(p.pos, game.player.pos) <= blast_r2:
             game._damage_player(blast_dmg)
             s.shake = max(s.shake, 12.0)
 
@@ -198,14 +212,15 @@ class PlayingState(State):
         if game.player.invincibility_timer > 0:
             game.player.invincibility_timer -= dt
 
-        if not s.wave_active and (s.time - s.last_wave_clear) >= WAVE_COOLDOWN:
+        if not s.wave_active and (s.time - s.last_wave_clear) >= game.balance.wave_cooldown:
             spawn_wave(s, Vec2(0.0, 0.0))
 
         if s.time < game.player.vortex_until:
             game.particle_system.add_vortex_swirl(game.player.pos, s.time, game.player.vortex_radius)
+            vortex_r2 = float(game.player.vortex_radius) * float(game.player.vortex_radius)
             dps = game.player.vortex_dps
             for e in list(s.enemies):
-                if dist(e.pos, game.player.pos) <= game.player.vortex_radius:
+                if dist_sq(e.pos, game.player.pos) <= vortex_r2:
                     acc = getattr(e, "_vortex_acc", 0.0) + dps * dt
                     dmg = int(acc)
                     e._vortex_acc = acc - dmg
@@ -223,16 +238,19 @@ class PlayingState(State):
                 s.traps.remove(tr)
                 game.visuals.drop_trap(tr)
                 continue
-            if tr.damage > 0 and tr.t >= tr.armed_delay and dist(tr.pos, game.player.pos) <= tr.radius + player_radius:
-                game._damage_player(tr.damage)
-                s.shake = max(s.shake, 10.0)
-                s.traps.remove(tr)
-                game.visuals.drop_trap(tr)
+            if tr.damage > 0 and tr.t >= tr.armed_delay:
+                hit_r = float(tr.radius) + float(player_radius)
+                if dist_sq(tr.pos, game.player.pos) <= hit_r * hit_r:
+                    game._damage_player(tr.damage)
+                    s.shake = max(s.shake, 10.0)
+                    s.traps.remove(tr)
+                    game.visuals.drop_trap(tr)
 
         for th in list(getattr(s, "thunders", [])):
             th.t += dt
             if th.t >= th.warn and not th.hit_done:
-                if point_segment_distance(game.player.pos, th.start, th.end) <= th.thickness * 0.6 + player_radius * 0.35:
+                hit_r = th.thickness * 0.6 + player_radius * 0.35
+                if point_segment_distance_sq(game.player.pos, th.start, th.end) <= hit_r * hit_r:
                     th.hit_done = True
                     game._damage_player(th.damage)
                     s.shake = max(s.shake, 14.0)
@@ -269,8 +287,17 @@ class PlayingState(State):
         else:
             player_vel = Vec2(0.0, 0.0)
 
-        weapon_cd = get_effective_fire_rate(game.player.current_weapon, game._effective_player_fire_rate())
-        if game.auto_shoot and (s.time - game.player.last_shot) >= weapon_cd:
+        weapon = game.player.current_weapon
+        if weapon and game.player.recoil > 0:
+            game.player.recoil = max(0.0, game.player.recoil - float(weapon.recoil_recover) * dt)
+
+        weapon_cd = get_effective_fire_rate(weapon, game._effective_player_fire_rate())
+        if weapon and weapon.cadence_jitter:
+            jitter = s.rng.uniform(1.0 - weapon.cadence_jitter, 1.0 + weapon.cadence_jitter)
+            weapon_cd *= jitter
+        weapon_cd = max(float(getattr(config, "FIRE_RATE_MIN", 0.06)), weapon_cd)
+
+        if game.auto_shoot and s.time >= float(game.player.next_shot_time):
             world_mouse = iso_to_world(game.mouse_xy)
             aim = (world_mouse - game.player.pos).normalized()
             muzzle = game.player.pos + aim * 14.0
@@ -283,18 +310,24 @@ class PlayingState(State):
                 s.lasers.append(beam)
                 game.particle_system.add_laser_beam(muzzle, end, color=beam.color)
                 for e in list(s.enemies):
-                    if point_segment_distance(e.pos, muzzle, end) <= (beam.thickness * 0.5) + game._enemy_radius(e):
+                    hit_r = (beam.thickness * 0.5) + game._enemy_radius(e)
+                    if point_segment_distance_sq(e.pos, muzzle, end) <= hit_r * hit_r:
                         e.hp -= dmg
                         s.shake = max(s.shake, 4.0)
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e, death_particles=False)
             else:
-                weapon = game.player.current_weapon
-                projectiles = spawn_projectiles(muzzle, aim, weapon, s.time, game._effective_player_damage())
+                game.player.recoil = min(float(weapon.recoil_max), float(game.player.recoil) + float(weapon.recoil_kick))
+                projectiles = spawn_projectiles(
+                    muzzle, aim, weapon, s.time, game._effective_player_damage(),
+                    recoil_deg=float(game.player.recoil),
+                    rng=s.rng,
+                )
                 s.projectiles.extend(projectiles)
 
             game.particle_system.add_muzzle_flash(muzzle, aim)
             game.player.last_shot = s.time
+            game.player.next_shot_time = s.time + weapon_cd
 
         for e in list(s.enemies):
             update_enemy(e, game.player.pos, s, dt, game, player_vel=player_vel)
@@ -305,7 +338,8 @@ class PlayingState(State):
             if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
                 e.pos = resolve_circle_obstacles(e.pos, e._radius, s.obstacles)
                 e.pos = clamp_to_map(e.pos, config.ROOM_RADIUS * 0.96, s.map_type)
-            if dist(e.pos, game.player.pos) <= e._radius + player_radius:
+            hit_r = float(e._radius) + float(player_radius)
+            if dist_sq(e.pos, game.player.pos) <= hit_r * hit_r:
                 game._damage_player(game.balance.enemy_contact_damage)
                 self._kill_enemy(game, s, e, death_particles=False)
                 s.shake = 9.0
@@ -366,17 +400,19 @@ class PlayingState(State):
                     self._remove_projectile(game, s, p)
 
         for pu in list(s.powerups):
-            dpu = dist(pu.pos, game.player.pos)
+            dpu2 = dist_sq(pu.pos, game.player.pos)
             kind = getattr(pu, "kind", "")
             magnet_r = game.balance.pickup_magnet_radius(kind, game._pickup_magnet_bonus)
-            if dpu < magnet_r and dpu > 1e-6:
+            magnet_r2 = float(magnet_r) * float(magnet_r)
+            if 1e-12 < dpu2 < magnet_r2:
+                dpu = math.sqrt(dpu2)
                 pull = (game.player.pos - pu.pos).normalized()
                 pull_speed = game.balance.pickup_pull_speed(magnet_r, dpu)
                 pu.pos = pu.pos + pull * pull_speed * dt
-                dpu = dist(pu.pos, game.player.pos)
+                dpu2 = dist_sq(pu.pos, game.player.pos)
 
             pickup_r = game.balance.pickup_radius(kind)
-            if dpu < pickup_r:
+            if dpu2 < float(pickup_r) * float(pickup_r):
                 color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
                 game.particle_system.add_powerup_collection(pu.pos, color)
                 apply_powerup(game.player, pu, s.time)
@@ -397,7 +433,7 @@ class PlayingState(State):
 
             if cleared_wave % 5 == 0:
                 game._roll_boss_rewards()
-                game.fsm.set_state("BossRewardState")
+                game.fsm.set_state(GameStateName.BOSS_REWARD)
             if getattr(game, 'score', None):
                 game.score.on_wave_clear(cleared_wave)
 
@@ -426,7 +462,8 @@ class PlayingState(State):
         for lb in list(getattr(s, "lasers", [])):
             lb.t += dt
             if lb.owner == "enemy" and lb.t >= lb.warn and not lb.hit_done:
-                if point_segment_distance(game.player.pos, lb.start, lb.end) <= lb.thickness * 0.55 + game._player_radius() * 0.35:
+                hit_r = lb.thickness * 0.55 + player_radius * 0.35
+                if point_segment_distance_sq(game.player.pos, lb.start, lb.end) <= hit_r * hit_r:
                     lb.hit_done = True
                     game._damage_player(lb.damage)
                     s.shake = max(s.shake, 10.0)
@@ -436,7 +473,7 @@ class PlayingState(State):
                 game.visuals.drop_laser(lb)
 
         if game.player.hp <= 0:
-            game.fsm.set_state("GameOverState")
+            game.fsm.set_state(GameStateName.GAME_OVER)
 
     def draw(self):
         game = self.game
@@ -446,7 +483,7 @@ class PlayingState(State):
         s = game.state
         shake = Vec2(0.0, 0.0)
         if s.shake > 0:
-            shake = Vec2(random.uniform(-1, 1), random.uniform(-1, 1)) * s.shake
+            shake = Vec2(game.state.rng.uniform(-1, 1), game.state.rng.uniform(-1, 1)) * s.shake
 
         game.visuals.sync_scene(s.time, shake, combat_intensity=float(getattr(game.room, "combat_intensity", 0.0)))
 
@@ -482,8 +519,8 @@ class PlayingState(State):
             game.visuals.ensure_thunder(th)
             game.visuals.sync_thunder(th, shake)
 
-        game.batch.draw()
         game.particle_system.render(shake)
+        game.batch.draw()
 
         # Update HUD
         laser_left = max(0.0, game.player.laser_until - game.state.time)
@@ -522,15 +559,15 @@ class PausedState(State):
 
     def on_key_press(self, symbol, modifiers):
         if symbol == pyglet.window.key.ESCAPE:
-            self.game.fsm.set_state("PlayingState")
+            self.game.fsm.set_state(GameStateName.PLAYING)
 
     def on_mouse_press(self, x, y, button, modifiers):
         action = self.game.pause_menu.on_mouse_press(x, y, button)
         if action == "resume":
-            self.game.fsm.set_state("PlayingState")
+            self.game.fsm.set_state(GameStateName.PLAYING)
         elif action == "quit_to_menu":
             self.game._return_to_menu()
-            self.game.fsm.set_state("MenuState")
+            self.game.fsm.set_state(GameStateName.MENU)
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.game.pause_menu.on_mouse_motion(x, y)
@@ -548,8 +585,8 @@ class BossRewardState(State):
         chosen = self.game.rpg_menu.on_mouse_press(x, y, button)
         if chosen == "done":
             if self.game.state:
-                self.game.state.last_wave_clear = self.game.state.time - float(WAVE_COOLDOWN)
-            self.game.fsm.set_state("PlayingState")
+                self.game.state.last_wave_clear = self.game.state.time - float(self.game.balance.wave_cooldown)
+            self.game.fsm.set_state(GameStateName.PLAYING)
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.game.rpg_menu.on_mouse_motion(x, y)
@@ -576,10 +613,10 @@ class GameOverState(State):
         action = self.game.game_over_menu.on_mouse_press(x, y, button)
         if action == "retry":
             self.game._init_game()
-            self.game.fsm.set_state("PlayingState")
+            self.game.fsm.set_state(GameStateName.PLAYING)
         elif action == "quit_to_menu":
             self.game._return_to_menu()
-            self.game.fsm.set_state("MenuState")
+            self.game.fsm.set_state(GameStateName.MENU)
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.game.game_over_menu.on_mouse_motion(x, y)

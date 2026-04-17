@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plouto Browser Build</title>
+    <meta
+      name="description"
+      content="PLOUTO // Stellar Survival rebuilt for Vercel with the gameplay simulation still running in Python."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main id="shell" data-ready="false">
+      <section class="intro">
+        <p class="eyebrow">Vercel Deployment</p>
+        <h1>PLOUTO, now running in the browser</h1>
+        <p class="lede">
+          This build keeps the combat simulation in Python and runs it client-side through
+          Pyodide, so Vercel only needs to host static files.
+        </p>
+        <div class="tips">
+          <p><span>Move</span> WASD or arrow keys</p>
+          <p><span>Attack</span> Left click toggles auto-fire</p>
+          <p><span>Ultra</span> Right click or Q</p>
+          <p><span>Dash</span> Space</p>
+        </div>
+      </section>
+
+      <section class="stage">
+        <canvas id="game-canvas" aria-label="Plouto browser game"></canvas>
+        <div id="loading-status" class="loading-pill">Loading Python runtime...</div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.29.3/full/pyodide.js"></script>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-﻿"""Visual rendering system."""
+﻿﻿"""Visual rendering system."""
 
 from __future__ import annotations
 
@@ -711,16 +711,16 @@ class Visuals:
                  pulse = 0.8 + 0.3 * math.sin(enemy.t * 18.0)
             
             body.x, body.y = sx, sy + bob
-            body.radius = 15 * pulse
+            body.radius = max(0.1, 15 * pulse)
             
             vein1.x, vein1.y = sx, sy + bob
-            vein1.radius = 14 * pulse
+            vein1.radius = max(0.1, 14 * pulse)
             
             vein2.x, vein2.y = sx, sy + bob
-            vein2.radius = 10 * pulse
+            vein2.radius = max(0.1, 10 * pulse)
 
             core.x, core.y = sx, sy + bob
-            core.radius = 6 * pulse + 2 * math.sin(enemy.t * 12.0)
+            core.radius = max(0.1, 6 * pulse + 2 * math.sin(enemy.t * 12.0))
             
             self._set_depth(h, sy)
             return

@@ -77,3 +77,23 @@ Outputs:
 - `menu.py`: main/settings/pause/game-over menus
 - `kiro2_game.spec`: PyInstaller config
 - `build_all.bat`: full build script
+
+## Vercel Browser Build
+
+The repo now also includes a browser-first deployment target in `vercel_site/`.
+
+- `vercel.json` points Vercel at `vercel_site/` as the deployable output directory
+- `vercel_site/index.html` is the browser entrypoint
+- `vercel_site/app.js` boots Pyodide and loads the Python runtime into the browser
+- `vercel_site/py/browser_game.py` is the web runtime that reuses the Python gameplay logic
+
+### Deploy
+
+1. Import the repo into Vercel.
+2. Keep the root as-is; `vercel.json` already scopes deployment to `vercel_site/`.
+3. Deploy without adding a separate build command.
+
+Notes:
+
+- The original desktop `pyglet` version is still intact.
+- The Vercel build is a static site that runs Python client-side through Pyodide.

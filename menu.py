@@ -1,4 +1,4 @@
-﻿"""Menu system for game configuration and navigation."""
+﻿﻿"""Menu system for game configuration and navigation."""
 
 from dataclasses import dataclass, field
 from collections.abc import Callable
@@ -164,7 +164,8 @@ class MenuSlider:
     
     def get_knob_x(self) -> float:
         """Calculate knob position based on current value."""
-        ratio = (self.current_val - self.min_val) / (self.max_val - self.min_val)
+        rng = self.max_val - self.min_val
+        ratio = (self.current_val - self.min_val) / rng if rng != 0 else 0.0
         return self.x + (ratio * self.width)
     
     def set_value_from_x(self, px: float):

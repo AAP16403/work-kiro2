@@ -71,11 +71,12 @@ class ParticleSystem:
             angle = base_angle + random.uniform(-limit_angle * 0.5, limit_angle * 0.5) if direction else random.uniform(0, limit_angle)
             sp = random.uniform(speed * 0.5, speed * 1.5)
             vel = Vec2(math.cos(angle) * sp, math.sin(angle) * sp)
+            life_val = random.uniform(life * 0.7, life * 1.3)
             p = Particle(
                 pos=Vec2(pos.x, pos.y),
                 vel=vel,
-                life=random.uniform(life * 0.7, life * 1.3),
-                max_life=life,
+                life=life_val,
+                max_life=life_val,
                 color=color,
                 size=random.uniform(size * 0.7, size * 1.3),
                 decay=decay,
@@ -148,7 +149,7 @@ class ParticleSystem:
             if p.life > 0:
                 p.pos = p.pos + p.vel * dt
                 if p.decay:
-                    p.vel = p.vel * (1.0 - 2.0 * dt)
+                    p.vel = p.vel * max(0.0, 1.0 - 2.0 * dt)
                 keep.append(p)
         self.particles = keep
 
@@ -176,9 +177,10 @@ class ParticleSystem:
             sh = self._shapes[i]
             sx, sy = to_iso(p.pos, shake)
             sh.x, sh.y = sx, sy
-            sh.radius = p.size * (p.life / p.max_life)
+            ratio = max(0.0, p.life / p.max_life)
+            sh.radius = max(0.1, p.size * ratio)
             sh.color = p.color
-            sh.opacity = int(255 * (p.life / p.max_life))
+            sh.opacity = max(0, min(255, int(255 * ratio)))
 
 def dist(a: Vec2, b: Vec2) -> float:
     return (a - b).length()

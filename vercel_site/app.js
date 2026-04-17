@@ -16,6 +16,7 @@ const PY_FILES = [
   "physics.py",
   "rpg.py",
   "score.py",
+  "particles.py",
   "enemy_behaviors/__init__.py",
   "enemy_behaviors/base.py",
   "enemy_behaviors/chase.py",
@@ -27,6 +28,12 @@ const PY_FILES = [
   "enemy_behaviors/flyer.py",
   "enemy_behaviors/engineer.py",
   "enemy_behaviors/bomber.py",
+  "enemy_behaviors/bosses/__init__.py",
+  "enemy_behaviors/bosses/brute.py",
+  "enemy_behaviors/bosses/laser.py",
+  "enemy_behaviors/bosses/swarmqueen.py",
+  "enemy_behaviors/bosses/thunder.py",
+  "enemy_behaviors/bosses/trapmaster.py",
 ];
 
 function setStatus(text) {

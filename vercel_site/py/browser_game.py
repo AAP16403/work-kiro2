@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import random
 from typing import Any
 
 from js import document, window
@@ -35,6 +36,7 @@ from logic import BalanceLogic
 from physics import resolve_circle_obstacles
 from player import Player, perform_dash, recharge_dash, format_dash_hud
 from powerup import apply_powerup
+from particles import ParticleSystem
 from projectile import spawn_projectiles
 from rpg import (
     recompute_temp_mods,
@@ -107,10 +109,24 @@ class BrowserGame:
         self.flash = 0.0
         self.impact = 0.0
 
+        # Atmospheric star field (persistent across frames)
+        self._stars: list[dict] = []
+        for _ in range(40):
+            self._stars.append({
+                "x": random.random(),
+                "y": random.random(),
+                "vx": random.uniform(-0.004, 0.004),
+                "vy": random.uniform(-0.003, 0.003),
+                "r": random.uniform(1.0, 2.8),
+                "phase": random.uniform(0, math.tau),
+            })
+
         self.state_name = STATE_MENU
         self.state: GameStateData | None = None
         self.player: Player | None = None
         self.score = ScoreTracker()
+        self.particles = ParticleSystem()
+
         self.menu_buttons: list[UIButton] = []
         self.reward_buttons: list[UIButton] = []
         self.pause_buttons: list[UIButton] = []
@@ -283,7 +299,9 @@ class BrowserGame:
         self._wave_banner_t = max(0.0, self._wave_banner_t - dt)
 
         if self.state_name == STATE_PLAYING and self.state and self.player:
+            self.particles.update(dt)
             self._update_playing(dt)
+
 
     def _input_dir(self) -> Vec2:
         x = 0.0
@@ -403,6 +421,7 @@ class BrowserGame:
         if amount > 0:
             self.player.hp -= amount
             self.score.on_player_hit()
+            self.particles.add_hit_particles(self.player.pos, (255, 100, 100))
             self.flash = max(self.flash, 0.34)
 
     def _use_ultra(self) -> None:
@@ -479,6 +498,8 @@ class BrowserGame:
             self._input_dir(),
             world_mouse,
         ):
+            if self.player.is_dashing:
+                self.particles.add_dash_effect(self.player.pos, self.player.dash_direction)
             self.flash = max(self.flash, 0.2)
 
     def _remove_projectile(self, projectile) -> None:
@@ -492,6 +513,7 @@ class BrowserGame:
         if enemy_obj in self.state.enemies:
             self.state.enemies.remove(enemy_obj)
         spawn_loot_on_enemy_death(self.state, behavior, enemy_obj.pos)
+        self.particles.add_death_explosion(enemy_obj.pos, ENEMY_COLORS.get(behavior, (220, 220, 220)), behavior)
         self.score.on_enemy_kill(behavior)
         self.impact = max(self.impact, 0.32)
 
@@ -606,6 +628,7 @@ class BrowserGame:
         if s.time < self.player.vortex_until:
             vortex_r2 = float(self.player.vortex_radius) ** 2
             dps = float(self.player.vortex_dps)
+            self.particles.add_vortex_swirl(self.player.pos, s.time, float(self.player.vortex_radius))
             for enemy_obj in list(s.enemies):
                 if dist_sq(enemy_obj.pos, self.player.pos) <= vortex_r2:
                     acc = getattr(enemy_obj, "_vortex_acc", 0.0) + dps * dt
@@ -652,8 +675,13 @@ class BrowserGame:
             input_dir = self._input_dir()
             if input_dir.length() > 0:
                 self.player.pos = self.player.pos + input_dir.normalized() * self._effective_player_speed() * dt
+                # Step dust particles
+                if s.rng.random() < 0.3:
+                    self.particles.add_step_dust(self.player.pos, input_dir.normalized())
 
         recharge_dash(self.player, s.time, self.balance, self._dash_cd_difficulty, self._dash_cd_mult)
+        if self.player.is_dashing:
+            self.particles.add_dash_effect(self.player.pos, self.player.dash_direction)
         self.player.pos = clamp_to_map(self.player.pos, config.ROOM_RADIUS * 0.9, s.map_type)
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
             self.player.pos = resolve_circle_obstacles(self.player.pos, player_radius, s.obstacles)
@@ -694,6 +722,7 @@ class BrowserGame:
                             self._kill_enemy(enemy_obj)
             else:
                 self.player.recoil = min(float(weapon.recoil_max), float(self.player.recoil) + float(weapon.recoil_kick))
+                self.particles.add_muzzle_flash(muzzle, aim)
                 s.projectiles.extend(
                     spawn_projectiles(
                         muzzle,
@@ -778,6 +807,7 @@ class BrowserGame:
             pickup_r = self.balance.pickup_radius(getattr(powerup, "kind", ""))
             if dpu2 < float(pickup_r) * float(pickup_r):
                 apply_powerup(self.player, powerup, s.time)
+                self.particles.add_powerup_collection(powerup.pos, POWERUP_COLORS.get(getattr(powerup, 'kind', ''), (220, 220, 220)))
                 s.powerups.remove(powerup)
                 self.flash = max(self.flash, 0.18)
 
@@ -857,28 +887,91 @@ class BrowserGame:
             self._draw_game_over()
 
         if self.flash > 0:
-            ctx.fillStyle = f"rgba(255, 248, 236, {0.08 * self.flash})"
+            flash_alpha = min(0.35, 0.18 * self.flash)
+            # Color tint based on flash intensity (bright = ultra, subtle = pickup)
+            if self.flash > 0.6:
+                ctx.fillStyle = f"rgba(255, 240, 210, {flash_alpha})"
+            elif self.flash > 0.3:
+                ctx.fillStyle = f"rgba(255, 248, 236, {flash_alpha})"
+            else:
+                ctx.fillStyle = f"rgba(240, 245, 255, {flash_alpha * 0.6})"
             ctx.fillRect(0, 0, self.view_w, self.view_h)
 
     def _draw_background(self, combat_intensity: float) -> None:
         ctx = self.ctx
+        ci = max(0.0, min(1.0, combat_intensity))
+        t = self.background_t
+
+        # ── Base gradient ──
         grad = ctx.createLinearGradient(0, 0, 0, self.view_h)
-        grad.addColorStop(0, f"rgb({18 + int(40 * combat_intensity)}, {26 + int(10 * combat_intensity)}, {42 - int(6 * combat_intensity)})")
-        grad.addColorStop(1, f"rgb({6 + int(25 * combat_intensity)}, {12}, {20})")
+        grad.addColorStop(0, f"rgb({18 + int(40 * ci)}, {26 + int(10 * ci)}, {42 - int(6 * ci)})")
+        grad.addColorStop(1, f"rgb({6 + int(25 * ci)}, {12}, {20})")
         ctx.fillStyle = grad
         ctx.fillRect(0, 0, self.view_w, self.view_h)
 
+        # ── Nebula glow orbs ──
+        nebulae = [
+            (0.22, 0.28, 320, (30, 75, 130), 0.25, 0.07),
+            (0.78, 0.68, 240, (160, 70, 120), 0.22, 0.09),
+            (0.52, 0.82, 180, (70, 180, 165), 0.18, 0.11),
+        ]
         ctx.save()
-        ctx.globalAlpha = 0.13
-        ctx.strokeStyle = "rgba(130, 180, 255, 0.3)"
+        for fx, fy, radius, color, amp, freq in nebulae:
+            nx = self.view_w * fx + math.sin(t * freq) * 30.0
+            ny = self.view_h * fy + math.cos(t * (freq + 0.02)) * 24.0
+            pulse = 0.5 + 0.5 * math.sin(t * (0.7 + freq * 3.0))
+            alpha = (0.06 + 0.04 * pulse) * (1.0 + ci * 0.6)
+            rg = ctx.createRadialGradient(nx, ny, 0, nx, ny, radius)
+            rg.addColorStop(0, f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha:.3f})")
+            rg.addColorStop(1, "rgba(0,0,0,0)")
+            ctx.fillStyle = rg
+            ctx.fillRect(nx - radius, ny - radius, radius * 2, radius * 2)
+        ctx.restore()
+
+        # ── Drifting star field ──
+        ctx.save()
+        for star in self._stars:
+            star["x"] += star["vx"] * (0.22 + ci * 0.6)
+            star["y"] += star["vy"] * (0.22 + ci * 0.6)
+            if star["x"] < -0.02: star["x"] = 1.02
+            elif star["x"] > 1.02: star["x"] = -0.02
+            if star["y"] < -0.02: star["y"] = 1.02
+            elif star["y"] > 1.02: star["y"] = -0.02
+            sx = star["x"] * self.view_w
+            sy = star["y"] * self.view_h
+            twinkle = 0.5 + 0.5 * math.sin(t * 1.4 + star["phase"])
+            alpha = 0.08 + 0.22 * twinkle
+            ctx.fillStyle = f"rgba(210, 235, 255, {alpha:.3f})"
+            ctx.beginPath()
+            ctx.arc(sx, sy, star["r"], 0, TAU)
+            ctx.fill()
+        ctx.restore()
+
+        # ── Subtle scan-line grid ──
+        ctx.save()
+        ctx.globalAlpha = 0.1
+        ctx.strokeStyle = "rgba(130, 180, 255, 0.25)"
         ctx.lineWidth = 1
         step = 44
-        drift = (self.background_t * 18.0) % step
+        drift = (t * 18.0) % step
         for x in range(-step, self.view_w + step, step):
             ctx.beginPath()
             ctx.moveTo(x + drift, 0)
             ctx.lineTo(x + drift - self.view_h * 0.22, self.view_h)
             ctx.stroke()
+        ctx.restore()
+
+        # ── Vignette edges ──
+        ctx.save()
+        v_alpha = 0.06 + 0.04 * ci
+        vg = ctx.createRadialGradient(
+            self.view_w * 0.5, self.view_h * 0.5, min(self.view_w, self.view_h) * 0.3,
+            self.view_w * 0.5, self.view_h * 0.5, max(self.view_w, self.view_h) * 0.72,
+        )
+        vg.addColorStop(0, "rgba(0,0,0,0)")
+        vg.addColorStop(1, f"rgba(0,0,0,{v_alpha:.3f})")
+        ctx.fillStyle = vg
+        ctx.fillRect(0, 0, self.view_w, self.view_h)
         ctx.restore()
 
     def _sample_map_points(self, radius: float, map_type: str) -> list[Vec2]:
@@ -961,6 +1054,20 @@ class BrowserGame:
                 sx, sy = to_iso(world, shake)
                 self._draw_glow_circle(sx, sy - 8, 11 + idx, (120 + idx * 18, 180, 255), 0.18)
 
+        # ── Pulsing concentric rings ──
+        center_x, center_y = to_iso(Vec2(0, 0), shake)
+        t = self.background_t
+        for ri in range(3):
+            ring_r = (180 + ri * 42) + 6.0 * math.sin(t * (0.8 + ri * 0.3))
+            ring_alpha = 0.06 + 0.04 * (0.5 + 0.5 * math.sin(t * (1.1 + ri * 0.15)))
+            ring_alpha *= (1.0 + combat_intensity * 0.6)
+            ring_screen_r = ring_r * 0.72  # approximate iso scale
+            ctx.strokeStyle = f"rgba(130, 185, 245, {ring_alpha:.3f})"
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.ellipse(center_x, center_y, ring_screen_r, ring_screen_r * 0.56, 0, 0, TAU)
+            ctx.stroke()
+
         ctx.restore()
 
     def _draw_glow_circle(self, x: float, y: float, radius: float, color: tuple[int, int, int], alpha: float) -> None:
@@ -992,6 +1099,8 @@ class BrowserGame:
         for enemy_obj in enemies_sorted:
             self._draw_enemy(enemy_obj, shake)
         self._draw_player(shake)
+        # ── Render particles on top of all world entities ──
+        self.particles.render(self.ctx, shake, to_iso)
 
     def _draw_obstacle(self, obstacle, shake: Vec2) -> None:
         sx, sy = to_iso(obstacle.pos, shake)
@@ -1030,30 +1139,109 @@ class BrowserGame:
         sx, sy = to_iso(trap.pos, shake)
         ctx = self.ctx
         armed = trap.t >= trap.armed_delay
-        ctx.strokeStyle = "rgba(255, 128, 92, 0.9)" if armed else "rgba(255, 220, 120, 0.55)"
+        kind = getattr(trap, "kind", "spike")
+        tr = float(trap.radius)
+
+        # Slam/womb warn — large expanding AoE circle
+        if kind in ("slam", "slam_warn", "womb_warn", "womb_pulse"):
+            pulse = 0.6 + 0.4 * math.sin(trap.t * 16.0)
+            base_alpha = 0.12 if kind.endswith("warn") else 0.22
+            base_alpha += 0.18 * pulse
+            self._draw_glow_circle(sx, sy - 8, tr, (255, 80, 80), base_alpha)
+            ctx.strokeStyle = f"rgba(255, 255, 255, {0.4 + 0.35 * pulse:.3f})"
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.ellipse(sx, sy - 8, tr, tr * 0.56, 0, 0, TAU)
+            ctx.stroke()
+            return
+
+        # Regular spike trap
+        # Filled base glow
+        base_alpha = 0.25 if armed else 0.1
+        base_color = (220, 120, 60) if armed else (255, 220, 120)
+        self._draw_glow_circle(sx, sy - 8, tr * 0.7, base_color, base_alpha)
+
+        # Inner core
+        core_alpha = 0.7 if armed else 0.35
+        core_r = max(4, tr * 0.25)
+        ctx.fillStyle = f"rgba(255, 220, 180, {core_alpha:.2f})"
+        ctx.beginPath()
+        ctx.arc(sx, sy - 8, core_r, 0, TAU)
+        ctx.fill()
+
+        # Outer ellipse outline
+        ctx.strokeStyle = "rgba(255, 128, 92, 0.85)" if armed else "rgba(255, 220, 120, 0.4)"
         ctx.lineWidth = 2.2
         ctx.beginPath()
-        ctx.ellipse(sx, sy - 8, trap.radius, trap.radius * 0.56, 0, 0, TAU)
+        ctx.ellipse(sx, sy - 8, tr, tr * 0.56, 0, 0, TAU)
         ctx.stroke()
+
+        # Cross-hair spikes (only when armed)
+        if armed:
+            arm_len = tr * 0.75
+            spike_alpha = 0.75 + 0.2 * math.sin(self.background_t * 12.0)
+            ctx.strokeStyle = f"rgba(255, 210, 170, {spike_alpha:.3f})"
+            ctx.lineWidth = 3
+            # Horizontal
+            ctx.beginPath()
+            ctx.moveTo(sx - arm_len, sy - 8 - 2)
+            ctx.lineTo(sx + arm_len, sy - 8 + 2)
+            ctx.stroke()
+            # Vertical
+            ctx.beginPath()
+            ctx.moveTo(sx - 2, sy - 8 - arm_len * 0.56)
+            ctx.lineTo(sx + 2, sy - 8 + arm_len * 0.56)
+            ctx.stroke()
 
     def _draw_beam(self, beam, shake: Vec2) -> None:
         ax, ay = to_iso(beam.start, shake)
         bx, by = to_iso(beam.end, shake)
         ctx = self.ctx
         color = getattr(beam, "color", (255, 120, 255))
-        alpha = 0.75 if getattr(beam, "owner", "player") == "player" else 0.55
-        if getattr(beam, "warn", 0.0) and getattr(beam, "t", 0.0) < beam.warn:
-            alpha = 0.25
-        ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha})"
-        ctx.lineWidth = max(2.0, float(getattr(beam, "thickness", 4.0)) * 0.65)
-        ctx.beginPath()
-        ctx.moveTo(ax, ay)
-        ctx.lineTo(bx, by)
-        ctx.stroke()
+        thickness = max(2.0, float(getattr(beam, "thickness", 4.0)))
+        warn_time = float(getattr(beam, "warn", 0.0))
+        beam_t = float(getattr(beam, "t", 0.0))
+        is_warning = warn_time > 0 and beam_t < warn_time
+
+        if is_warning:
+            # Warning telegraph: thin dashed faint line
+            ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.18)"
+            ctx.lineWidth = max(1.5, thickness * 0.28)
+            ctx.setLineDash([8, 6])
+            ctx.beginPath()
+            ctx.moveTo(ax, ay)
+            ctx.lineTo(bx, by)
+            ctx.stroke()
+            ctx.setLineDash([])
+        else:
+            # Active beam — outer glow layer
+            flicker = 0.7 + 0.3 * math.sin(beam_t * 40.0)
+            outer_alpha = (0.65 if getattr(beam, "owner", "player") == "player" else 0.5) * flicker
+            ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {outer_alpha:.3f})"
+            ctx.lineWidth = thickness * 0.65
+            ctx.beginPath()
+            ctx.moveTo(ax, ay)
+            ctx.lineTo(bx, by)
+            ctx.stroke()
+
+            # Inner white-hot core
+            core_flicker = 0.6 + 0.4 * math.sin(beam_t * 55.0)
+            core_alpha = 0.55 * core_flicker
+            core_w = max(1.5, thickness * 0.22)
+            ctx.strokeStyle = f"rgba(255, 255, 255, {core_alpha:.3f})"
+            ctx.lineWidth = core_w
+            ctx.beginPath()
+            ctx.moveTo(ax, ay)
+            ctx.lineTo(bx, by)
+            ctx.stroke()
 
     def _draw_projectile(self, projectile, shake: Vec2) -> None:
         sx, sy = to_iso(projectile.pos, shake)
         ptype = str(getattr(projectile, "projectile_type", "bullet"))
+        is_enemy = str(getattr(projectile, "owner", "player")) == "enemy"
+        ctx = self.ctx
+        py = sy - 10
+
         palette = {
             "bullet": (255, 242, 196),
             "spread": (255, 200, 108),
@@ -1061,13 +1249,70 @@ class BrowserGame:
             "plasma": (175, 130, 255),
             "bomb": (255, 152, 88),
         }
+        if is_enemy:
+            palette = {
+                "bullet": (255, 110, 110),
+                "spread": (255, 130, 100),
+                "missile": (200, 80, 80),
+                "plasma": (255, 100, 200),
+                "bomb": (255, 152, 88),
+            }
         color = palette.get(ptype, (240, 240, 240))
         radius = max(3.0, self._projectile_radius(projectile) * 0.72)
-        self._draw_glow_circle(sx, sy - 10, radius, color, 0.22)
-        ctx = self.ctx
+
+        vel = getattr(projectile, "vel", None)
+        has_trail = ptype in ("missile", "bomb", "plasma")
+
+        # Trail streak for heavy projectiles
+        if has_trail and vel:
+            speed = math.sqrt(vel.x * vel.x + vel.y * vel.y)
+            if speed > 1e-6:
+                vdx, vdy = vel.x / speed, vel.y / speed
+                trail_len = 8 + min(16.0, speed * 0.03)
+                trail_alpha = 0.32 if is_enemy else 0.42
+                ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {trail_alpha:.2f})"
+                ctx.lineWidth = max(1.5, radius * 0.65)
+                ctx.beginPath()
+                ctx.moveTo(sx, py)
+                ctx.lineTo(sx - vdx * trail_len, py - vdy * trail_len * 0.65)
+                ctx.stroke()
+
+        # Outer glow
+        glow_alpha = 0.18 if ptype in ("bullet", "spread") else 0.28
+        self._draw_glow_circle(sx, py, radius * 1.1, color, glow_alpha)
+
+        # Bomb: dark casing ring + orange core
+        if ptype == "bomb":
+            ctx.fillStyle = f"rgba(120, 70, 45, 0.85)"
+            ctx.beginPath()
+            ctx.arc(sx, py, radius * 1.3, 0, TAU)
+            ctx.fill()
+            ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
+            ctx.beginPath()
+            ctx.arc(sx, py, radius * 0.7, 0, TAU)
+            ctx.fill()
+            return
+
+        # Plasma: pulsing outer ring
+        if ptype == "plasma":
+            pulse = 0.7 + 0.3 * math.sin(self.background_t * 10.0 + projectile.pos.x * 0.1)
+            ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {0.35 * pulse:.3f})"
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.arc(sx, py, radius * 1.6, 0, TAU)
+            ctx.stroke()
+
+        # Main body
         ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
         ctx.beginPath()
-        ctx.arc(sx, sy - 10, radius, 0, TAU)
+        ctx.arc(sx, py, radius, 0, TAU)
+        ctx.fill()
+
+        # White-hot flare
+        flare_r = max(1.5, radius * 0.45)
+        ctx.fillStyle = f"rgba(255, 255, 255, {0.35 if is_enemy else 0.5})"
+        ctx.beginPath()
+        ctx.arc(sx, py, flare_r, 0, TAU)
         ctx.fill()
 
     def _draw_enemy(self, enemy_obj, shake: Vec2) -> None:
@@ -1079,57 +1324,485 @@ class BrowserGame:
         rx = max(10.0, radius * 0.95)
         ry = max(8.0, radius * 0.58)
         ctx = self.ctx
+        bob = math.sin(enemy_obj.t * 6.0) * 1.5
 
+        if boss:
+            sy -= 26
+        
         ctx.fillStyle = "rgba(10, 12, 18, 0.5)"
         ctx.beginPath()
-        ctx.ellipse(sx, sy + 10, rx * 0.95, ry * 0.74, 0, 0, TAU)
+        ctx.ellipse(sx, sy + 10 + (26 if boss else 0), rx * 0.95, ry * 0.74, 0, 0, TAU)
         ctx.fill()
 
-        self._draw_glow_circle(sx, sy - 16, rx * 0.8, color, 0.18 if not boss else 0.28)
+        self._draw_glow_circle(sx, sy - 16 + bob, rx * 0.8, color, 0.18 if not boss else 0.28)
+        
         ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
         ctx.beginPath()
-        ctx.ellipse(sx, sy - 14, rx, ry, 0, 0, TAU)
+        ctx.ellipse(sx, sy - 14 + bob, rx, ry, 0, 0, TAU)
         ctx.fill()
+        
+        ctx.lineWidth = 1.6
+        if name == "bomber":
+            exploding = bool(getattr(enemy_obj, "ai", {}).get("bomber_exploding", False))
+            pulse = 0.5 + 0.5 * math.sin(enemy_obj.t * 30) if exploding else 0
+            fuse_speed = 18.0 if exploding else 4.0
+            
+            ctx.fillStyle = "rgba(255, 100, 50, 0.9)" if exploding else "rgba(255, 160, 50, 0.8)"
+            ctx.beginPath()
+            ctx.arc(sx, sy + bob - 14, 8 + 4 * pulse, 0, TAU)
+            ctx.fill()
+            
+            fr = 16
+            fx = sx + math.cos(enemy_obj.t * fuse_speed) * fr
+            fy = sy + bob - 14 + math.sin(enemy_obj.t * fuse_speed) * fr
+            self._draw_glow_circle(fx, fy, 6, (255, 200, 50), 0.6 + 0.4 * math.sin(enemy_obj.t * 12.0))
+            
+        elif name == "engineer":
+            gear_r = 17 + 1.5 * math.sin(enemy_obj.t * 5.0)
+            ctx.strokeStyle = f"rgba(180, 200, 220, {0.2 + 0.2 * math.sin(enemy_obj.t * 3.0)})"
+            ctx.beginPath()
+            ctx.arc(sx - 12, sy + 2 + bob - 14, gear_r, 0, TAU)
+            ctx.stroke()
+            
+            ctx.fillStyle = "rgba(100, 150, 180, 0.8)"
+            ctx.fillRect(sx - 16, sy + bob - 16, 8, 12)
+            ctx.fillStyle = "rgba(200, 200, 200, 0.9)"
+            ctx.fillRect(sx + 10, sy + bob - 12, 6, 2)
+            
+        elif name == "egg_sac":
+            pulse = 0.8 + 0.2 * math.sin(enemy_obj.t * 8.0)
+            if getattr(enemy_obj, "ai", {}).get("hatch_timer", 0) < 1.0:
+                pulse = 0.8 + 0.3 * math.sin(enemy_obj.t * 18.0)
+            
+            ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.8)"
+            ctx.beginPath()
+            ctx.arc(sx, sy + bob - 14, 15 * pulse, 0, TAU)
+            ctx.fill()
+            
+            ctx.fillStyle = "rgba(255, 50, 50, 0.9)"
+            ctx.beginPath()
+            ctx.arc(sx, sy + bob - 14, 6 * pulse + 2 * math.sin(enemy_obj.t * 12.0), 0, TAU)
+            ctx.fill()
+
+        elif name == "tank":
+            ctx.fillStyle = "rgba(80, 120, 80, 0.9)"
+            ctx.fillRect(sx - 8, sy + bob - 18, 16, 8)
+            
+            shield_r = 22 + 1.0 * math.sin(enemy_obj.t * 2.0)
+            ctx.strokeStyle = f"rgba(100, 220, 100, {0.2 + 0.15 * math.sin(enemy_obj.t * 1.5)})"
+            ctx.lineWidth = 2.5
+            ctx.beginPath()
+            ctx.ellipse(sx, sy + bob * 0.4 - 14, shield_r, shield_r * 0.6, 0, 0, TAU)
+            ctx.stroke()
+            
+        elif name == "ranged":
+            sr = 20
+            sa = enemy_obj.t * 1.2
+            ctx.strokeStyle = f"rgba(255, 50, 50, {0.25 + 0.15 * math.sin(enemy_obj.t * 3.0)})"
+            ctx.lineWidth = 1.5
+            cx = sx + 18
+            cy = sy + 2 + bob - 14
+            ctx.beginPath()
+            ctx.moveTo(cx - math.cos(sa) * sr, cy)
+            ctx.lineTo(cx + math.cos(sa) * sr, cy)
+            ctx.moveTo(cx, cy - math.sin(sa) * sr)
+            ctx.lineTo(cx, cy + math.sin(sa) * sr)
+            ctx.stroke()
+            
+            ctx.fillStyle = "rgba(100, 100, 100, 0.9)"
+            ctx.fillRect(sx + 6, sy + bob - 16, 12, 4)
+
+        elif name == "charger":
+            ctx.fillStyle = "rgba(200, 200, 200, 0.9)"
+            ctx.beginPath()
+            ctx.moveTo(sx + 2, sy + 16 + bob - 14)
+            ctx.lineTo(sx + 12, sy + 10 + bob - 14)
+            ctx.lineTo(sx + 6, sy + 4 + bob - 14)
+            ctx.fill()
+            ctx.beginPath()
+            ctx.moveTo(sx - 2, sy + 16 + bob - 14)
+            ctx.lineTo(sx - 12, sy + 10 + bob - 14)
+            ctx.lineTo(sx - 6, sy + 4 + bob - 14)
+            ctx.fill()
+            
+            if getattr(enemy_obj, "ai", {}).get("charger_dashing", False):
+                ctx.strokeStyle = "rgba(255, 200, 100, 0.5)"
+                ctx.lineWidth = 2
+                ctx.beginPath()
+                ctx.moveTo(sx - 12, sy + 6 + bob - 14)
+                ctx.lineTo(sx - 32, sy + 10 + bob - 14)
+                ctx.stroke()
+                ctx.beginPath()
+                ctx.moveTo(sx - 12, sy - 2 + bob - 14)
+                ctx.lineTo(sx - 32, sy + 2 + bob - 14)
+                ctx.stroke()
+
+        elif name == "flyer":
+            flap = 6 + 4 * math.sin(enemy_obj.t * 10.0)
+            ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.8)"
+            ctx.beginPath()
+            ctx.moveTo(sx, sy + bob + 6 - 14)
+            ctx.lineTo(sx + 22, sy + bob + flap - 14)
+            ctx.lineTo(sx + 10, sy + bob - 2 - 14)
+            ctx.fill()
+            ctx.beginPath()
+            ctx.moveTo(sx, sy + bob + 6 - 14)
+            ctx.lineTo(sx - 22, sy + bob + flap - 14)
+            ctx.lineTo(sx - 10, sy + bob - 2 - 14)
+            ctx.fill()
+            
+            ctx.strokeStyle = f"rgba(100, 200, 255, {0.2 + 0.15 * math.sin(enemy_obj.t * 8.0)})"
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.moveTo(sx - 4, sy + bob - 4 - 14)
+            ctx.lineTo(sx - 18, sy + bob - 16 - 14)
+            ctx.stroke()
+            
+        elif name == "spitter":
+            ctx.fillStyle = "rgba(100, 200, 100, 0.8)"
+            ctx.beginPath()
+            ctx.arc(sx - 9, sy + 2 + bob - 14, 5, 0, TAU)
+            ctx.fill()
+            ctx.beginPath()
+            ctx.arc(sx + 8, sy + 4 + bob - 14, 5, 0, TAU)
+            ctx.fill()
+            
+            acid_r = 14 + 3 * math.sin(enemy_obj.t * 4.0)
+            self._draw_glow_circle(sx, sy + bob - 14, acid_r, (100, 255, 100), 0.1 + 0.1 * math.sin(enemy_obj.t * 5.0))
+
+        elif name == "swarm":
+            r = 8
+            dot_color = (255, 100, 255)
+            for offset in (0, 2.1, 4.2):
+                dx = sx + math.cos(enemy_obj.t * 6.0 + offset) * r
+                dy = sy + bob - 14 + math.sin(enemy_obj.t * 6.0 + offset) * r
+                ctx.fillStyle = f"rgb({dot_color[0]}, {dot_color[1]}, {dot_color[2]})"
+                ctx.beginPath()
+                ctx.arc(dx, dy, 3, 0, TAU)
+                ctx.fill()
+            
+            jitter = math.sin(enemy_obj.t * 20.0) * 3.0
+            ctx.strokeStyle = f"rgba(255, 150, 255, {0.3 + 0.2 * math.sin(enemy_obj.t * 14.0)})"
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.moveTo(sx - 3, sy + bob + 8 - 14)
+            ctx.lineTo(sx - 5 + jitter, sy + bob + 15 - 14)
+            ctx.stroke()
+            ctx.beginPath()
+            ctx.moveTo(sx + 3, sy + bob + 8 - 14)
+            ctx.lineTo(sx + 5 - jitter, sy + bob + 15 - 14)
+            ctx.stroke()
+
+        elif name == "chaser":
+            aura_r = 16 + 4 * math.sin(enemy_obj.t * 3.5)
+            ctx.strokeStyle = f"rgba(255, 50, 50, {0.15 + 0.15 * math.sin(enemy_obj.t * 2.5)})"
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(sx, sy + bob - 14, aura_r, 0, TAU)
+            ctx.stroke()
+            
+            t_rot = enemy_obj.t * 1.8
+            ctx.fillStyle = "rgba(200, 50, 50, 0.9)"
+            for i in range(3):
+                a = t_rot + i * (math.tau / 3)
+                tip_x = sx + math.cos(a) * 18
+                tip_y = sy + bob - 14 + math.sin(a) * 18
+                b1 = a + 0.35
+                b2 = a - 0.35
+                ctx.beginPath()
+                ctx.moveTo(tip_x, tip_y)
+                ctx.lineTo(sx + math.cos(b1) * 10, sy + bob - 14 + math.sin(b1) * 10)
+                ctx.lineTo(sx + math.cos(b2) * 10, sy + bob - 14 + math.sin(b2) * 10)
+                ctx.fill()
+        
+        elif boss:
+            # Crown ring (all bosses)
+            ctx.strokeStyle = f"rgba(255, 200, 50, {0.5 + 0.3 * math.sin(enemy_obj.t * 4.0)})"
+            ctx.lineWidth = 3
+            crown_r = 24 + 2.0 * (0.5 + 0.5 * math.sin(enemy_obj.t * 4.0))
+            ctx.beginPath()
+            ctx.ellipse(sx, sy + bob - 14, crown_r, crown_r * 0.5, 0, 0, TAU)
+            ctx.stroke()
+
+            # Dark armor ring
+            ctx.strokeStyle = "rgba(20, 25, 40, 0.7)"
+            ctx.lineWidth = 5
+            ctx.beginPath()
+            ctx.ellipse(sx, sy + bob - 14, rx * 1.15, ry * 1.15, 0, 0, TAU)
+            ctx.stroke()
+
+            # Per-boss signature
+            if name == "boss_thunder":
+                # Zigzag lightning bolt
+                ctx.strokeStyle = f"rgba(200, 230, 255, {0.6 + 0.3 * math.sin(enemy_obj.t * 8.0)})"
+                ctx.lineWidth = 3
+                ctx.beginPath()
+                ctx.moveTo(sx - 10, sy + 20 + bob - 14)
+                ctx.lineTo(sx + 2, sy + 14 + bob - 14)
+                ctx.lineTo(sx - 4, sy + 10 + bob - 14)
+                ctx.lineTo(sx + 10, sy + 4 + bob - 14)
+                ctx.stroke()
+            elif name == "boss_laser":
+                # Eye + iris tracking
+                ex, ey = sx + 6, sy + 8 + bob - 14
+                ctx.fillStyle = "rgba(255, 255, 255, 0.8)"
+                ctx.beginPath()
+                ctx.arc(ex, ey, 6, 0, TAU)
+                ctx.fill()
+                iris_off = 2.0 * math.sin(enemy_obj.t * 9.0)
+                ctx.fillStyle = "rgba(255, 120, 255, 0.85)"
+                ctx.beginPath()
+                ctx.arc(ex + iris_off, ey, 3, 0, TAU)
+                ctx.fill()
+            elif name == "boss_trapmaster":
+                # Rotating gear arc
+                gear_r = 26 + 1.5 * math.sin(enemy_obj.t * 3.2)
+                gear_alpha = 0.35 + 0.2 * math.sin(enemy_obj.t * 2.0)
+                ctx.strokeStyle = f"rgba(255, 210, 120, {gear_alpha:.3f})"
+                ctx.lineWidth = 4
+                gear_start = enemy_obj.t * 1.5
+                ctx.beginPath()
+                ctx.arc(sx, sy + bob - 14, gear_r, gear_start, gear_start + 4.2)
+                ctx.stroke()
+            elif name == "boss_swarmqueen":
+                # Orbiting orbs
+                orb_r = 20
+                for orb_i in range(3):
+                    oa = enemy_obj.t * 2.2 + orb_i * 2.1
+                    ox = sx + math.cos(oa) * orb_r
+                    oy = sy + bob - 14 + math.sin(oa) * orb_r
+                    ctx.fillStyle = "rgba(255, 255, 255, 0.35)"
+                    ctx.beginPath()
+                    ctx.arc(ox, oy, 5, 0, TAU)
+                    ctx.fill()
+            elif name == "boss_brute":
+                # Horn triangle
+                ctx.fillStyle = "rgba(255, 250, 240, 0.85)"
+                ctx.beginPath()
+                ctx.moveTo(sx, sy + bob - 14 + 26)
+                ctx.lineTo(sx + 18, sy + bob - 14 + 16)
+                ctx.lineTo(sx - 18, sy + bob - 14 + 16)
+                ctx.closePath()
+                ctx.fill()
+                # Scar
+                ctx.strokeStyle = "rgba(40, 10, 10, 0.7)"
+                ctx.lineWidth = 4
+                ctx.beginPath()
+                ctx.moveTo(sx - 10, sy + bob - 14 + 2)
+                ctx.lineTo(sx + 10, sy + bob - 14 - 6)
+                ctx.stroke()
+                # Charge telegraph circle
+                b_state = getattr(enemy_obj, "ai", {}).get("brute_state", "")
+                if b_state == "telegraph":
+                    tele_pulse = 0.5 + 0.5 * math.sin(enemy_obj.t * 20.0)
+                    ctx.strokeStyle = f"rgba(255, 100, 50, {0.3 + 0.4 * tele_pulse:.3f})"
+                    ctx.lineWidth = 3
+                    ctx.beginPath()
+                    ctx.arc(sx, sy + bob - 14, 30 + 8 * tele_pulse, 0, TAU)
+                    ctx.stroke()
+            elif name == "boss_abyss_gaze":
+                # Multiple pulsing eye rings
+                for ei in range(2):
+                    e_alpha = 0.25 + 0.2 * math.sin(enemy_obj.t * (4.0 + ei * 1.5))
+                    e_r = 18 + ei * 8 + 2 * math.sin(enemy_obj.t * 3.0)
+                    ctx.strokeStyle = f"rgba(190, 210, 255, {e_alpha:.3f})"
+                    ctx.lineWidth = 2
+                    ctx.beginPath()
+                    ctx.arc(sx, sy + bob - 14, e_r, 0, TAU)
+                    ctx.stroke()
+            elif name == "boss_womb_core":
+                # Pulsing veins
+                for vi in range(3):
+                    va = enemy_obj.t * 1.2 + vi * (TAU / 3)
+                    vr = 16 + 4 * math.sin(enemy_obj.t * 5.0 + vi)
+                    vx1 = sx + math.cos(va) * 4
+                    vy1 = sy + bob - 14
+                    vx2 = sx + math.cos(va) * vr
+                    vy2 = sy + bob - 14 + math.sin(va) * vr
+                    ctx.strokeStyle = f"rgba(160, 60, 80, {0.4 + 0.2 * math.sin(enemy_obj.t * 8.0 + vi):.3f})"
+                    ctx.lineWidth = 2
+                    ctx.beginPath()
+                    ctx.moveTo(vx1, vy1)
+                    ctx.lineTo(vx2, vy2)
+                    ctx.stroke()
+
         ctx.strokeStyle = "rgba(255,255,255,0.16)"
         ctx.lineWidth = 1.6
+        ctx.beginPath()
+        ctx.ellipse(sx, sy - 14 + bob, rx, ry, 0, 0, TAU)
         ctx.stroke()
 
         if boss:
             max_hp = max(1, int(enemy_obj.ai.get("max_hp", enemy_obj.hp)))
-            self._draw_entity_bar(sx - 28, sy - 44, 56, max(0.0, min(1.0, enemy_obj.hp / max_hp)), color)
+            self._draw_entity_bar(sx - 28, sy - 44 + 26, 56, max(0.0, min(1.0, enemy_obj.hp / max_hp)), color)
+
 
     def _draw_player(self, shake: Vec2) -> None:
         if not self.player:
             return
         sx, sy = to_iso(self.player.pos, shake)
         ctx = self.ctx
+        t = self.background_t
         aim_dir = (iso_to_world((self.mouse_screen.x, self.mouse_screen.y)) - self.player.pos).normalized()
         if aim_dir.length() <= 1e-6:
             aim_dir = Vec2(1.0, 0.0)
         angle = math.atan2(aim_dir.y, aim_dir.x)
         hull = (132, 224, 255) if self.player.invincibility_timer <= 0 else (255, 236, 160)
+        bob = math.sin(t * 6.0) * 1.5
+        cy = sy - 18 + bob
 
+        # ── Shadow ──
         ctx.fillStyle = "rgba(8, 14, 22, 0.56)"
         ctx.beginPath()
         ctx.ellipse(sx, sy + 12, 18, 10, 0, 0, TAU)
         ctx.fill()
 
-        self._draw_glow_circle(sx, sy - 18, 16, hull, 0.18)
+        # ── Shield ring ──
+        if getattr(self.player, "shield", 0) > 0:
+            pulse = 0.65 + 0.35 * math.sin(t * 6.5)
+            shield_alpha = 0.25 + min(120, self.player.shield) * 0.003 * pulse
+            ctx.strokeStyle = f"rgba(120, 220, 255, {shield_alpha:.3f})"
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.arc(sx, cy, 20 + 2 * pulse, 0, TAU)
+            ctx.stroke()
+            # Outer thin ring
+            ctx.strokeStyle = f"rgba(255, 255, 255, {shield_alpha * 0.5:.3f})"
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.arc(sx, cy, 26 + 3 * pulse, 0, TAU)
+            ctx.stroke()
+
+        # ── Laser aura ring ──
+        if self.state and self.state.time < getattr(self.player, "laser_until", 0.0):
+            pulse = 0.6 + 0.4 * math.sin(t * 10.0)
+            ctx.strokeStyle = f"rgba(255, 120, 255, {0.45 * pulse:.3f})"
+            ctx.lineWidth = 2.5
+            ctx.beginPath()
+            ctx.arc(sx, cy, 22 + 3 * pulse, 0, TAU)
+            ctx.stroke()
+
+        # ── Outer glow ──
+        self._draw_glow_circle(sx, cy, 20, hull, 0.15)
+        self._draw_glow_circle(sx, cy, 28, (80, 120, 220), 0.06)
+
+        # ── Thruster jets (dash) ──
+        if getattr(self.player, "is_dashing", False):
+            dash_pulse = 0.6 + 0.4 * math.sin(t * 40.0)
+            jet_len = 20 + 12 * dash_pulse
+            ctx.strokeStyle = f"rgba(130, 210, 255, {0.5 + 0.35 * dash_pulse:.3f})"
+            ctx.lineWidth = 4
+            ctx.beginPath()
+            ctx.moveTo(sx - aim_dir.x * 9, cy - aim_dir.y * 4)
+            ctx.lineTo(sx - aim_dir.x * jet_len, cy - aim_dir.y * (jet_len * 0.6))
+            ctx.stroke()
+            ctx.strokeStyle = f"rgba(200, 240, 255, {0.3 + 0.25 * dash_pulse:.3f})"
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            ctx.moveTo(sx - aim_dir.x * 5, cy - aim_dir.y * 7)
+            ctx.lineTo(sx - aim_dir.x * (jet_len * 0.8), cy - aim_dir.y * (jet_len * 0.5))
+            ctx.stroke()
+
+        # ── Body diamond (main hull) ──
         ctx.save()
-        ctx.translate(sx, sy - 18)
+        ctx.translate(sx, cy)
         ctx.rotate(angle + math.pi * 0.25)
-        ctx.fillStyle = f"rgb({hull[0]}, {hull[1]}, {hull[2]})"
+
+        # Dark outline hull
+        ctx.fillStyle = "rgba(10, 20, 35, 0.85)"
         ctx.beginPath()
-        ctx.moveTo(0, -18)
-        ctx.lineTo(12, 2)
-        ctx.lineTo(0, 14)
-        ctx.lineTo(-12, 2)
+        ctx.moveTo(0, -19)
+        ctx.lineTo(13, 2)
+        ctx.lineTo(0, 15)
+        ctx.lineTo(-13, 2)
         ctx.closePath()
         ctx.fill()
-        ctx.strokeStyle = "rgba(255,255,255,0.32)"
+
+        # Colored hull
+        ctx.fillStyle = f"rgb({hull[0]}, {hull[1]}, {hull[2]})"
+        ctx.beginPath()
+        ctx.moveTo(0, -17)
+        ctx.lineTo(11, 2)
+        ctx.lineTo(0, 13)
+        ctx.lineTo(-11, 2)
+        ctx.closePath()
+        ctx.fill()
+
+        # Chest plate accent
+        ctx.fillStyle = f"rgba({hull[0] - 30}, {hull[1] - 50}, {hull[2] - 30}, 0.7)"
+        ctx.beginPath()
+        ctx.moveTo(0, -10)
+        ctx.lineTo(6, 0)
+        ctx.lineTo(0, 8)
+        ctx.lineTo(-6, 0)
+        ctx.closePath()
+        ctx.fill()
+
+        # Core energy dot
+        core_pulse = 0.7 + 0.3 * math.sin(t * 7.8)
+        ctx.fillStyle = f"rgba(200, 245, 255, {0.6 * core_pulse:.3f})"
+        ctx.beginPath()
+        ctx.arc(0, 0, 4, 0, TAU)
+        ctx.fill()
+
+        # Highlight
+        ctx.fillStyle = "rgba(255, 255, 255, 0.22)"
+        ctx.beginPath()
+        ctx.arc(-3, 4, 4, 0, TAU)
+        ctx.fill()
+
+        # Edge stroke
+        ctx.strokeStyle = "rgba(255,255,255,0.28)"
         ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(0, -17)
+        ctx.lineTo(11, 2)
+        ctx.lineTo(0, 13)
+        ctx.lineTo(-11, 2)
+        ctx.closePath()
         ctx.stroke()
         ctx.restore()
+
+        # ── Gun barrel (world space, pointing at aim) ──
+        gun_len = 18
+        gx = sx + aim_dir.x * 8
+        gy = cy + aim_dir.y * 4
+        ctx.strokeStyle = "rgba(230, 230, 240, 0.75)"
+        ctx.lineWidth = 3
+        ctx.beginPath()
+        ctx.moveTo(gx, gy)
+        ctx.lineTo(gx + aim_dir.x * gun_len, gy + aim_dir.y * gun_len * 0.65)
+        ctx.stroke()
+        # Inner barrel highlight
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.6)"
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(gx, gy)
+        ctx.lineTo(gx + aim_dir.x * gun_len, gy + aim_dir.y * gun_len * 0.65)
+        ctx.stroke()
+
+        # ── Visor glow ──
+        visor_pulse = 0.7 + 0.3 * math.sin(t * 5.4)
+        ctx.fillStyle = f"rgba(238, 245, 255, {0.6 * visor_pulse:.3f})"
+        vx = sx + aim_dir.x * 3
+        vy = cy + aim_dir.y * 1.5 + 3
+        ctx.fillRect(vx - 6, vy - 1.5, 12, 3)
+
+        # ── Vortex swirl ring ──
+        if self.state and self.state.time < getattr(self.player, "vortex_until", 0.0):
+            vort_r = float(getattr(self.player, "vortex_radius", 100))
+            vort_screen_r = vort_r * 0.72
+            vort_pulse = 0.5 + 0.5 * math.sin(t * 4.0)
+            ctx.strokeStyle = f"rgba(180, 140, 255, {0.2 + 0.15 * vort_pulse:.3f})"
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(sx, cy, vort_screen_r, t * 2.0, t * 2.0 + 4.5)
+            ctx.stroke()
+            ctx.strokeStyle = f"rgba(220, 200, 255, {0.12 + 0.08 * vort_pulse:.3f})"
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.arc(sx, cy, vort_screen_r * 0.7, -t * 1.5, -t * 1.5 + 3.8)
+            ctx.stroke()
 
     def _draw_entity_bar(self, x: float, y: float, width: float, ratio: float, color: tuple[int, int, int]) -> None:
         ctx = self.ctx
@@ -1210,21 +1883,54 @@ class BrowserGame:
         if not self.state:
             return
         ctx = self.ctx
-        alpha = min(1.0, self._wave_banner_t)
+        t = self._wave_banner_t
+        alpha = min(1.0, t)
         text = f"WAVE {self.state.wave}"
-        if self._last_cleared_wave and self._last_cleared_wave % 5 == 0:
+        is_boss_clear = self._last_cleared_wave and self._last_cleared_wave % 5 == 0
+        if is_boss_clear:
             text = f"BOSS CLEAR  //  {text}"
+
         ctx.save()
+        # Slide-in from top
+        slide_offset = max(0.0, (1.0 - min(1.0, t * 3.0))) * -40.0
         ctx.globalAlpha = 0.18 + alpha * 0.72
-        ctx.fillStyle = "rgba(7, 11, 20, 0.65)"
-        width = min(self.view_w * 0.34, 360)
+
+        width = min(self.view_w * 0.38, 420)
         x = (self.view_w - width) * 0.5
-        y = 110
-        ctx.fillRect(x, y, width, 52)
-        ctx.fillStyle = "rgba(235, 242, 255, 0.96)"
-        ctx.font = "700 22px Orbitron, sans-serif"
+        y = 100 + slide_offset
+
+        # Background panel with gradient
+        bg_grad = ctx.createLinearGradient(x, y, x + width, y)
+        if is_boss_clear:
+            bg_grad.addColorStop(0, "rgba(40, 18, 12, 0.85)")
+            bg_grad.addColorStop(1, "rgba(12, 8, 20, 0.85)")
+        else:
+            bg_grad.addColorStop(0, "rgba(7, 11, 20, 0.82)")
+            bg_grad.addColorStop(1, "rgba(10, 16, 28, 0.82)")
+        ctx.fillStyle = bg_grad
+        ctx.fillRect(x, y, width, 56)
+
+        # Accent top line
+        accent_color = "rgba(255, 200, 100, 0.75)" if is_boss_clear else "rgba(130, 200, 255, 0.55)"
+        ctx.fillStyle = accent_color
+        ctx.fillRect(x, y, width, 2)
+        # Accent bottom line
+        ctx.fillRect(x, y + 54, width, 2)
+
+        # Side glow
+        glow_alpha = 0.12 * alpha
+        glow_color = (255, 200, 100) if is_boss_clear else (130, 185, 245)
+        glow = ctx.createRadialGradient(self.view_w * 0.5, y + 28, 10, self.view_w * 0.5, y + 28, width * 0.6)
+        glow.addColorStop(0, f"rgba({glow_color[0]}, {glow_color[1]}, {glow_color[2]}, {glow_alpha:.3f})")
+        glow.addColorStop(1, "rgba(0,0,0,0)")
+        ctx.fillStyle = glow
+        ctx.fillRect(x - 40, y - 20, width + 80, 96)
+
+        # Text
+        ctx.fillStyle = "rgba(235, 242, 255, 0.98)" if not is_boss_clear else "rgba(255, 230, 180, 0.98)"
+        ctx.font = "700 24px Orbitron, sans-serif"
         ctx.textAlign = "center"
-        ctx.fillText(text, self.view_w * 0.5, y + 32)
+        ctx.fillText(text, self.view_w * 0.5, y + 36)
         ctx.restore()
         ctx.textAlign = "start"
 

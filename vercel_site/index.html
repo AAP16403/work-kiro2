@@ -3,33 +3,58 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Plouto Browser Build</title>
+    <title>PLOUTO — Stellar Survival</title>
     <meta
       name="description"
-      content="PLOUTO // Stellar Survival rebuilt for Vercel with the gameplay simulation still running in Python."
+      content="PLOUTO // A neon-drenched top-down survival shooter. Battle waves of enemies, collect powerups, face devastating bosses."
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main id="shell" data-ready="false">
       <section class="intro">
-        <p class="eyebrow">Vercel Deployment</p>
-        <h1>PLOUTO, now running in the browser</h1>
-        <p class="lede">
-          This build keeps the combat simulation in Python and runs it client-side through
-          Pyodide, so Vercel only needs to host static files.
-        </p>
-        <div class="tips">
-          <p><span>Move</span> WASD or arrow keys</p>
-          <p><span>Attack</span> Left click toggles auto-fire</p>
-          <p><span>Ultra</span> Right click or Q</p>
-          <p><span>Dash</span> Space</p>
+        <div class="intro-top">
+          <p class="eyebrow">Stellar Survival</p>
+          <h1>PLOUTO</h1>
+          <p class="tagline">Battle the void. Survive the storm.</p>
+          <p class="lede">
+            Fight through relentless waves of enemies, collect devastating powerups,
+            and face colossal bosses in this neon-drenched top-down survival shooter.
+          </p>
+        </div>
+        <div class="controls-section">
+          <p class="controls-title">Controls</p>
+          <div class="tips">
+            <div class="tip-row">
+              <span class="tip-key">WASD</span>
+              <span class="tip-desc">Move</span>
+            </div>
+            <div class="tip-row">
+              <span class="tip-key">LMB</span>
+              <span class="tip-desc">Toggle auto-fire</span>
+            </div>
+            <div class="tip-row">
+              <span class="tip-key">RMB / Q</span>
+              <span class="tip-desc">Ultra ability</span>
+            </div>
+            <div class="tip-row">
+              <span class="tip-key">Space</span>
+              <span class="tip-desc">Dash</span>
+            </div>
+            <div class="tip-row">
+              <span class="tip-key">Esc</span>
+              <span class="tip-desc">Pause</span>
+            </div>
+          </div>
+        </div>
+        <div class="intro-footer">
+          <p class="version">v2.0 &mdash; Browser Edition</p>
         </div>
       </section>
 
       <section class="stage">
         <canvas id="game-canvas" aria-label="Plouto browser game"></canvas>
-        <div id="loading-status" class="loading-pill">Loading Python runtime...</div>
+        <div id="loading-status" class="loading-pill">Initializing...</div>
       </section>
     </main>
 

@@ -1,31 +1,34 @@
-@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&family=Rajdhani:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&family=Rajdhani:wght@400;500;600;700&display=swap");
 
 :root {
-  --bg-0: #030812;
-  --bg-1: #0a1524;
-  --bg-2: #10243a;
+  --bg-0: #020610;
+  --bg-1: #08101e;
+  --bg-2: #0e1c2e;
   --ink: #edf4ff;
-  --muted: #9eb7d1;
-  --line: rgba(145, 214, 255, 0.24);
-  --panel: rgba(8, 15, 25, 0.72);
-  --accent: #8ee0ff;
-  --accent-warm: #ffd580;
+  --muted: #8a9fb8;
+  --line: rgba(120, 200, 255, 0.14);
+  --panel: rgba(6, 12, 22, 0.82);
+  --accent: #7dd8ff;
+  --accent-warm: #ffd380;
+  --glow-blue: rgba(100, 190, 255, 0.12);
+  --glow-purple: rgba(160, 120, 255, 0.08);
 }
 
 * {
   box-sizing: border-box;
 }
 
-html,
-body {
+html, body {
   margin: 0;
   min-height: 100%;
   background:
-    radial-gradient(circle at top left, rgba(116, 198, 255, 0.15), transparent 32%),
-    radial-gradient(circle at bottom right, rgba(255, 184, 120, 0.12), transparent 28%),
+    radial-gradient(ellipse at 20% 10%, rgba(80, 160, 255, 0.09), transparent 45%),
+    radial-gradient(ellipse at 80% 85%, rgba(180, 100, 255, 0.07), transparent 40%),
+    radial-gradient(ellipse at 50% 50%, rgba(20, 60, 120, 0.15), transparent 60%),
     linear-gradient(180deg, var(--bg-1), var(--bg-0));
   color: var(--ink);
   font-family: "Rajdhani", sans-serif;
+  overflow: hidden;
 }
 
 body {
@@ -34,99 +37,190 @@ body {
 
 #shell {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
   min-height: 100vh;
-  padding: 24px;
+  padding: 16px;
 }
 
-.intro,
-.stage {
+/* ── Sidebar ── */
+.intro {
   border: 1px solid var(--line);
   background: var(--panel);
-  backdrop-filter: blur(16px);
-  border-radius: 28px;
-  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.34);
-}
-
-.intro {
-  padding: 32px 28px;
+  backdrop-filter: blur(20px);
+  border-radius: 20px;
+  box-shadow:
+    0 0 60px rgba(80, 160, 255, 0.04),
+    0 20px 60px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 28px 24px 20px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Decorative top accent line */
+.intro::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.5;
+}
+
+.intro-top {
+  flex: 1;
 }
 
 .eyebrow {
-  margin: 0 0 10px;
-  font: 700 0.92rem/1 "Orbitron", sans-serif;
-  letter-spacing: 0.18em;
+  margin: 0 0 8px;
+  font: 700 0.72rem/1 "Orbitron", sans-serif;
+  letter-spacing: 0.28em;
   text-transform: uppercase;
   color: var(--accent);
+  opacity: 0.7;
 }
 
 .intro h1 {
-  margin: 0 0 18px;
-  font: 700 clamp(2.1rem, 4vw, 3.4rem) / 0.95 "Orbitron", sans-serif;
-  text-wrap: balance;
+  margin: 0 0 6px;
+  font: 900 clamp(2.4rem, 5vw, 3.6rem)/0.9 "Orbitron", sans-serif;
+  background: linear-gradient(180deg, #ffffff 20%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 2px 8px rgba(100, 200, 255, 0.3));
+}
+
+.tagline {
+  margin: 0 0 16px;
+  font: 600 1.1rem/1.3 "Rajdhani", sans-serif;
+  color: var(--accent-warm);
+  letter-spacing: 0.04em;
+  opacity: 0.9;
 }
 
 .lede {
   margin: 0;
-  max-width: 28ch;
-  font-size: 1.18rem;
+  max-width: 30ch;
+  font-size: 0.95rem;
+  line-height: 1.45;
   color: var(--muted);
+}
+
+/* ── Controls section ── */
+.controls-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(120, 200, 255, 0.08);
+}
+
+.controls-title {
+  margin: 0 0 10px;
+  font: 700 0.68rem/1 "Orbitron", sans-serif;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.65;
 }
 
 .tips {
-  margin-top: 28px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tip-row {
+  display: flex;
+  align-items: center;
   gap: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  transition: background 0.2s;
 }
 
-.tips p {
-  margin: 0;
-  padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.04);
+.tip-row:hover {
+  background: rgba(100, 180, 255, 0.06);
+}
+
+.tip-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(100, 180, 255, 0.08);
+  border: 1px solid rgba(120, 200, 255, 0.15);
+  font: 700 0.78rem/1 "Orbitron", sans-serif;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.tip-desc {
   color: var(--muted);
-  font-size: 1.02rem;
+  font-size: 0.92rem;
+  font-weight: 500;
 }
 
-.tips span {
-  display: inline-block;
-  min-width: 72px;
-  color: var(--ink);
-  font-weight: 700;
+/* ── Footer ── */
+.intro-footer {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(120, 200, 255, 0.06);
 }
 
+.version {
+  margin: 0;
+  font: 500 0.82rem/1 "Rajdhani", sans-serif;
+  color: var(--muted);
+  opacity: 0.45;
+  letter-spacing: 0.04em;
+}
+
+/* ── Game stage ── */
 .stage {
   position: relative;
   min-height: 560px;
   overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  border-radius: 20px;
+  box-shadow:
+    0 0 80px rgba(60, 140, 255, 0.05),
+    0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
 #game-canvas {
   display: block;
   width: 100%;
-  height: min(100vh - 48px, 960px);
+  height: min(100vh - 32px, 960px);
   cursor: crosshair;
 }
 
 .loading-pill {
   position: absolute;
-  right: 18px;
-  bottom: 18px;
-  padding: 10px 14px;
+  right: 14px;
+  bottom: 14px;
+  padding: 8px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(6, 10, 18, 0.78);
-  color: var(--ink);
-  font: 600 0.98rem/1 "Rajdhani", sans-serif;
+  border: 1px solid rgba(120, 200, 255, 0.12);
+  background: rgba(6, 10, 18, 0.85);
+  color: var(--muted);
+  font: 600 0.82rem/1 "Rajdhani", sans-serif;
   letter-spacing: 0.02em;
+  backdrop-filter: blur(8px);
 }
 
 #shell[data-ready="true"] .loading-pill {
-  opacity: 0.84;
+  opacity: 0.7;
 }
 
 @media (max-width: 980px) {
@@ -135,7 +229,7 @@ body {
   }
 
   .intro {
-    padding: 24px 20px;
+    padding: 20px 18px;
   }
 
   .lede {

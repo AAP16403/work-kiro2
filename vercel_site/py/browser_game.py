@@ -1936,20 +1936,66 @@ class BrowserGame:
 
     def _draw_menu(self) -> None:
         ctx = self.ctx
-        self._draw_panel(44, 44, min(self.view_w * 0.4, 520), self.view_h - 88)
-        ctx.fillStyle = "rgba(240, 245, 255, 0.98)"
-        ctx.font = "700 42px Orbitron, sans-serif"
-        ctx.fillText("PLOUTO", 78, 118)
-        ctx.font = "600 18px Rajdhani, sans-serif"
-        ctx.fillStyle = "rgba(200, 216, 236, 0.92)"
-        self._wrap_text("Stellar Survival rebuilt for the browser. The simulation stays in Python and now runs directly in Vercel as a static deployment.", 78, 152, min(self.view_w * 0.34, 430), 24)
-        self._wrap_text("Controls: WASD or arrows move, left click toggles auto-fire, right click or Q uses Ultra, Space dashes, Esc pauses.", 78, 238, min(self.view_w * 0.34, 430), 22)
+        pw = min(self.view_w * 0.42, 480)
+        ph = self.view_h - 72
+        px = 36
+        py = 36
+        t = self.background_t
 
+        self._draw_panel(px, py, pw, ph)
+
+        # Title glow
+        title_x = px + 40
+        title_y = py + 72
+        glow_pulse = 0.6 + 0.4 * math.sin(t * 1.5)
+        glow = ctx.createRadialGradient(title_x + 90, title_y - 10, 10, title_x + 90, title_y - 10, 180)
+        glow.addColorStop(0, f"rgba(100, 200, 255, {0.06 * glow_pulse:.3f})")
+        glow.addColorStop(1, "rgba(0,0,0,0)")
+        ctx.fillStyle = glow
+        ctx.fillRect(px, py, pw, 120)
+
+        # Title
+        ctx.fillStyle = "rgba(240, 248, 255, 0.98)"
+        ctx.font = "900 48px Orbitron, sans-serif"
+        ctx.fillText("PLOUTO", title_x, title_y)
+
+        # Subtitle
+        ctx.fillStyle = "rgba(255, 211, 128, 0.85)"
+        ctx.font = "600 16px Orbitron, sans-serif"
+        ctx.fillText("STELLAR SURVIVAL", title_x, title_y + 26)
+
+        # Accent line under title
+        accent_alpha = 0.3 + 0.15 * math.sin(t * 2.0)
+        ctx.strokeStyle = f"rgba(120, 210, 255, {accent_alpha:.3f})"
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(title_x, title_y + 36)
+        ctx.lineTo(title_x + 200, title_y + 36)
+        ctx.stroke()
+
+        # Description
+        ctx.font = "500 17px Rajdhani, sans-serif"
+        ctx.fillStyle = "rgba(180, 200, 220, 0.88)"
+        self._wrap_text(
+            "Fight through waves of enemies, collect devastating powerups, and face colossal bosses.",
+            title_x, title_y + 62, pw - 80, 22
+        )
+
+        # Stats
         high_score = ScoreTracker(difficulty=self.settings["difficulty"]).get_high_score()
-        ctx.font = "700 16px Rajdhani, sans-serif"
-        ctx.fillStyle = "rgba(160, 214, 255, 0.96)"
-        ctx.fillText(f"Best {self.settings['difficulty'].title()} Score: {high_score}", 78, 336)
-        ctx.fillText(f"Arena Radius: {int(config.ROOM_RADIUS)}", 78, 364)
+        stats_y = title_y + 126
+        ctx.font = "700 15px Rajdhani, sans-serif"
+
+        # High score with icon accent
+        ctx.fillStyle = "rgba(255, 211, 128, 0.75)"
+        ctx.fillText("\u2605", title_x, stats_y)
+        ctx.fillStyle = "rgba(160, 200, 235, 0.9)"
+        ctx.fillText(f"Best Score: {high_score}", title_x + 18, stats_y)
+
+        ctx.fillStyle = "rgba(120, 200, 255, 0.5)"
+        ctx.fillText("\u25C6", title_x, stats_y + 24)
+        ctx.fillStyle = "rgba(160, 200, 235, 0.9)"
+        ctx.fillText(f"Arena: {int(config.ROOM_RADIUS)}", title_x + 18, stats_y + 24)
 
         for button in self.menu_buttons:
             self._draw_button(button)
@@ -2022,29 +2068,102 @@ class BrowserGame:
 
     def _draw_panel(self, x: float, y: float, width: float, height: float) -> None:
         ctx = self.ctx
-        ctx.fillStyle = "rgba(5, 10, 18, 0.78)"
-        ctx.fillRect(x, y, width, height)
-        ctx.strokeStyle = "rgba(154, 214, 255, 0.24)"
-        ctx.lineWidth = 2
-        ctx.strokeRect(x, y, width, height)
+        r = 14  # corner radius
+        ctx.save()
+
+        # Rounded rect path
+        ctx.beginPath()
+        ctx.moveTo(x + r, y)
+        ctx.lineTo(x + width - r, y)
+        ctx.arcTo(x + width, y, x + width, y + r, r)
+        ctx.lineTo(x + width, y + height - r)
+        ctx.arcTo(x + width, y + height, x + width - r, y + height, r)
+        ctx.lineTo(x + r, y + height)
+        ctx.arcTo(x, y + height, x, y + height - r, r)
+        ctx.lineTo(x, y + r)
+        ctx.arcTo(x, y, x + r, y, r)
+        ctx.closePath()
+
+        # Dark fill
+        ctx.fillStyle = "rgba(4, 8, 16, 0.88)"
+        ctx.fill()
+
+        # Border
+        ctx.strokeStyle = "rgba(100, 190, 255, 0.15)"
+        ctx.lineWidth = 1
+        ctx.stroke()
+
+        # Inner top glow line
+        ctx.strokeStyle = "rgba(120, 200, 255, 0.08)"
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(x + r + 10, y + 1)
+        ctx.lineTo(x + width - r - 10, y + 1)
+        ctx.stroke()
+
+        ctx.restore()
 
     def _draw_button(self, button: UIButton, card_text: str = "") -> None:
         hovered = button.contains(self.mouse_screen.x, self.mouse_screen.y)
         ctx = self.ctx
         accent = button.accent
-        fill_alpha = 0.28 if hovered else 0.18
+        bx, by, bw, bh = button.x, button.y, button.width, button.height
+        r = 10  # corner radius
+
+        ctx.save()
+        # Rounded rect path
+        ctx.beginPath()
+        ctx.moveTo(bx + r, by)
+        ctx.lineTo(bx + bw - r, by)
+        ctx.arcTo(bx + bw, by, bx + bw, by + r, r)
+        ctx.lineTo(bx + bw, by + bh - r)
+        ctx.arcTo(bx + bw, by + bh, bx + bw - r, by + bh, r)
+        ctx.lineTo(bx + r, by + bh)
+        ctx.arcTo(bx, by + bh, bx, by + bh - r, r)
+        ctx.lineTo(bx, by + r)
+        ctx.arcTo(bx, by, bx + r, by, r)
+        ctx.closePath()
+
+        # Fill
+        fill_alpha = 0.16 if hovered else 0.06
         ctx.fillStyle = f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {fill_alpha})"
-        ctx.fillRect(button.x, button.y, button.width, button.height)
-        ctx.strokeStyle = f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {0.9 if hovered else 0.46})"
-        ctx.lineWidth = 2
-        ctx.strokeRect(button.x, button.y, button.width, button.height)
-        ctx.fillStyle = "rgba(245, 248, 255, 0.98)"
-        ctx.font = "700 20px Rajdhani, sans-serif"
-        ctx.fillText(button.label, button.x + 20, button.y + 32)
+        ctx.fill()
+
+        # Border
+        border_alpha = 0.7 if hovered else 0.22
+        ctx.strokeStyle = f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {border_alpha})"
+        ctx.lineWidth = 1.5 if hovered else 1
+        ctx.stroke()
+
+        # Left accent bar
+        bar_alpha = 0.8 if hovered else 0.35
+        ctx.fillStyle = f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {bar_alpha})"
+        ctx.beginPath()
+        ctx.moveTo(bx, by + r)
+        ctx.lineTo(bx, by + bh - r)
+        ctx.lineTo(bx + 3, by + bh - r)
+        ctx.lineTo(bx + 3, by + r)
+        ctx.closePath()
+        ctx.fill()
+
+        # Hover glow
+        if hovered:
+            glow = ctx.createRadialGradient(bx + bw * 0.5, by + bh * 0.5, 10, bx + bw * 0.5, by + bh * 0.5, bw * 0.6)
+            glow.addColorStop(0, f"rgba({accent[0]}, {accent[1]}, {accent[2]}, 0.06)")
+            glow.addColorStop(1, "rgba(0,0,0,0)")
+            ctx.fillStyle = glow
+            ctx.fill()
+
+        # Label
+        ctx.fillStyle = "rgba(240, 246, 255, 0.96)" if hovered else "rgba(210, 224, 240, 0.9)"
+        ctx.font = "700 19px Rajdhani, sans-serif"
+        ctx.fillText(button.label, bx + 18, by + 30)
+        ctx.restore()
+
         if card_text:
-            ctx.font = "500 16px Rajdhani, sans-serif"
-            ctx.fillStyle = "rgba(212, 224, 240, 0.92)"
-            self._wrap_text(card_text, button.x + 20, button.y + 62, button.width - 32, 22)
+            ctx.font = "500 15px Rajdhani, sans-serif"
+            ctx.fillStyle = "rgba(180, 200, 220, 0.85)"
+            self._wrap_text(card_text, bx + 18, by + 56, bw - 36, 20)
 
     def _wrap_text(self, text: str, x: float, y: float, max_width: float, line_height: float) -> None:
         ctx = self.ctx

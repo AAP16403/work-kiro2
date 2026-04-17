@@ -1272,9 +1272,8 @@ class BrowserGame:
                 ctx.lineTo(sx - vdx * trail_len, py - vdy * trail_len * 0.65)
                 ctx.stroke()
 
-        # Outer glow
-        glow_alpha = 0.18 if ptype in ("bullet", "spread") else 0.28
-        self._draw_glow_circle(sx, py, radius * 1.1, color, glow_alpha)
+
+
 
         # Bomb: dark casing ring + orange core
         if ptype == "bomb":

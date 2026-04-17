@@ -111,15 +111,16 @@ class BrowserGame:
 
         # Atmospheric star field (persistent across frames)
         self._stars: list[dict] = []
-        for _ in range(40):
+        for _ in range(18):
             self._stars.append({
                 "x": random.random(),
                 "y": random.random(),
                 "vx": random.uniform(-0.004, 0.004),
                 "vy": random.uniform(-0.003, 0.003),
-                "r": random.uniform(1.0, 2.8),
+                "r": random.uniform(1.0, 2.5),
                 "phase": random.uniform(0, math.tau),
             })
+        self._is_playing = False  # cached for perf
 
         self.state_name = STATE_MENU
         self.state: GameStateData | None = None
@@ -294,6 +295,7 @@ class BrowserGame:
         window.requestAnimationFrame(self._frame_proxy)
 
     def update(self, dt: float) -> None:
+        self._is_playing = self.state_name == STATE_PLAYING
         self.flash = max(0.0, self.flash - dt * 2.6)
         self.impact = max(0.0, self.impact - dt * 6.0)
         self._wave_banner_t = max(0.0, self._wave_banner_t - dt)
@@ -901,6 +903,7 @@ class BrowserGame:
         ctx = self.ctx
         ci = max(0.0, min(1.0, combat_intensity))
         t = self.background_t
+        playing = self._is_playing
 
         # ── Base gradient ──
         grad = ctx.createLinearGradient(0, 0, 0, self.view_h)
@@ -909,13 +912,14 @@ class BrowserGame:
         ctx.fillStyle = grad
         ctx.fillRect(0, 0, self.view_w, self.view_h)
 
-        # ── Nebula glow orbs ──
+        # ── Nebula glow orb (only 1 during gameplay, all 3 on menu) ──
         nebulae = [
+            (0.22, 0.28, 320, (30, 75, 130), 0.25, 0.07),
+        ] if playing else [
             (0.22, 0.28, 320, (30, 75, 130), 0.25, 0.07),
             (0.78, 0.68, 240, (160, 70, 120), 0.22, 0.09),
             (0.52, 0.82, 180, (70, 180, 165), 0.18, 0.11),
         ]
-        ctx.save()
         for fx, fy, radius, color, amp, freq in nebulae:
             nx = self.view_w * fx + math.sin(t * freq) * 30.0
             ny = self.view_h * fy + math.cos(t * (freq + 0.02)) * 24.0
@@ -926,53 +930,48 @@ class BrowserGame:
             rg.addColorStop(1, "rgba(0,0,0,0)")
             ctx.fillStyle = rg
             ctx.fillRect(nx - radius, ny - radius, radius * 2, radius * 2)
-        ctx.restore()
 
-        # ── Drifting star field ──
-        ctx.save()
+        # ── Drifting star field (batched into single path) ──
+        ctx.fillStyle = "rgba(210, 235, 255, 0.18)"
+        ctx.beginPath()
         for star in self._stars:
-            star["x"] += star["vx"] * (0.22 + ci * 0.6)
-            star["y"] += star["vy"] * (0.22 + ci * 0.6)
+            star["x"] += star["vx"] * 0.3
+            star["y"] += star["vy"] * 0.3
             if star["x"] < -0.02: star["x"] = 1.02
             elif star["x"] > 1.02: star["x"] = -0.02
             if star["y"] < -0.02: star["y"] = 1.02
             elif star["y"] > 1.02: star["y"] = -0.02
             sx = star["x"] * self.view_w
             sy = star["y"] * self.view_h
-            twinkle = 0.5 + 0.5 * math.sin(t * 1.4 + star["phase"])
-            alpha = 0.08 + 0.22 * twinkle
-            ctx.fillStyle = f"rgba(210, 235, 255, {alpha:.3f})"
-            ctx.beginPath()
+            ctx.moveTo(sx + star["r"], sy)
             ctx.arc(sx, sy, star["r"], 0, TAU)
-            ctx.fill()
-        ctx.restore()
+        ctx.fill()
 
-        # ── Subtle scan-line grid ──
-        ctx.save()
-        ctx.globalAlpha = 0.1
-        ctx.strokeStyle = "rgba(130, 180, 255, 0.25)"
-        ctx.lineWidth = 1
-        step = 44
-        drift = (t * 18.0) % step
-        for x in range(-step, self.view_w + step, step):
-            ctx.beginPath()
-            ctx.moveTo(x + drift, 0)
-            ctx.lineTo(x + drift - self.view_h * 0.22, self.view_h)
-            ctx.stroke()
-        ctx.restore()
+        # ── Scan-line grid + vignette: menu only (too expensive during gameplay) ──
+        if not playing:
+            ctx.save()
+            ctx.globalAlpha = 0.1
+            ctx.strokeStyle = "rgba(130, 180, 255, 0.25)"
+            ctx.lineWidth = 1
+            step = 44
+            drift = (t * 18.0) % step
+            for x in range(-step, self.view_w + step, step):
+                ctx.beginPath()
+                ctx.moveTo(x + drift, 0)
+                ctx.lineTo(x + drift - self.view_h * 0.22, self.view_h)
+                ctx.stroke()
+            ctx.restore()
 
-        # ── Vignette edges ──
-        ctx.save()
-        v_alpha = 0.06 + 0.04 * ci
-        vg = ctx.createRadialGradient(
-            self.view_w * 0.5, self.view_h * 0.5, min(self.view_w, self.view_h) * 0.3,
-            self.view_w * 0.5, self.view_h * 0.5, max(self.view_w, self.view_h) * 0.72,
-        )
-        vg.addColorStop(0, "rgba(0,0,0,0)")
-        vg.addColorStop(1, f"rgba(0,0,0,{v_alpha:.3f})")
-        ctx.fillStyle = vg
-        ctx.fillRect(0, 0, self.view_w, self.view_h)
-        ctx.restore()
+            ctx.save()
+            vg = ctx.createRadialGradient(
+                self.view_w * 0.5, self.view_h * 0.5, min(self.view_w, self.view_h) * 0.3,
+                self.view_w * 0.5, self.view_h * 0.5, max(self.view_w, self.view_h) * 0.72,
+            )
+            vg.addColorStop(0, "rgba(0,0,0,0)")
+            vg.addColorStop(1, "rgba(0,0,0,0.08)")
+            ctx.fillStyle = vg
+            ctx.fillRect(0, 0, self.view_w, self.view_h)
+            ctx.restore()
 
     def _sample_map_points(self, radius: float, map_type: str) -> list[Vec2]:
         if map_type == MAP_DIAMOND:
@@ -1054,30 +1053,26 @@ class BrowserGame:
                 sx, sy = to_iso(world, shake)
                 self._draw_glow_circle(sx, sy - 8, 11 + idx, (120 + idx * 18, 180, 255), 0.18)
 
-        # ── Pulsing concentric rings ──
+        # ── Pulsing concentric ring (single ring for perf) ──
         center_x, center_y = to_iso(Vec2(0, 0), shake)
         t = self.background_t
-        for ri in range(3):
-            ring_r = (180 + ri * 42) + 6.0 * math.sin(t * (0.8 + ri * 0.3))
-            ring_alpha = 0.06 + 0.04 * (0.5 + 0.5 * math.sin(t * (1.1 + ri * 0.15)))
-            ring_alpha *= (1.0 + combat_intensity * 0.6)
-            ring_screen_r = ring_r * 0.72  # approximate iso scale
-            ctx.strokeStyle = f"rgba(130, 185, 245, {ring_alpha:.3f})"
-            ctx.lineWidth = 2
-            ctx.beginPath()
-            ctx.ellipse(center_x, center_y, ring_screen_r, ring_screen_r * 0.56, 0, 0, TAU)
-            ctx.stroke()
+        ring_r = 222 + 6.0 * math.sin(t * 0.8)
+        ring_alpha = 0.06 + 0.04 * (0.5 + 0.5 * math.sin(t * 1.1))
+        ring_screen_r = ring_r * 0.72
+        ctx.strokeStyle = f"rgba(130, 185, 245, {ring_alpha:.3f})"
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.ellipse(center_x, center_y, ring_screen_r, ring_screen_r * 0.56, 0, 0, TAU)
+        ctx.stroke()
 
         ctx.restore()
 
     def _draw_glow_circle(self, x: float, y: float, radius: float, color: tuple[int, int, int], alpha: float) -> None:
+        """Cheap glow: simple semi-transparent filled circle (no radial gradient)."""
         ctx = self.ctx
-        grad = ctx.createRadialGradient(x, y, 0, x, y, radius * 2.4)
-        grad.addColorStop(0, f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha})")
-        grad.addColorStop(1, "rgba(0, 0, 0, 0)")
-        ctx.fillStyle = grad
+        ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha * 0.5:.3f})"
         ctx.beginPath()
-        ctx.arc(x, y, radius * 2.4, 0, TAU)
+        ctx.arc(x, y, radius * 1.6, 0, TAU)
         ctx.fill()
 
     def _draw_world(self, shake: Vec2) -> None:

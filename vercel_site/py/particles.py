@@ -38,8 +38,8 @@ class ParticleSystem:
     ):
         if count <= 0:
             return
-        soft_cap = int(getattr(config, "PARTICLE_SOFT_CAP", 550))
-        hard_cap = int(getattr(config, "PARTICLE_HARD_CAP", 800))
+        soft_cap = int(getattr(config, "PARTICLE_SOFT_CAP", 200))
+        hard_cap = int(getattr(config, "PARTICLE_HARD_CAP", 300))
         current = len(self.particles)
         if current >= hard_cap:
             return
@@ -140,18 +140,28 @@ class ParticleSystem:
                 keep.append(p)
         self.particles = keep
 
-    def render(self, ctx, shake: Vec2, to_iso):
+    def render(self, ctx, shake, to_iso):
         if not self.particles:
             return
-            
+
         TAU = math.tau
+        # Group particles by color key for batching
+        buckets: dict[tuple, list] = {}
         for p in self.particles:
-            sx, sy = to_iso(p.pos, shake)
             ratio = max(0.0, p.life / p.max_life)
-            radius = max(0.1, p.size * ratio)
-            alpha = max(0.0, min(1.0, ratio))
-            
-            ctx.fillStyle = f"rgba({p.color[0]}, {p.color[1]}, {p.color[2]}, {alpha})"
+            alpha_i = int(max(0, min(255, ratio * 255)))
+            key = (p.color[0], p.color[1], p.color[2], alpha_i)
+            if key not in buckets:
+                buckets[key] = []
+            buckets[key].append((p, ratio))
+
+        for (r, g, b, a_i), group in buckets.items():
+            alpha = a_i / 255.0
+            ctx.fillStyle = f"rgba({r}, {g}, {b}, {alpha:.2f})"
             ctx.beginPath()
-            ctx.arc(sx, sy, radius, 0, TAU)
+            for p, ratio in group:
+                sx, sy = to_iso(p.pos, shake)
+                radius = max(0.5, p.size * ratio)
+                ctx.moveTo(sx + radius, sy)
+                ctx.arc(sx, sy, radius, 0, TAU)
             ctx.fill()

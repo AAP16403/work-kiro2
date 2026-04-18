@@ -1328,8 +1328,8 @@ class BrowserGame:
         ctx.ellipse(sx, sy + 10 + (26 if boss else 0), rx * 0.95, ry * 0.74, 0, 0, TAU)
         ctx.fill()
 
-        self._draw_glow_circle(sx, sy - 16 + bob, rx * 0.8, color, 0.18 if not boss else 0.28)
-        
+
+
         ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
         ctx.beginPath()
         ctx.ellipse(sx, sy - 14 + bob, rx, ry, 0, 0, TAU)

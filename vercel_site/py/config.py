@@ -1,4 +1,4 @@
-﻿ # Game Configuration Constants
+ # Game Configuration Constants
 
 # Screen dimensions
 SCREEN_W = 980
@@ -11,7 +11,7 @@ ENABLE_ADVANCED_FX = True
 ADVANCED_FX_STRENGTH = 0.55
 
 # Room settings
-ROOM_RADIUS = 400.0
+ROOM_RADIUS = 600.0
 ARENA_MARGIN = 0.97
 
 # Map Types
@@ -21,18 +21,18 @@ MAP_CROSS = "cross"
 MAP_DIAMOND = "diamond"
 
 # Player stats
-PLAYER_SPEED = 175.0
+PLAYER_SPEED = 210.0
 PLAYER_HP = 100
 PLAYER_DAMAGE = 10
-PLAYER_FIRE_RATE = 0.28
-FIRE_RATE_MIN = 0.08
+PLAYER_FIRE_RATE = 0.22
+FIRE_RATE_MIN = 0.05
 FIRE_RATE_RATIO_MIN = 0.65
 FIRE_RATE_RATIO_MAX = 1.65
 FIRE_RATE_CURVE = 0.85
 
 # Gameplay tuning
-WAVE_COOLDOWN = 2.0
-MAX_ENEMIES = 12  # Maximum concurrent enemies in a wave
+WAVE_COOLDOWN = 0.6
+MAX_ENEMIES = 24  # Maximum concurrent enemies in a wave
 MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter
 
 # Ultra ability (special powerup -> right click)
@@ -56,9 +56,9 @@ ISO_SCALE_X = 1.0
 ISO_SCALE_Y = 0.5
 
 # Colors
-BG_TOP = (10, 15, 30)
+BG_TOP = (5, 10, 20)
 BG_BOTTOM = (5, 8, 20)
-FLOOR_MAIN = (30, 35, 42)       # Cool slate-grey
+FLOOR_MAIN = (20, 24, 32)       # Cool slate-grey
 FLOOR_EDGE = (50, 60, 75)       # Blue-grey edge
 FLOOR_GRID = (60, 80, 100)      # Muted steel-blue grid
 HUD_TEXT = (240, 240, 240)

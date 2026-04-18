@@ -18,7 +18,7 @@ class BalanceLogic:
     sim_dt_cap: float = 1.0 / 30.0
 
     # Hitboxes
-    player_radius: float = 14.0
+    player_radius: float = 10.0
     boss_radius: float = 24.0
     default_enemy_radius: float = 12.0
     enemy_radii: dict[str, float] = field(
@@ -51,12 +51,12 @@ class BalanceLogic:
     bomb_blast_min_damage: int = 10
 
     # Pickups
-    magnet_radius_normal: float = 150.0
-    magnet_radius_special: float = 190.0
-    pickup_radius_normal: float = 16.0
-    pickup_radius_special: float = 20.0
-    pickup_pull_base_speed: float = 220.0
-    pickup_pull_nearby_gain: float = 2.0
+    magnet_radius_normal: float = 180.0
+    magnet_radius_special: float = 230.0
+    pickup_radius_normal: float = 20.0
+    pickup_radius_special: float = 25.0
+    pickup_pull_base_speed: float = 270.0
+    pickup_pull_nearby_gain: float = 2.5
 
     # Wave / spawn settings
     wave_cooldown: float = 2.0
@@ -80,7 +80,7 @@ class BalanceLogic:
     ultra_kill_pity_threshold: int = 30
 
     # Dash
-    dash_cooldown: float = 1.5
+    dash_cooldown: float = 0.85
 
     @property
     def fixed_dt(self) -> float:
@@ -138,11 +138,11 @@ class EnemySpawnLogic:
         self.enemy_classes: tuple[EnemyClass, ...] = (
             EnemyClass("frontline", ("chaser", "charger"), unlock_wave=1, weight=3.0),
             EnemyClass("gunline", ("ranged",), unlock_wave=1, weight=2.2),
-            EnemyClass("explosive", ("bomber",), unlock_wave=2, weight=1.6),
-            EnemyClass("swarmers", ("swarm",), unlock_wave=3, weight=1.7),
-            EnemyClass("control", ("engineer",), unlock_wave=4, weight=1.2),
-            EnemyClass("bruisers", ("tank",), unlock_wave=5, weight=1.0),
-            EnemyClass("pressure", ("spitter", "flyer"), unlock_wave=7, weight=1.3),
+            EnemyClass("explosive", ("bomber",), unlock_wave=1, weight=1.6),
+            EnemyClass("swarmers", ("swarm",), unlock_wave=2, weight=1.7),
+            EnemyClass("control", ("engineer",), unlock_wave=3, weight=1.2),
+            EnemyClass("bruisers", ("tank",), unlock_wave=3, weight=1.0),
+            EnemyClass("pressure", ("spitter", "flyer"), unlock_wave=4, weight=1.3),
         )
         self.member_weights: dict[str, float] = {
             "chaser": 1.0,
@@ -174,7 +174,7 @@ class EnemySpawnLogic:
             "boss_womb_core": 30,
         }
         # Prevent wave plans from collapsing into a single class too often.
-        self.max_class_share: float = 0.6
+        self.max_class_share: float = 0.45
 
     @staticmethod
     def _spawn_mod(difficulty: str) -> float:

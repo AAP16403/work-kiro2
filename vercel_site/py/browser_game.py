@@ -991,24 +991,7 @@ class BrowserGame:
         ctx.fill()
 
         # ── Retro Parallax Wireframe Floor ──
-        if playing:
-            ctx.save()
-            grid = 120
-            p_alpha = 0.05 + 0.05 * ci
-            ctx.strokeStyle = f"rgba(100, 180, 255, {p_alpha})"
-            ctx.lineWidth = 1
-            ox = (px * 0.9) % grid
-            oy = (py * 0.45) % grid
-            ctx.beginPath()
-            for x in range(0, self.view_w + grid, grid):
-                ctx.moveTo(x - ox, 0)
-                ctx.lineTo(x - ox, self.view_h)
-            for y in range(0, self.view_h + grid, grid):
-                ctx.moveTo(0, y - oy)
-                ctx.lineTo(self.view_w, y - oy)
-            ctx.stroke()
-            ctx.restore()
-        else:
+        if not playing:
             # Scan-line grid menu
             ctx.save()
             ctx.globalAlpha = 0.08
@@ -2232,8 +2215,9 @@ class BrowserGame:
             self._draw_button(button)
 
     def _draw_pause(self) -> None:
-        pw = 380
-        ph = 340
+        scale = max(0.85, min(1.4, min(self.view_w / 1280.0, self.view_h / 820.0)))
+        pw = 380 * scale
+        ph = 360 * scale
         px = self.view_w * 0.5 - pw * 0.5
         py = self.view_h * 0.5 - ph * 0.5
         self._draw_panel(px, py, pw, ph)
@@ -2242,19 +2226,19 @@ class BrowserGame:
 
         ctx.textAlign = "center"
         ctx.fillStyle = "rgba(244, 247, 255, 0.98)"
-        ctx.font = "700 34px Orbitron, sans-serif"
-        ctx.fillText("PAUSED", cx, py + 60)
+        ctx.font = f"700 {int(34 * scale)}px Orbitron, sans-serif"
+        ctx.fillText("PAUSED", cx, py + 60 * scale)
 
         ctx.strokeStyle = "rgba(120, 200, 255, 0.2)"
         ctx.lineWidth = 1
         ctx.beginPath()
-        ctx.moveTo(cx - 80, py + 72)
-        ctx.lineTo(cx + 80, py + 72)
+        ctx.moveTo(cx - 80 * scale, py + 72 * scale)
+        ctx.lineTo(cx + 80 * scale, py + 72 * scale)
         ctx.stroke()
 
-        ctx.font = "600 18px Rajdhani, sans-serif"
+        ctx.font = f"600 {int(18 * scale)}px Rajdhani, sans-serif"
         ctx.fillStyle = "rgba(192, 208, 228, 0.92)"
-        ctx.fillText("Take a breath, then jump back in.", cx, py + 100)
+        ctx.fillText("Take a breath, then jump back in.", cx, py + 100 * scale)
         ctx.textAlign = "start"
         for button in self.pause_buttons:
             self._draw_button(button)
@@ -2302,8 +2286,9 @@ class BrowserGame:
             self._draw_button(button, card_text=button.payload.get("desc", ""))
 
     def _draw_game_over(self) -> None:
-        pw = 480
-        ph = 420
+        scale = max(0.85, min(1.4, min(self.view_w / 1280.0, self.view_h / 820.0)))
+        pw = 480 * scale
+        ph = 440 * scale
         px = self.view_w * 0.5 - pw * 0.5
         py = self.view_h * 0.5 - ph * 0.5
         
@@ -2316,37 +2301,37 @@ class BrowserGame:
         cx = self.view_w * 0.5
 
         # Top banner highlight
-        banner_grad = ctx.createLinearGradient(px, py, px, py + 100)
+        banner_grad = ctx.createLinearGradient(px, py, px, py + 100 * scale)
         banner_grad.addColorStop(0, "rgba(255, 80, 80, 0.15)")
         banner_grad.addColorStop(1, "rgba(255, 80, 80, 0)")
         ctx.fillStyle = banner_grad
-        ctx.fillRect(px, py, pw, 100)
+        ctx.fillRect(px, py, pw, 100 * scale)
 
         ctx.textAlign = "center"
         ctx.fillStyle = "rgba(255, 180, 160, 0.98)"
-        ctx.font = "900 38px Orbitron, sans-serif"
-        ctx.fillText("RUN COMPLETE", cx, py + 70)
+        ctx.font = f"900 {int(38 * scale)}px Orbitron, sans-serif"
+        ctx.fillText("RUN COMPLETE", cx, py + 70 * scale)
 
         # Accent line
         ctx.strokeStyle = "rgba(255, 120, 100, 0.3)"
         ctx.lineWidth = 1.5
         ctx.beginPath()
-        ctx.moveTo(cx - 120, py + 95)
-        ctx.lineTo(cx + 120, py + 95)
+        ctx.moveTo(cx - 120 * scale, py + 95 * scale)
+        ctx.lineTo(cx + 120 * scale, py + 95 * scale)
         ctx.stroke()
 
-        ctx.font = "700 22px Rajdhani, sans-serif"
+        ctx.font = f"700 {int(22 * scale)}px Rajdhani, sans-serif"
         ctx.fillStyle = "rgba(208, 220, 238, 0.95)"
-        ctx.fillText(f"Wave Reached:  {self.final_wave}", cx, py + 140)
-        ctx.fillText(f"Final Score:  {self.final_score:,}", cx, py + 175)
+        ctx.fillText(f"Wave Reached:  {self.final_wave}", cx, py + 140 * scale)
+        ctx.fillText(f"Final Score:  {self.final_score:,}", cx, py + 175 * scale)
         ctx.fillStyle = "rgba(180, 200, 220, 0.7)"
-        ctx.fillText(f"High Score:  {self.high_score:,}", cx, py + 210)
+        ctx.fillText(f"High Score:  {self.high_score:,}", cx, py + 210 * scale)
 
         if self.is_new_high:
             ctx.fillStyle = "rgba(255, 216, 100, 1.0)"
-            ctx.font = "800 24px Orbitron, sans-serif"
+            ctx.font = f"800 {int(24 * scale)}px Orbitron, sans-serif"
             pulse_y = 4 * math.sin(self.background_t * 6.0)
-            ctx.fillText("\u2605  NEW HIGH SCORE  \u2605", cx, py + 260 + pulse_y)
+            ctx.fillText("\u2605  NEW HIGH SCORE  \u2605", cx, py + 260 * scale + pulse_y)
 
         ctx.textAlign = "start"
         for button in self.game_over_buttons:

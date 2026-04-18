@@ -1,6 +1,6 @@
-﻿"""Projectile entity and related functionality."""
+"""Projectile entity and related functionality."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 import random
 from typing import TYPE_CHECKING
@@ -20,10 +20,14 @@ class Projectile:
     owner: str = "player"  # "player" or "enemy"
     projectile_type: str = "bullet"  # "bullet", "spread", "missile", "plasma", "bomb"
     prev_pos: Vec2 | None = None
+    history: list[Vec2] = field(default_factory=list)
 
     def update(self, dt: float) -> bool:
         """Update projectile position and TTL. Returns False if expired."""
         self.prev_pos = self.pos
+        self.history.append(Vec2(self.pos.x, self.pos.y))
+        if len(self.history) > 6:
+            self.history.pop(0)
         self.pos = self.pos + self.vel * dt
         self.ttl -= dt
         return self.ttl > 0

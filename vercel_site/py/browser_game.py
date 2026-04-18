@@ -864,7 +864,10 @@ class BrowserGame:
 
     def render(self) -> None:
         ctx = self.ctx
-        ctx.clearRect(0, 0, self.view_w, self.view_h)
+        # Motion blur clear via alpha overlay
+        ctx.globalCompositeOperation = "source-over"
+        ctx.fillStyle = "rgba(4, 6, 12, 0.25)"
+        ctx.fillRect(0, 0, self.view_w, self.view_h)
         combat_intensity = 0.0
         if self.state:
             n_enemies = len(self.state.enemies)
@@ -881,7 +884,9 @@ class BrowserGame:
 
         if self.state and self.player:
             self._draw_arena(shake, combat_intensity)
+            ctx.globalCompositeOperation = "screen"
             self._draw_world(shake)
+            ctx.globalCompositeOperation = "source-over"
             self._draw_hud()
         else:
             self._draw_arena(shake, 0.12, preview_only=True)
@@ -920,19 +925,26 @@ class BrowserGame:
         ci = max(0.0, min(1.0, combat_intensity))
         t = self.background_t
         playing = self._is_playing
+        
+        px = self.player.pos.x if self.player else 0.0
+        py = self.player.pos.y if self.player else 0.0
 
-        # ── Deep space gradient ──
-        grad = ctx.createLinearGradient(0, 0, self.view_w * 0.3, self.view_h)
-        r0 = 10 + int(35 * ci)
-        g0 = 16 + int(12 * ci)
-        b0 = 32 - int(4 * ci)
-        grad.addColorStop(0, f"rgb({r0}, {g0}, {b0})")
-        grad.addColorStop(0.5, f"rgb({4 + int(20 * ci)}, {8 + int(5 * ci)}, {22})")
-        grad.addColorStop(1, f"rgb({3 + int(15 * ci)}, {6}, {14})")
-        ctx.fillStyle = grad
-        ctx.fillRect(0, 0, self.view_w, self.view_h)
+        if not playing:
+            grad = ctx.createLinearGradient(0, 0, self.view_w * 0.3, self.view_h)
+            r0 = 10 + int(35 * ci)
+            g0 = 16 + int(12 * ci)
+            b0 = 32 - int(4 * ci)
+            grad.addColorStop(0, f"rgb({r0}, {g0}, {b0})")
+            grad.addColorStop(0.5, f"rgb({4 + int(20 * ci)}, {8 + int(5 * ci)}, {22})")
+            grad.addColorStop(1, f"rgb({3 + int(15 * ci)}, {6}, {14})")
+            ctx.fillStyle = grad
+            ctx.fillRect(0, 0, self.view_w, self.view_h)
+        else:
+            # Soft tint to prevent complete washout
+            ctx.fillStyle = f"rgba({4 + int(10*ci)}, {6 + int(8*ci)}, {12}, 0.08)"
+            ctx.fillRect(0, 0, self.view_w, self.view_h)
 
-        # ── Nebula glow orbs — 2 during gameplay, 3 on menu ──
+        # ── Nebula glow orbs ──
         nebulae = [
             (0.25, 0.30, 380, (25, 65, 140), 0.28, 0.06),
             (0.75, 0.72, 260, (120, 50, 100), 0.18, 0.08),
@@ -942,8 +954,8 @@ class BrowserGame:
             (0.52, 0.82, 200, (70, 180, 165), 0.20, 0.11),
         ]
         for fx, fy, radius, color, amp, freq in nebulae:
-            nx = self.view_w * fx + math.sin(t * freq) * 40.0
-            ny = self.view_h * fy + math.cos(t * (freq + 0.02)) * 32.0
+            nx = self.view_w * fx + math.sin(t * freq) * 40.0 - (px * 0.02)
+            ny = self.view_h * fy + math.cos(t * (freq + 0.02)) * 32.0 - (py * 0.01)
             pulse = 0.5 + 0.5 * math.sin(t * (0.7 + freq * 3.0))
             alpha = (0.08 + 0.05 * pulse) * (1.0 + ci * 0.7)
             rg = ctx.createRadialGradient(nx, ny, 0, nx, ny, radius)
@@ -953,37 +965,51 @@ class BrowserGame:
             ctx.fillStyle = rg
             ctx.fillRect(nx - radius, ny - radius, radius * 2, radius * 2)
 
-        # ── Drifting star field — always active, with twinkle ──
-        for star in self._stars:
-            star["x"] += star["vx"] * 0.3
-            star["y"] += star["vy"] * 0.3
-            if star["x"] < -0.02: star["x"] = 1.02
-            elif star["x"] > 1.02: star["x"] = -0.02
-            if star["y"] < -0.02: star["y"] = 1.02
-            elif star["y"] > 1.02: star["y"] = -0.02
-        # Bright stars
-        ctx.fillStyle = "rgba(220, 240, 255, 0.35)"
+        # ── Drifting star field with Parallax ──
         ctx.beginPath()
-        for star in self._stars[:12]:
+        for idx, star in enumerate(self._stars):
+            star["x"] += star["vx"] * 0.4
+            star["y"] += star["vy"] * 0.4
+            if star["x"] < -0.2: star["x"] += 1.4
+            elif star["x"] > 1.2: star["x"] -= 1.4
+            if star["y"] < -0.2: star["y"] += 1.4
+            elif star["y"] > 1.2: star["y"] -= 1.4
+            
+            layer = (idx % 3) + 1.0
+            px_mod = (px * 0.08) / layer
+            py_mod = (py * 0.04) / layer
+            
+            sx = (star["x"] * self.view_w - px_mod) % self.view_w
+            sy = (star["y"] * self.view_h - py_mod) % self.view_h
+            
             twinkle = 0.6 + 0.4 * math.sin(t * 3.0 + star["phase"])
-            sx = star["x"] * self.view_w
-            sy = star["y"] * self.view_h
             r = star["r"] * twinkle
             ctx.moveTo(sx + r, sy)
             ctx.arc(sx, sy, r, 0, TAU)
-        ctx.fill()
-        # Dim stars
-        ctx.fillStyle = "rgba(180, 210, 240, 0.15)"
-        ctx.beginPath()
-        for star in self._stars[12:]:
-            sx = star["x"] * self.view_w
-            sy = star["y"] * self.view_h
-            ctx.moveTo(sx + star["r"], sy)
-            ctx.arc(sx, sy, star["r"], 0, TAU)
+            
+        ctx.fillStyle = "rgba(180, 220, 255, 0.45)"
         ctx.fill()
 
-        # ── Scan-line grid: menu only ──
-        if not playing:
+        # ── Retro Parallax Wireframe Floor ──
+        if playing:
+            ctx.save()
+            grid = 120
+            p_alpha = 0.05 + 0.05 * ci
+            ctx.strokeStyle = f"rgba(100, 180, 255, {p_alpha})"
+            ctx.lineWidth = 1
+            ox = (px * 0.9) % grid
+            oy = (py * 0.45) % grid
+            ctx.beginPath()
+            for x in range(0, self.view_w + grid, grid):
+                ctx.moveTo(x - ox, 0)
+                ctx.lineTo(x - ox, self.view_h)
+            for y in range(0, self.view_h + grid, grid):
+                ctx.moveTo(0, y - oy)
+                ctx.lineTo(self.view_w, y - oy)
+            ctx.stroke()
+            ctx.restore()
+        else:
+            # Scan-line grid menu
             ctx.save()
             ctx.globalAlpha = 0.08
             ctx.strokeStyle = "rgba(130, 180, 255, 0.2)"
@@ -1366,10 +1392,24 @@ class BrowserGame:
         radius = max(3.0, self._projectile_radius(projectile) * 0.72)
 
         vel = getattr(projectile, "vel", None)
-        has_trail = ptype in ("missile", "bomb", "plasma")
-
-        # Trail streak for heavy projectiles
-        if has_trail and vel:
+        # Ribbons via History
+        history = getattr(projectile, "history", [])
+        if len(history) > 1:
+            trail_alpha = 0.35 if is_enemy else 0.55
+            ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {trail_alpha:.2f})"
+            ctx.lineWidth = max(1.5, radius * 0.8)
+            ctx.lineJoin = "round"
+            ctx.lineCap = "round"
+            ctx.beginPath()
+            hsx, hsy = to_iso(history[0], shake)
+            ctx.moveTo(hsx, hsy - 10)
+            for point in history[1:]:
+                hx, hy = to_iso(point, shake)
+                ctx.lineTo(hx, hy - 10)
+            ctx.lineTo(sx, py)
+            ctx.stroke()
+        elif ptype in ("missile", "bomb", "plasma") and vel:
+            # Fallback streak
             speed = math.sqrt(vel.x * vel.x + vel.y * vel.y)
             if speed > 1e-6:
                 vdx, vdy = vel.x / speed, vel.y / speed
@@ -1380,12 +1420,7 @@ class BrowserGame:
                 ctx.beginPath()
                 ctx.moveTo(sx, py)
                 ctx.lineTo(sx - vdx * trail_len, py - vdy * trail_len * 0.65)
-                ctx.stroke()
-
-
-
-
-        # Bomb: dark casing ring + orange core
+                ctx.stroke()        # Bomb: dark casing ring + orange core
         if ptype == "bomb":
             ctx.fillStyle = f"rgba(120, 70, 45, 0.85)"
             ctx.beginPath()
@@ -1858,64 +1893,67 @@ class BrowserGame:
             ctx.stroke()
 
         # ── Body diamond (main hull) ──
-        ctx.save()
-        ctx.translate(sx, cy)
-        ctx.rotate(angle + math.pi * 0.25)
-
-        # Dark outline hull
-        ctx.fillStyle = "rgba(10, 20, 35, 0.85)"
-        ctx.beginPath()
-        ctx.moveTo(0, -19)
-        ctx.lineTo(13, 2)
-        ctx.lineTo(0, 15)
-        ctx.lineTo(-13, 2)
-        ctx.closePath()
-        ctx.fill()
-
-        # Colored hull
-        ctx.fillStyle = f"rgb({hull[0]}, {hull[1]}, {hull[2]})"
-        ctx.beginPath()
-        ctx.moveTo(0, -17)
-        ctx.lineTo(11, 2)
-        ctx.lineTo(0, 13)
-        ctx.lineTo(-11, 2)
-        ctx.closePath()
-        ctx.fill()
-
-        # Chest plate accent
-        ctx.fillStyle = f"rgba({hull[0] - 30}, {hull[1] - 50}, {hull[2] - 30}, 0.7)"
-        ctx.beginPath()
-        ctx.moveTo(0, -10)
-        ctx.lineTo(6, 0)
-        ctx.lineTo(0, 8)
-        ctx.lineTo(-6, 0)
-        ctx.closePath()
-        ctx.fill()
-
-        # Core energy dot
-        core_pulse = 0.7 + 0.3 * math.sin(t * 7.8)
-        ctx.fillStyle = f"rgba(200, 245, 255, {0.6 * core_pulse:.3f})"
-        ctx.beginPath()
-        ctx.arc(0, 0, 4, 0, TAU)
-        ctx.fill()
-
-        # Highlight
-        ctx.fillStyle = "rgba(255, 255, 255, 0.22)"
-        ctx.beginPath()
-        ctx.arc(-3, 4, 4, 0, TAU)
-        ctx.fill()
-
-        # Edge stroke
-        ctx.strokeStyle = "rgba(255,255,255,0.28)"
-        ctx.lineWidth = 1.5
-        ctx.beginPath()
-        ctx.moveTo(0, -17)
-        ctx.lineTo(11, 2)
-        ctx.lineTo(0, 13)
-        ctx.lineTo(-11, 2)
-        ctx.closePath()
-        ctx.stroke()
-        ctx.restore()
+        aberration = self.flash > 0 or getattr(self.player, "is_dashing", False)
+        passes = 3 if aberration else 1
+        
+        for p_idx in range(passes):
+            ctx.save()
+            if passes > 1:
+                ctx.globalCompositeOperation = "lighter"
+                off_x = (p_idx - 1) * 3.5
+                off_y = (p_idx - 1) * -1.5
+                ctx.translate(sx + off_x, cy + off_y)
+                ctx.rotate(angle + math.pi * 0.25)
+                color = f"rgba({255 if p_idx==0 else 0}, {255 if p_idx==1 else 0}, {255 if p_idx==2 else 0}, 0.85)"
+                ctx.fillStyle = color
+                ctx.beginPath()
+                ctx.moveTo(0, -19); ctx.lineTo(13, 2); ctx.lineTo(0, 15); ctx.lineTo(-13, 2)
+                ctx.closePath()
+                ctx.fill()
+            else:
+                ctx.translate(sx, cy)
+                ctx.rotate(angle + math.pi * 0.25)
+        
+                # Dark outline hull
+                ctx.fillStyle = "rgba(10, 20, 35, 0.85)"
+                ctx.beginPath()
+                ctx.moveTo(0, -19); ctx.lineTo(13, 2); ctx.lineTo(0, 15); ctx.lineTo(-13, 2)
+                ctx.closePath()
+                ctx.fill()
+        
+                # Colored hull
+                ctx.fillStyle = f"rgb({hull[0]}, {hull[1]}, {hull[2]})"
+                ctx.beginPath()
+                ctx.moveTo(0, -17); ctx.lineTo(11, 2); ctx.lineTo(0, 13); ctx.lineTo(-11, 2)
+                ctx.closePath()
+                ctx.fill()
+        
+                # Chest plate accent
+                ctx.fillStyle = f"rgba({hull[0] - 30}, {hull[1] - 50}, {hull[2] - 30}, 0.7)"
+                ctx.beginPath()
+                ctx.moveTo(0, -10); ctx.lineTo(6, 0); ctx.lineTo(0, 8); ctx.lineTo(-6, 0)
+                ctx.closePath()
+                ctx.fill()
+        
+                # Core energy dot
+                core_pulse = 0.7 + 0.3 * math.sin(t * 7.8)
+                ctx.fillStyle = f"rgba(200, 245, 255, {0.6 * core_pulse:.3f})"
+                ctx.beginPath()
+                ctx.arc(0, 0, 4, 0, TAU)
+                ctx.fill()
+        
+                # Highlight & Edge stroke
+                ctx.fillStyle = "rgba(255, 255, 255, 0.22)"
+                ctx.beginPath()
+                ctx.arc(-3, 4, 4, 0, TAU)
+                ctx.fill()
+                ctx.strokeStyle = "rgba(255,255,255,0.28)"
+                ctx.lineWidth = 1.5
+                ctx.beginPath()
+                ctx.moveTo(0, -17); ctx.lineTo(11, 2); ctx.lineTo(0, 13); ctx.lineTo(-11, 2)
+                ctx.closePath()
+                ctx.stroke()
+            ctx.restore()
 
         # ── Gun barrel (world space, pointing at aim) ──
         gun_len = 18

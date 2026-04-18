@@ -228,12 +228,14 @@ class ParticleSystem:
             self.particles.append(p)
 
     def add_death_explosion(self, pos: Vec2, color: tuple[int, int, int], behavior_name: str = ""):
-        count = 12
+        count = 60
         if behavior_name.startswith("boss"):
-            count = 40
+            count = 150
         elif behavior_name == "tank":
-            count = 20
-        self.emit(pos, color, count=count, speed=150.0, life=0.8, size=4.0)
+            count = 90
+            
+        self.emit(pos, color, count=int(count * 0.7), speed=250.0, life=0.6, size=2.5)
+        self.emit(pos, (255, 255, 255), count=int(count * 0.3), speed=350.0, life=0.3, size=1.5)
 
     def add_hit_particles(self, pos: Vec2, color: tuple[int, int, int]):
         self.emit(pos, color, count=4, speed=80.0, life=0.4, size=2.5)

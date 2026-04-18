@@ -964,11 +964,7 @@ class Visuals:
             trail.opacity = 95 if str(getattr(proj, "owner", "player")) == "enemy" else 125
         sh.x, sh.y = sx, sy
         core.x, core.y = sx, sy
-        if speed <= 1e-6:
-            flare.x, flare.y = sx, sy
-        else:
-            vd = v2.normalized()
-            flare.x, flare.y = sx + vd.x * 1.8, sy + vd.y * 1.2
+        flare.x, flare.y = sx, sy
         flare.opacity = 90 if str(getattr(proj, "owner", "player")) == "enemy" else 130
         self._set_depth(h, sy)
 

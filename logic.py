@@ -18,7 +18,7 @@ class BalanceLogic:
     sim_dt_cap: float = 1.0 / 30.0
 
     # Hitboxes
-    player_radius: float = 14.0
+    player_radius: float = 4.0
     boss_radius: float = 24.0
     default_enemy_radius: float = 12.0
     enemy_radii: dict[str, float] = field(

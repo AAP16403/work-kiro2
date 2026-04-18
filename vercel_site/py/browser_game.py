@@ -1377,7 +1377,7 @@ class BrowserGame:
         vel = getattr(projectile, "vel", None)
         # Ribbons via History
         history = getattr(projectile, "history", [])
-        if len(history) > 1:
+        if len(history) > 1 and ptype not in ("bullet", "spread"):
             trail_alpha = 0.35 if is_enemy else 0.55
             ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {trail_alpha:.2f})"
             ctx.lineWidth = max(1.5, radius * 0.8)

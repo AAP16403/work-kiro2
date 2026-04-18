@@ -238,14 +238,14 @@ class BrowserGame:
 
         pw = 230 * scale
         ph = 54 * scale
-        py = self.view_h * 0.5 + 92 * scale
+        py = self.view_h * 0.5 - 20 * scale
         self.pause_buttons = [
             UIButton("Resume", self.view_w * 0.5 - pw * 0.5, py, pw, ph, "resume"),
             UIButton("Restart", self.view_w * 0.5 - pw * 0.5, py + ph + gap, pw, ph, "restart"),
             UIButton("Main Menu", self.view_w * 0.5 - pw * 0.5, py + 2 * (ph + gap), pw, ph, "menu"),
         ]
 
-        gy = self.view_h * 0.5 + 110 * scale
+        gy = self.view_h * 0.5 + 80 * scale
         self.game_over_buttons = [
             UIButton("Run Again", self.view_w * 0.5 - pw * 0.5, gy, pw, ph, "restart"),
             UIButton("Main Menu", self.view_w * 0.5 - pw * 0.5, gy + ph + gap, pw, ph, "menu"),
@@ -1183,8 +1183,9 @@ class BrowserGame:
         color = POWERUP_COLORS.get(getattr(powerup, "kind", ""), (220, 220, 220))
         sx, sy = to_iso(powerup.pos, shake)
         t = self.background_t
-        pulse = 1.0 + 0.15 * math.sin(t * 4.0 + powerup.pos.x * 0.02)
-        float_y = 6.0 * math.sin(t * 3.0 + getattr(powerup, "id", powerup.pos.x))
+        seed = getattr(powerup, "id", powerup.pos.x)
+        pulse = 1.0 + 0.15 * math.sin(t * 4.0 + seed * 0.02)
+        float_y = 6.0 * math.sin(t * 3.0 + seed)
         cy = sy - 14 + float_y
         
         ctx = self.ctx
@@ -1197,55 +1198,47 @@ class BrowserGame:
         ctx.ellipse(sx, sy, shadow_w, shadow_h, 0, 0, TAU)
         ctx.fill()
 
-        # Glow rings
-        self._draw_glow_circle(sx, cy, 14 * pulse, color, 0.25)
-        self._draw_glow_circle(sx, cy, 24 * pulse, color, 0.1)
+        # Deep glow
+        self._draw_glow_circle(sx, cy, 16 * pulse, color, 0.3)
+        self._draw_glow_circle(sx, cy, 30 * pulse, color, 0.12)
 
-        # 3D Crystal rendering
-        width = 12 * pulse
-        height_top = 16 * pulse
-        height_bot = 14 * pulse
-        
-        # Left facet
-        ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.85)"
+        # Sci-Fi Orb Core
+        core_r = 7.5 * pulse
+        ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.95)"
         ctx.beginPath()
-        ctx.moveTo(sx, cy - height_top)
-        ctx.lineTo(sx - width, cy)
-        ctx.lineTo(sx, cy + height_bot)
-        ctx.lineTo(sx, cy)
+        ctx.arc(sx, cy, core_r, 0, TAU)
         ctx.fill()
-        
-        # Right facet (darker for 3D effect)
-        ctx.fillStyle = f"rgba({max(0, color[0]-50)}, {max(0, color[1]-50)}, {max(0, color[2]-50)}, 0.95)"
+        # Brilliant center
+        ctx.fillStyle = "rgba(255, 255, 255, 0.8)"
         ctx.beginPath()
-        ctx.moveTo(sx, cy - height_top)
-        ctx.lineTo(sx + width, cy)
-        ctx.lineTo(sx, cy + height_bot)
-        ctx.lineTo(sx, cy)
+        ctx.arc(sx, cy, core_r * 0.4, 0, TAU)
         ctx.fill()
-        
-        # Crystal outline
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.6)"
-        ctx.lineWidth = 1.5
-        ctx.beginPath()
-        ctx.moveTo(sx, cy - height_top)
-        ctx.lineTo(sx + width, cy)
-        ctx.lineTo(sx, cy + height_bot)
-        ctx.lineTo(sx - width, cy)
-        ctx.closePath()
-        ctx.stroke()
-        # Center edge line
-        ctx.beginPath()
-        ctx.moveTo(sx, cy - height_top)
-        ctx.lineTo(sx, cy + height_bot)
-        ctx.stroke()
-        
-        # Inner energy core flash
-        if math.sin(t * 8.0 + powerup.pos.x) > 0.8:
-            ctx.fillStyle = "rgba(255, 255, 255, 0.8)"
+
+        # Orbiting Wireframe Halos
+        for i in range(2):
+            ring_scale = 14.0 * pulse + (i * 5.0)
+            tilt = 0.5 + 0.4 * math.sin(t * (2.0 + i) + seed)
+            rot = t * (3.5 - i * 1.5) + seed * 1.2
+            
+            ctx.save()
+            ctx.translate(sx, cy)
+            ctx.rotate(rot)
+            
+            ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {0.6 + 0.3 * math.cos(t * 5.0):.3f})"
+            ctx.lineWidth = 2.0 - i * 0.5
             ctx.beginPath()
-            ctx.arc(sx, cy, 3, 0, TAU)
+            ctx.ellipse(0, 0, ring_scale, ring_scale * tilt, 0, 0, TAU)
+            ctx.stroke()
+            
+            # Orbiting node on the ring
+            node_x = math.cos(t * (5.0 + i) + seed) * ring_scale
+            node_y = math.sin(t * (5.0 + i) + seed) * (ring_scale * tilt)
+            ctx.fillStyle = "rgba(255, 255, 255, 0.9)"
+            ctx.beginPath()
+            ctx.arc(node_x, node_y, 2.5, 0, TAU)
             ctx.fill()
+            
+            ctx.restore()
 
     def _draw_trap(self, trap, shake: Vec2) -> None:
         sx, sy = to_iso(trap.pos, shake)
@@ -1500,77 +1493,123 @@ class BrowserGame:
             ctx.fill()
 
         elif name == "tank":
-            ctx.fillStyle = "rgba(80, 120, 80, 0.9)"
-            ctx.fillRect(sx - 8, sy + bob - 18, 16, 8)
+            ctx.fillStyle = "rgba(40, 50, 40, 0.9)"
+            ctx.beginPath()
+            ctx.ellipse(sx - 10, sy + bob - 12, 6, 12, 0, 0, TAU)
+            ctx.ellipse(sx + 10, sy + bob - 12, 6, 12, 0, 0, TAU)
+            ctx.fill()
             
-            shield_r = 22 + 1.0 * math.sin(enemy_obj.t * 2.0)
-            ctx.strokeStyle = f"rgba(100, 220, 100, {0.2 + 0.15 * math.sin(enemy_obj.t * 1.5)})"
+            ctx.fillStyle = f"rgba({max(0, color[0]-40)}, {max(0, color[1]-40)}, {max(0, color[2]-40)}, 0.9)"
+            ctx.beginPath()
+            ctx.ellipse(sx, sy + bob - 16, 14, 10, 0, 0, TAU)
+            ctx.fill()
+            
+            ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.95)"
+            ctx.beginPath()
+            ctx.arc(sx, sy + bob - 16, 6, 0, TAU)
+            ctx.fill()
+            ctx.strokeStyle = "rgba(200, 255, 200, 0.7)"
+            ctx.lineWidth = 4
+            ctx.beginPath()
+            ctx.moveTo(sx, sy + bob - 16)
+            ctx.lineTo(sx, sy + bob - 28)
+            ctx.stroke()
+            
+            shield_r = 24 + 1.5 * math.sin(enemy_obj.t * 3.0)
+            ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {0.2 + 0.2 * math.cos(enemy_obj.t * 2.5):.3f})"
             ctx.lineWidth = 2.5
             ctx.beginPath()
             ctx.ellipse(sx, sy + bob * 0.4 - 14, shield_r, shield_r * 0.6, 0, 0, TAU)
             ctx.stroke()
+            ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {0.05 + 0.05 * math.cos(enemy_obj.t * 2.5):.3f})"
+            ctx.fill()
             
         elif name == "ranged":
             sr = 20
             sa = enemy_obj.t * 1.2
-            ctx.strokeStyle = f"rgba(255, 50, 50, {0.25 + 0.15 * math.sin(enemy_obj.t * 3.0)})"
-            ctx.lineWidth = 1.5
-            cx = sx + 18
-            cy = sy + 2 + bob - 14
+            cx = sx + 16
+            cy = sy + bob - 14
+            
+            # Articulated turret
+            ctx.fillStyle = f"rgba({max(0, color[0]-30)}, {max(0, color[1]-30)}, {max(0, color[2]-30)}, 0.95)"
             ctx.beginPath()
-            ctx.moveTo(cx - math.cos(sa) * sr, cy)
-            ctx.lineTo(cx + math.cos(sa) * sr, cy)
-            ctx.moveTo(cx, cy - math.sin(sa) * sr)
-            ctx.lineTo(cx, cy + math.sin(sa) * sr)
+            ctx.ellipse(cx - 10, cy, 14, 6, 0, 0, TAU)
+            ctx.fill()
+            
+            # Turret ring
+            ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.8)"
+            ctx.lineWidth = 2.5
+            ctx.beginPath()
+            ctx.arc(cx, cy, 6, 0, TAU)
             ctx.stroke()
             
-            ctx.fillStyle = "rgba(100, 100, 100, 0.9)"
-            ctx.fillRect(sx + 6, sy + bob - 16, 12, 4)
+            # Rotating crosshairs
+            ctx.strokeStyle = f"rgba(255, 100, 100, {0.25 + 0.15 * math.sin(enemy_obj.t * 3.0)})"
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.moveTo(cx - math.cos(sa) * sr, cy - math.sin(sa) * sr * 0.5)
+            ctx.lineTo(cx + math.cos(sa) * sr, cy + math.sin(sa) * sr * 0.5)
+            ctx.moveTo(cx + math.sin(sa) * sr, cy - math.cos(sa) * sr * 0.5)
+            ctx.lineTo(cx - math.sin(sa) * sr, cy + math.cos(sa) * sr * 0.5)
+            ctx.stroke()
 
         elif name == "charger":
-            ctx.fillStyle = "rgba(200, 200, 200, 0.9)"
+            ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.85)"
             ctx.beginPath()
-            ctx.moveTo(sx + 2, sy + 16 + bob - 14)
-            ctx.lineTo(sx + 12, sy + 10 + bob - 14)
-            ctx.lineTo(sx + 6, sy + 4 + bob - 14)
-            ctx.fill()
-            ctx.beginPath()
-            ctx.moveTo(sx - 2, sy + 16 + bob - 14)
-            ctx.lineTo(sx - 12, sy + 10 + bob - 14)
-            ctx.lineTo(sx - 6, sy + 4 + bob - 14)
+            ctx.moveTo(sx, sy + bob - 28)
+            ctx.lineTo(sx + 16, sy + bob)
+            ctx.lineTo(sx + 6, sy + bob - 6)
+            ctx.lineTo(sx, sy + bob - 2)
+            ctx.lineTo(sx - 6, sy + bob - 6)
+            ctx.lineTo(sx - 16, sy + bob)
+            ctx.closePath()
             ctx.fill()
             
+            core_pulse = 0.6 + 0.4 * math.sin(enemy_obj.t * 25.0)
+            self._draw_glow_circle(sx, sy + bob - 12, 6, (255, 255, 255), core_pulse)
+            
             if getattr(enemy_obj, "ai", {}).get("charger_dashing", False):
-                ctx.strokeStyle = "rgba(255, 200, 100, 0.5)"
-                ctx.lineWidth = 2
+                ctx.strokeStyle = "rgba(255, 200, 100, 0.6)"
+                ctx.lineWidth = 3
                 ctx.beginPath()
-                ctx.moveTo(sx - 12, sy + 6 + bob - 14)
-                ctx.lineTo(sx - 32, sy + 10 + bob - 14)
+                ctx.moveTo(sx - 4, sy + bob - 2)
+                ctx.lineTo(sx - 10, sy + bob + 16)
                 ctx.stroke()
                 ctx.beginPath()
-                ctx.moveTo(sx - 12, sy - 2 + bob - 14)
-                ctx.lineTo(sx - 32, sy + 2 + bob - 14)
+                ctx.moveTo(sx + 4, sy + bob - 2)
+                ctx.lineTo(sx + 10, sy + bob + 16)
                 ctx.stroke()
 
         elif name == "flyer":
-            flap = 6 + 4 * math.sin(enemy_obj.t * 10.0)
-            ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.8)"
+            flap = 4 + 6 * math.sin(enemy_obj.t * 12.0)
+            ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.9)"
             ctx.beginPath()
-            ctx.moveTo(sx, sy + bob + 6 - 14)
-            ctx.lineTo(sx + 22, sy + bob + flap - 14)
-            ctx.lineTo(sx + 10, sy + bob - 2 - 14)
-            ctx.fill()
-            ctx.beginPath()
-            ctx.moveTo(sx, sy + bob + 6 - 14)
-            ctx.lineTo(sx - 22, sy + bob + flap - 14)
-            ctx.lineTo(sx - 10, sy + bob - 2 - 14)
+            ctx.ellipse(sx, sy + bob - 14, 4, 12, 0, 0, TAU)
             ctx.fill()
             
-            ctx.strokeStyle = f"rgba(100, 200, 255, {0.2 + 0.15 * math.sin(enemy_obj.t * 8.0)})"
-            ctx.lineWidth = 2
+            ctx.fillStyle = f"rgba({max(0, color[0]-20)}, {max(0, color[1]-20)}, {max(0, color[2]-20)}, 0.85)"
             ctx.beginPath()
-            ctx.moveTo(sx - 4, sy + bob - 4 - 14)
-            ctx.lineTo(sx - 18, sy + bob - 16 - 14)
+            ctx.moveTo(sx, sy + bob - 10)
+            ctx.lineTo(sx + 24, sy + bob + flap - 14)
+            ctx.lineTo(sx + 4, sy + bob - 20)
+            ctx.fill()
+            ctx.beginPath()
+            ctx.moveTo(sx, sy + bob - 10)
+            ctx.lineTo(sx - 24, sy + bob + flap - 14)
+            ctx.lineTo(sx - 4, sy + bob - 20)
+            ctx.fill()
+            
+            # Jet trails
+            jet_pulse = 0.5 + 0.5 * math.sin(enemy_obj.t * 15.0)
+            ctx.strokeStyle = f"rgba(100, 200, 255, {0.4 * jet_pulse})"
+            ctx.lineWidth = 2.5
+            ctx.beginPath()
+            ctx.moveTo(sx - 2, sy + bob - 4)
+            ctx.lineTo(sx - 6, sy + bob + 8 + 4 * jet_pulse)
+            ctx.stroke()
+            ctx.beginPath()
+            ctx.moveTo(sx + 2, sy + bob - 4)
+            ctx.lineTo(sx + 6, sy + bob + 8 + 4 * jet_pulse)
             ctx.stroke()
             
         elif name == "spitter":

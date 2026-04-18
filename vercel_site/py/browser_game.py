@@ -1875,7 +1875,7 @@ class BrowserGame:
             ctx.lineTo(sx - aim_dir.x * (jet_len * 0.8), cy - aim_dir.y * (jet_len * 0.5))
             ctx.stroke()
 
-        # ── Body diamond (main hull) ──
+        # ── Main Ship Hull (Sleek Fighter) ──
         aberration = self.flash > 0 or getattr(self.player, "is_dashing", False)
         passes = 3 if aberration else 1
         
@@ -1886,54 +1886,77 @@ class BrowserGame:
                 off_x = (p_idx - 1) * 3.5
                 off_y = (p_idx - 1) * -1.5
                 ctx.translate(sx + off_x, cy + off_y)
-                ctx.rotate(angle + math.pi * 0.25)
+                ctx.rotate(angle)
                 color = f"rgba({255 if p_idx==0 else 0}, {255 if p_idx==1 else 0}, {255 if p_idx==2 else 0}, 0.85)"
                 ctx.fillStyle = color
                 ctx.beginPath()
-                ctx.moveTo(0, -19); ctx.lineTo(13, 2); ctx.lineTo(0, 15); ctx.lineTo(-13, 2)
+                ctx.moveTo(18, 0)
+                ctx.lineTo(-4, 12)
+                ctx.lineTo(-12, 12)
+                ctx.lineTo(-8, 0)
+                ctx.lineTo(-12, -12)
+                ctx.lineTo(-4, -12)
                 ctx.closePath()
                 ctx.fill()
             else:
                 ctx.translate(sx, cy)
-                ctx.rotate(angle + math.pi * 0.25)
+                ctx.rotate(angle)
         
-                # Dark outline hull
-                ctx.fillStyle = "rgba(10, 20, 35, 0.85)"
+                # Dark outline hull / Wings
+                ctx.fillStyle = "rgba(15, 22, 36, 0.95)"
                 ctx.beginPath()
-                ctx.moveTo(0, -19); ctx.lineTo(13, 2); ctx.lineTo(0, 15); ctx.lineTo(-13, 2)
+                ctx.moveTo(8, 0)
+                ctx.lineTo(-12, 18)
+                ctx.lineTo(-16, 18)
+                ctx.lineTo(-10, 6)
+                ctx.lineTo(-18, 8)
+                ctx.lineTo(-18, -8)
+                ctx.lineTo(-10, -6)
+                ctx.lineTo(-16, -18)
+                ctx.lineTo(-12, -18)
                 ctx.closePath()
                 ctx.fill()
         
-                # Colored hull
+                # Main fuselage
                 ctx.fillStyle = f"rgb({hull[0]}, {hull[1]}, {hull[2]})"
                 ctx.beginPath()
-                ctx.moveTo(0, -17); ctx.lineTo(11, 2); ctx.lineTo(0, 13); ctx.lineTo(-11, 2)
+                ctx.moveTo(18, 0)
+                ctx.lineTo(-4, 10)
+                ctx.lineTo(-12, 8)
+                ctx.lineTo(-8, 0)
+                ctx.lineTo(-12, -8)
+                ctx.lineTo(-4, -10)
                 ctx.closePath()
                 ctx.fill()
         
-                # Chest plate accent
-                ctx.fillStyle = f"rgba({hull[0] - 30}, {hull[1] - 50}, {hull[2] - 30}, 0.7)"
+                # Canopy / Cockpit
+                ctx.fillStyle = "rgba(10, 200, 255, 0.85)"
                 ctx.beginPath()
-                ctx.moveTo(0, -10); ctx.lineTo(6, 0); ctx.lineTo(0, 8); ctx.lineTo(-6, 0)
+                ctx.moveTo(10, 0)
+                ctx.lineTo(2, 4)
+                ctx.lineTo(-6, 3)
+                ctx.lineTo(-6, -3)
+                ctx.lineTo(2, -4)
                 ctx.closePath()
                 ctx.fill()
-        
-                # Core energy dot
-                core_pulse = 0.7 + 0.3 * math.sin(t * 7.8)
-                ctx.fillStyle = f"rgba(200, 245, 255, {0.6 * core_pulse:.3f})"
+                
+                # Engine Glow
+                engine_pulse = 0.7 + 0.3 * math.sin(t * 15.0)
+                ctx.fillStyle = f"rgba(100, 220, 255, {0.8 * engine_pulse:.3f})"
                 ctx.beginPath()
-                ctx.arc(0, 0, 4, 0, TAU)
+                ctx.arc(-10, 0, 4, 0, TAU)
                 ctx.fill()
         
                 # Highlight & Edge stroke
-                ctx.fillStyle = "rgba(255, 255, 255, 0.22)"
-                ctx.beginPath()
-                ctx.arc(-3, 4, 4, 0, TAU)
-                ctx.fill()
-                ctx.strokeStyle = "rgba(255,255,255,0.28)"
+                ctx.strokeStyle = "rgba(255,255,255,0.3)"
                 ctx.lineWidth = 1.5
                 ctx.beginPath()
-                ctx.moveTo(0, -17); ctx.lineTo(11, 2); ctx.lineTo(0, 13); ctx.lineTo(-11, 2)
+                ctx.moveTo(18, 0)
+                ctx.lineTo(-4, 10)
+                ctx.lineTo(-12, 8)
+                ctx.lineTo(-8, 0)
+                ctx.lineTo(-12, -8)
+                ctx.lineTo(-4, -10)
                 ctx.closePath()
                 ctx.stroke()
             ctx.restore()

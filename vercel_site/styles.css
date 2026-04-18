@@ -16,31 +16,51 @@
 
 * {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 html, body {
-  margin: 0;
-  min-height: 100%;
-  background:
-    radial-gradient(ellipse at 20% 10%, rgba(80, 160, 255, 0.09), transparent 45%),
-    radial-gradient(ellipse at 80% 85%, rgba(180, 100, 255, 0.07), transparent 40%),
-    radial-gradient(ellipse at 50% 50%, rgba(20, 60, 120, 0.15), transparent 60%),
-    linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  width: 100%;
+  height: 100%;
+  background: var(--bg-0);
   color: var(--ink);
   font-family: "Rajdhani", sans-serif;
   overflow: hidden;
 }
 
-body {
-  min-height: 100vh;
-}
-
+/* ── Shell: Landing state (before game boots) ── */
 #shell {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 16px;
-  min-height: 100vh;
+  width: 100%;
+  height: 100vh;
   padding: 16px;
+  background:
+    radial-gradient(ellipse at 20% 10%, rgba(80, 160, 255, 0.09), transparent 45%),
+    radial-gradient(ellipse at 80% 85%, rgba(180, 100, 255, 0.07), transparent 40%),
+    radial-gradient(ellipse at 50% 50%, rgba(20, 60, 120, 0.15), transparent 60%),
+    linear-gradient(180deg, var(--bg-1), var(--bg-0));
+}
+
+/* ── Shell: Game active — fullscreen canvas ── */
+#shell[data-ready="true"] {
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 0;
+}
+
+#shell[data-ready="true"] .intro {
+  display: none;
+}
+
+#shell[data-ready="true"] .stage {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 
 /* ── Sidebar ── */
@@ -187,7 +207,7 @@ body {
 /* ── Game stage ── */
 .stage {
   position: relative;
-  min-height: 560px;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--line);
   background: var(--panel);
@@ -198,29 +218,42 @@ body {
     0 20px 60px rgba(0, 0, 0, 0.4);
 }
 
+/* ── Canvas: fill parent completely ── */
 #game-canvas {
   display: block;
   width: 100%;
-  height: min(100vh - 32px, 960px);
+  height: 100%;
   cursor: crosshair;
+}
+
+/* fullscreen state: stage fills viewport */
+#shell[data-ready="true"] .stage {
+  width: 100vw;
+  height: 100vh;
 }
 
 .loading-pill {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
-  padding: 8px 14px;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 10px 22px;
   border-radius: 999px;
-  border: 1px solid rgba(120, 200, 255, 0.12);
-  background: rgba(6, 10, 18, 0.85);
+  border: 1px solid rgba(120, 200, 255, 0.18);
+  background: rgba(6, 10, 18, 0.92);
   color: var(--muted);
-  font: 600 0.82rem/1 "Rajdhani", sans-serif;
-  letter-spacing: 0.02em;
-  backdrop-filter: blur(8px);
+  font: 600 0.88rem/1 "Rajdhani", sans-serif;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+  white-space: nowrap;
 }
 
 #shell[data-ready="true"] .loading-pill {
-  opacity: 0.7;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
 }
 
 @media (max-width: 980px) {
@@ -234,9 +267,5 @@ body {
 
   .lede {
     max-width: none;
-  }
-
-  #game-canvas {
-    height: min(72vh, 760px);
   }
 }

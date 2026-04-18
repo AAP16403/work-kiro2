@@ -1,7 +1,5 @@
 """Bomber behavior for enemies."""
 
-import random
-
 from enemy_behaviors.base import Behavior
 from projectile import Projectile
 from utils import Vec2
@@ -40,14 +38,14 @@ class Bomber(Behavior):
         # Throw bombs at a cadence; bombs explode in gameplay update logic.
         enemy.attack_cd -= dt
         if enemy.attack_cd <= 0.0 and dist_to_player < 360.0:
-            bomb_speed = 115.0 + state.wave * 1.8
+            bomb_speed = min(195.0, 115.0 + state.wave * 1.8)
             aim = _lead_dir(enemy.pos, player_pos, player_vel, bomb_speed, mult=0.95)
-            jitter = random.uniform(-10.0, 10.0)
-            c = random.random()
+            jitter = state.rng.uniform(-10.0, 10.0)
+            c = state.rng.random()
             if c < 0.5:
                 aim = Vec2(aim.x * (1.0 + jitter * 0.005), aim.y * (1.0 - jitter * 0.005)).normalized()
             bomb_damage = 14 + state.wave // 3
-            fuse = 1.1 + random.uniform(0.0, 0.35)
+            fuse = 1.1 + state.rng.uniform(0.0, 0.35)
             state.projectiles.append(
                 Projectile(
                     pos=Vec2(enemy.pos.x, enemy.pos.y),
@@ -58,7 +56,7 @@ class Bomber(Behavior):
                     projectile_type="bomb",
                 )
             )
-            enemy.attack_cd = 2.0 + random.uniform(0.2, 0.7)
+            enemy.attack_cd = 2.0 + state.rng.uniform(0.2, 0.7)
 
     def _separation(self, enemy, others, radius: float, weight: float = 1.0) -> Vec2:
         """Repel from nearby enemies to reduce stacking."""

@@ -2,8 +2,8 @@
 from enemy_behaviors.base import Behavior
 from utils import Vec2, perp
 from hazards import Trap
-import random
 import config
+
 
 def _append_trap_capped(state, trap: Trap) -> bool:
     """Append trap only if construction cap has room."""
@@ -15,8 +15,9 @@ def _append_trap_capped(state, trap: Trap) -> bool:
     state.traps.append(trap)
     return True
 
+
 class Engineer(Behavior):
-    """An engineer behavior."""
+    """An engineer behavior that places traps ahead of the player."""
 
     def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
@@ -40,14 +41,32 @@ class Engineer(Behavior):
         if enemy.attack_cd <= 0.0 and d < 420:
             if not hasattr(state, "traps"):
                 state.traps = []
-            predicted = Vec2(player_pos.x + player_vel.x * 0.65, player_pos.y + player_vel.y * 0.65)
-            jitter = Vec2(random.uniform(-24, 24), random.uniform(-24, 24))
+            # Predict where the player will be — use state.rng for determinism
+            lead_time = 0.85 + state.rng.uniform(0.0, 0.3)
+            predicted = Vec2(
+                player_pos.x + player_vel.x * lead_time,
+                player_pos.y + player_vel.y * lead_time,
+            )
+            jitter = Vec2(
+                state.rng.uniform(-28, 28),
+                state.rng.uniform(-28, 28),
+            )
             p = Vec2(predicted.x + jitter.x, predicted.y + jitter.y)
             # Keep within room bounds.
             if p.length() > config.ROOM_RADIUS * 0.86:
                 p = p.normalized() * (config.ROOM_RADIUS * 0.86)
-            _append_trap_capped(state, Trap(pos=p, radius=28.0, damage=16, ttl=10.0))
-            enemy.attack_cd = 2.9 + random.uniform(0.0, 0.6)
+            _append_trap_capped(
+                state,
+                Trap(
+                    pos=p,
+                    radius=28.0,
+                    damage=16,
+                    ttl=10.0,
+                    armed_delay=0.6,
+                    kind="spike",
+                ),
+            )
+            enemy.attack_cd = 2.9 + state.rng.uniform(0.0, 0.6)
 
     def _separation(self, enemy, others, radius: float = 44.0, weight: float = 1.1) -> Vec2:
         """Repel from nearby enemies to reduce stacking."""

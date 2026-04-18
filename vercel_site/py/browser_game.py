@@ -101,8 +101,8 @@ class BrowserGame:
 
         self.balance = BalanceLogic(fps=float(FPS))
         self._fixed_dt = self.balance.fixed_dt
-        self._frame_dt_cap = self.balance.frame_dt_cap
-        self._max_catchup_steps = self.balance.max_catchup_steps
+        self._frame_dt_cap = 0.10  # Much tighter cap — prevents speed spikes
+        self._max_catchup_steps = 3  # Was 6 — prevents burst-speed after tab switch
         self._accumulator = 0.0
         self._last_ts = 0.0
         self.background_t = 0.0
@@ -111,13 +111,13 @@ class BrowserGame:
 
         # Atmospheric star field (persistent across frames)
         self._stars: list[dict] = []
-        for _ in range(18):
+        for _ in range(30):
             self._stars.append({
                 "x": random.random(),
                 "y": random.random(),
-                "vx": random.uniform(-0.004, 0.004),
-                "vy": random.uniform(-0.003, 0.003),
-                "r": random.uniform(1.0, 2.5),
+                "vx": random.uniform(-0.005, 0.005),
+                "vy": random.uniform(-0.004, 0.004),
+                "r": random.uniform(0.8, 3.0),
                 "phase": random.uniform(0, math.tau),
             })
         self._is_playing = False  # cached for perf
@@ -201,10 +201,12 @@ class BrowserGame:
             self.loading.textContent = text
 
     def _on_resize(self, _event) -> None:
-        rect = self.canvas.getBoundingClientRect()
-        width = max(640, int(rect.width or SCREEN_W))
-        height = max(480, int(rect.height or SCREEN_H))
-        dpr = max(1.0, float(window.devicePixelRatio or 1.0))
+        # Use full window dimensions for true fullscreen
+        win_w = int(window.innerWidth or SCREEN_W)
+        win_h = int(window.innerHeight or SCREEN_H)
+        width = max(640, win_w)
+        height = max(480, win_h)
+        dpr = max(1.0, min(2.0, float(window.devicePixelRatio or 1.0)))  # Cap DPR for perf
         self.canvas.width = int(width * dpr)
         self.canvas.height = int(height * dpr)
         self.canvas.style.width = f"{width}px"
@@ -280,8 +282,16 @@ class BrowserGame:
     def _frame(self, ts: float) -> None:
         if not self._last_ts:
             self._last_ts = ts
-        dt = max(0.0, min((ts - self._last_ts) / 1000.0, self._frame_dt_cap))
+        raw_dt = (ts - self._last_ts) / 1000.0
         self._last_ts = ts
+
+        # Tab-switch protection: if the browser was backgrounded for >100ms,
+        # discard the accumulated time instead of fast-forwarding the game.
+        if raw_dt > 0.1:
+            raw_dt = self._fixed_dt  # Pretend only one frame passed
+            self._accumulator = 0.0
+
+        dt = max(0.0, min(raw_dt, self._frame_dt_cap))
         self.background_t += dt
 
         self._accumulator += dt
@@ -290,6 +300,9 @@ class BrowserGame:
             self.update(self._fixed_dt)
             self._accumulator -= self._fixed_dt
             steps += 1
+        # Drain leftover to prevent gradual accumulation on slow frames
+        if self._accumulator > self._fixed_dt * 2.0:
+            self._accumulator = self._fixed_dt * 0.5
 
         self.render()
         window.requestAnimationFrame(self._frame_proxy)
@@ -889,14 +902,17 @@ class BrowserGame:
             self._draw_game_over()
 
         if self.flash > 0:
-            flash_alpha = min(0.35, 0.18 * self.flash)
-            # Color tint based on flash intensity (bright = ultra, subtle = pickup)
+            flash_alpha = min(0.42, 0.22 * self.flash)
+            # Color tint based on flash intensity
             if self.flash > 0.6:
-                ctx.fillStyle = f"rgba(255, 240, 210, {flash_alpha})"
+                # Ultra / major event — warm gold flash
+                ctx.fillStyle = f"rgba(255, 230, 180, {flash_alpha})"
             elif self.flash > 0.3:
-                ctx.fillStyle = f"rgba(255, 248, 236, {flash_alpha})"
+                # Damage taken — red-orange tint
+                ctx.fillStyle = f"rgba(255, 180, 140, {flash_alpha * 0.85})"
             else:
-                ctx.fillStyle = f"rgba(240, 245, 255, {flash_alpha * 0.6})"
+                # Pickup / minor — cool cyan tint
+                ctx.fillStyle = f"rgba(180, 230, 255, {flash_alpha * 0.55})"
             ctx.fillRect(0, 0, self.view_w, self.view_h)
 
     def _draw_background(self, combat_intensity: float) -> None:
@@ -905,35 +921,39 @@ class BrowserGame:
         t = self.background_t
         playing = self._is_playing
 
-        # ── Base gradient ──
-        grad = ctx.createLinearGradient(0, 0, 0, self.view_h)
-        grad.addColorStop(0, f"rgb({18 + int(40 * ci)}, {26 + int(10 * ci)}, {42 - int(6 * ci)})")
-        grad.addColorStop(1, f"rgb({6 + int(25 * ci)}, {12}, {20})")
+        # ── Deep space gradient ──
+        grad = ctx.createLinearGradient(0, 0, self.view_w * 0.3, self.view_h)
+        r0 = 10 + int(35 * ci)
+        g0 = 16 + int(12 * ci)
+        b0 = 32 - int(4 * ci)
+        grad.addColorStop(0, f"rgb({r0}, {g0}, {b0})")
+        grad.addColorStop(0.5, f"rgb({4 + int(20 * ci)}, {8 + int(5 * ci)}, {22})")
+        grad.addColorStop(1, f"rgb({3 + int(15 * ci)}, {6}, {14})")
         ctx.fillStyle = grad
         ctx.fillRect(0, 0, self.view_w, self.view_h)
 
-        # ── Nebula glow orb (only 1 during gameplay, all 3 on menu) ──
+        # ── Nebula glow orbs — 2 during gameplay, 3 on menu ──
         nebulae = [
-            (0.22, 0.28, 320, (30, 75, 130), 0.25, 0.07),
+            (0.25, 0.30, 380, (25, 65, 140), 0.28, 0.06),
+            (0.75, 0.72, 260, (120, 50, 100), 0.18, 0.08),
         ] if playing else [
-            (0.22, 0.28, 320, (30, 75, 130), 0.25, 0.07),
-            (0.78, 0.68, 240, (160, 70, 120), 0.22, 0.09),
-            (0.52, 0.82, 180, (70, 180, 165), 0.18, 0.11),
+            (0.22, 0.28, 380, (30, 75, 140), 0.28, 0.06),
+            (0.78, 0.68, 280, (160, 70, 120), 0.22, 0.09),
+            (0.52, 0.82, 200, (70, 180, 165), 0.20, 0.11),
         ]
         for fx, fy, radius, color, amp, freq in nebulae:
-            nx = self.view_w * fx + math.sin(t * freq) * 30.0
-            ny = self.view_h * fy + math.cos(t * (freq + 0.02)) * 24.0
+            nx = self.view_w * fx + math.sin(t * freq) * 40.0
+            ny = self.view_h * fy + math.cos(t * (freq + 0.02)) * 32.0
             pulse = 0.5 + 0.5 * math.sin(t * (0.7 + freq * 3.0))
-            alpha = (0.06 + 0.04 * pulse) * (1.0 + ci * 0.6)
+            alpha = (0.08 + 0.05 * pulse) * (1.0 + ci * 0.7)
             rg = ctx.createRadialGradient(nx, ny, 0, nx, ny, radius)
             rg.addColorStop(0, f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha:.3f})")
+            rg.addColorStop(0.6, f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha * 0.3:.3f})")
             rg.addColorStop(1, "rgba(0,0,0,0)")
             ctx.fillStyle = rg
             ctx.fillRect(nx - radius, ny - radius, radius * 2, radius * 2)
 
-        # ── Drifting star field (batched into single path) ──
-        ctx.fillStyle = "rgba(210, 235, 255, 0.18)"
-        ctx.beginPath()
+        # ── Drifting star field — always active, with twinkle ──
         for star in self._stars:
             star["x"] += star["vx"] * 0.3
             star["y"] += star["vy"] * 0.3
@@ -941,17 +961,32 @@ class BrowserGame:
             elif star["x"] > 1.02: star["x"] = -0.02
             if star["y"] < -0.02: star["y"] = 1.02
             elif star["y"] > 1.02: star["y"] = -0.02
+        # Bright stars
+        ctx.fillStyle = "rgba(220, 240, 255, 0.35)"
+        ctx.beginPath()
+        for star in self._stars[:12]:
+            twinkle = 0.6 + 0.4 * math.sin(t * 3.0 + star["phase"])
+            sx = star["x"] * self.view_w
+            sy = star["y"] * self.view_h
+            r = star["r"] * twinkle
+            ctx.moveTo(sx + r, sy)
+            ctx.arc(sx, sy, r, 0, TAU)
+        ctx.fill()
+        # Dim stars
+        ctx.fillStyle = "rgba(180, 210, 240, 0.15)"
+        ctx.beginPath()
+        for star in self._stars[12:]:
             sx = star["x"] * self.view_w
             sy = star["y"] * self.view_h
             ctx.moveTo(sx + star["r"], sy)
             ctx.arc(sx, sy, star["r"], 0, TAU)
         ctx.fill()
 
-        # ── Scan-line grid + vignette: menu only (too expensive during gameplay) ──
+        # ── Scan-line grid: menu only ──
         if not playing:
             ctx.save()
-            ctx.globalAlpha = 0.1
-            ctx.strokeStyle = "rgba(130, 180, 255, 0.25)"
+            ctx.globalAlpha = 0.08
+            ctx.strokeStyle = "rgba(130, 180, 255, 0.2)"
             ctx.lineWidth = 1
             step = 44
             drift = (t * 18.0) % step
@@ -962,16 +997,16 @@ class BrowserGame:
                 ctx.stroke()
             ctx.restore()
 
-            ctx.save()
-            vg = ctx.createRadialGradient(
-                self.view_w * 0.5, self.view_h * 0.5, min(self.view_w, self.view_h) * 0.3,
-                self.view_w * 0.5, self.view_h * 0.5, max(self.view_w, self.view_h) * 0.72,
-            )
-            vg.addColorStop(0, "rgba(0,0,0,0)")
-            vg.addColorStop(1, "rgba(0,0,0,0.08)")
-            ctx.fillStyle = vg
-            ctx.fillRect(0, 0, self.view_w, self.view_h)
-            ctx.restore()
+        # ── Vignette — always active, stronger during combat ──
+        vign_strength = 0.12 + ci * 0.06
+        vg = ctx.createRadialGradient(
+            self.view_w * 0.5, self.view_h * 0.5, min(self.view_w, self.view_h) * 0.25,
+            self.view_w * 0.5, self.view_h * 0.5, max(self.view_w, self.view_h) * 0.68,
+        )
+        vg.addColorStop(0, "rgba(0,0,0,0)")
+        vg.addColorStop(1, f"rgba(0,0,0,{vign_strength:.3f})")
+        ctx.fillStyle = vg
+        ctx.fillRect(0, 0, self.view_w, self.view_h)
 
     def _sample_map_points(self, radius: float, map_type: str) -> list[Vec2]:
         if map_type == MAP_DIAMOND:
@@ -1003,76 +1038,105 @@ class BrowserGame:
         map_type = self.state.map_type if self.state else self.settings["map_type"]
         outer = self._sample_map_points(config.ROOM_RADIUS, map_type)
         outer_screen = [to_iso(point, shake) for point in outer]
+        t = self.background_t
+        ci = max(0.0, min(1.0, combat_intensity))
 
         ctx.save()
+        # ── Floor fill — rich dark gradient ──
         self._trace_polygon(outer_screen)
-        floor_grad = ctx.createLinearGradient(self.view_w * 0.3, self.view_h * 0.2, self.view_w * 0.7, self.view_h * 0.82)
-        floor_grad.addColorStop(0, "rgba(38, 56, 78, 0.96)")
-        floor_grad.addColorStop(1, f"rgba({24 + int(26 * combat_intensity)}, {32}, {38 - int(6 * combat_intensity)}, 0.96)")
+        floor_grad = ctx.createLinearGradient(self.view_w * 0.2, self.view_h * 0.15, self.view_w * 0.8, self.view_h * 0.85)
+        floor_grad.addColorStop(0, f"rgba({28 + int(20 * ci)}, {42 + int(8 * ci)}, {62}, 0.97)")
+        floor_grad.addColorStop(0.5, f"rgba({18 + int(12 * ci)}, {28 + int(6 * ci)}, {44}, 0.97)")
+        floor_grad.addColorStop(1, f"rgba({12 + int(22 * ci)}, {20}, {30 - int(4 * ci)}, 0.97)")
         ctx.fillStyle = floor_grad
         ctx.fill()
 
+        # ── Center energy glow ──
+        center_x, center_y = to_iso(Vec2(0, 0), shake)
+        glow_r = config.ROOM_RADIUS * 0.4
+        glow_pulse = 0.5 + 0.5 * math.sin(t * 0.8)
+        glow_alpha = (0.04 + 0.03 * glow_pulse) * (1.0 + ci * 0.8)
+        cg = ctx.createRadialGradient(center_x, center_y, 0, center_x, center_y, glow_r)
+        cg.addColorStop(0, f"rgba({60 + int(40 * ci)}, {100 + int(30 * ci)}, {180}, {glow_alpha:.3f})")
+        cg.addColorStop(1, "rgba(0,0,0,0)")
+        ctx.fillStyle = cg
+        ctx.fillRect(center_x - glow_r, center_y - glow_r, glow_r * 2, glow_r * 2)
+
+        # ── Donut hole ──
         if map_type == MAP_DONUT:
             inner = self._sample_map_points(config.ROOM_RADIUS * 0.4, MAP_CIRCLE)
             inner_screen = [to_iso(point, shake) for point in inner]
             self._trace_polygon(inner_screen)
-            ctx.fillStyle = "rgba(5, 10, 18, 0.88)"
+            ctx.fillStyle = "rgba(3, 6, 14, 0.92)"
             ctx.fill()
 
-        ctx.strokeStyle = f"rgba({150 + int(70 * combat_intensity)}, {205}, {255}, 0.55)"
-        ctx.lineWidth = 2.2
+        # ── Border — pulsing glow ──
+        border_pulse = 0.5 + 0.5 * math.sin(t * 1.5)
+        border_alpha = 0.4 + 0.25 * border_pulse + ci * 0.2
+        ctx.strokeStyle = f"rgba({140 + int(80 * ci)}, {200 + int(30 * ci)}, {255}, {border_alpha:.3f})"
+        ctx.lineWidth = 2.5
+        self._trace_polygon(outer_screen)
+        ctx.stroke()
+        # Outer glow layer
+        ctx.strokeStyle = f"rgba({100 + int(60 * ci)}, {170}, {240}, {border_alpha * 0.3:.3f})"
+        ctx.lineWidth = 6
         self._trace_polygon(outer_screen)
         ctx.stroke()
 
+        # ── Grid lines — subtle pulsing ──
         step = max(58, int(config.ROOM_RADIUS * 0.14))
-        ctx.strokeStyle = "rgba(110, 145, 190, 0.24)"
+        grid_alpha = 0.12 + 0.08 * math.sin(t * 0.6) + ci * 0.06
+        ctx.strokeStyle = f"rgba(90, 140, 200, {grid_alpha:.3f})"
         ctx.lineWidth = 1
+        ctx.beginPath()
         for line_pos in range(-int(config.ROOM_RADIUS), int(config.ROOM_RADIUS) + step, step):
             a = Vec2(line_pos, -config.ROOM_RADIUS)
             b = Vec2(line_pos, config.ROOM_RADIUS)
             ax, ay = to_iso(a, shake)
             bx, by = to_iso(b, shake)
-            ctx.beginPath()
             ctx.moveTo(ax, ay)
             ctx.lineTo(bx, by)
-            ctx.stroke()
             a = Vec2(-config.ROOM_RADIUS, line_pos)
             b = Vec2(config.ROOM_RADIUS, line_pos)
             ax, ay = to_iso(a, shake)
             bx, by = to_iso(b, shake)
-            ctx.beginPath()
             ctx.moveTo(ax, ay)
             ctx.lineTo(bx, by)
-            ctx.stroke()
+        ctx.stroke()
 
         if preview_only:
             for idx in range(5):
-                angle = self.background_t * 0.4 + idx * 1.26
+                angle = t * 0.4 + idx * 1.26
                 radius = config.ROOM_RADIUS * (0.24 + idx * 0.08)
                 world = Vec2(math.cos(angle) * radius, math.sin(angle) * radius * 0.8)
                 sx, sy = to_iso(world, shake)
                 self._draw_glow_circle(sx, sy - 8, 11 + idx, (120 + idx * 18, 180, 255), 0.18)
 
-        # ── Pulsing concentric ring (single ring for perf) ──
-        center_x, center_y = to_iso(Vec2(0, 0), shake)
-        t = self.background_t
-        ring_r = 222 + 6.0 * math.sin(t * 0.8)
-        ring_alpha = 0.06 + 0.04 * (0.5 + 0.5 * math.sin(t * 1.1))
-        ring_screen_r = ring_r * 0.72
-        ctx.strokeStyle = f"rgba(130, 185, 245, {ring_alpha:.3f})"
-        ctx.lineWidth = 2
-        ctx.beginPath()
-        ctx.ellipse(center_x, center_y, ring_screen_r, ring_screen_r * 0.56, 0, 0, TAU)
-        ctx.stroke()
+        # ── Pulsing concentric rings ──
+        for ri, (r_base, r_speed, r_phase) in enumerate([(200, 0.8, 0.0), (280, 0.6, 1.5)]):
+            ring_r = r_base + 8.0 * math.sin(t * r_speed + r_phase)
+            ring_alpha = (0.05 + 0.04 * (0.5 + 0.5 * math.sin(t * (1.1 + ri * 0.3)))) * (1.0 + ci * 0.4)
+            ring_screen_r = ring_r * 0.72
+            ctx.strokeStyle = f"rgba({120 + ri * 20}, {180 + ri * 10}, {245}, {ring_alpha:.3f})"
+            ctx.lineWidth = 1.5 + ri * 0.5
+            ctx.beginPath()
+            ctx.ellipse(center_x, center_y, ring_screen_r, ring_screen_r * 0.56, 0, 0, TAU)
+            ctx.stroke()
 
         ctx.restore()
 
     def _draw_glow_circle(self, x: float, y: float, radius: float, color: tuple[int, int, int], alpha: float) -> None:
-        """Cheap glow: simple semi-transparent filled circle (no radial gradient)."""
+        """Cheap glow: two-layer semi-transparent filled circle for soft falloff."""
         ctx = self.ctx
-        ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha * 0.5:.3f})"
+        # Outer soft layer
+        ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha * 0.25:.3f})"
         ctx.beginPath()
-        ctx.arc(x, y, radius * 1.6, 0, TAU)
+        ctx.arc(x, y, radius * 2.0, 0, TAU)
+        ctx.fill()
+        # Inner brighter layer
+        ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {alpha * 0.55:.3f})"
+        ctx.beginPath()
+        ctx.arc(x, y, radius * 1.2, 0, TAU)
         ctx.fill()
 
     def _draw_world(self, shake: Vec2) -> None:
@@ -1118,17 +1182,70 @@ class BrowserGame:
     def _draw_powerup(self, powerup, shake: Vec2) -> None:
         color = POWERUP_COLORS.get(getattr(powerup, "kind", ""), (220, 220, 220))
         sx, sy = to_iso(powerup.pos, shake)
-        pulse = 1.0 + 0.15 * math.sin(self.background_t * 4.0 + powerup.pos.x * 0.02)
-        self._draw_glow_circle(sx, sy - 14, 10 * pulse, color, 0.22)
+        t = self.background_t
+        pulse = 1.0 + 0.15 * math.sin(t * 4.0 + powerup.pos.x * 0.02)
+        float_y = 6.0 * math.sin(t * 3.0 + getattr(powerup, "id", powerup.pos.x))
+        cy = sy - 14 + float_y
+        
         ctx = self.ctx
-        ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
+
+        # Ground shadow
+        shadow_w = 14 * pulse
+        shadow_h = 6 * pulse
+        ctx.fillStyle = "rgba(4, 8, 16, 0.45)"
         ctx.beginPath()
-        ctx.moveTo(sx, sy - 28 * pulse)
-        ctx.lineTo(sx + 12 * pulse, sy - 14)
-        ctx.lineTo(sx, sy)
-        ctx.lineTo(sx - 12 * pulse, sy - 14)
-        ctx.closePath()
+        ctx.ellipse(sx, sy, shadow_w, shadow_h, 0, 0, TAU)
         ctx.fill()
+
+        # Glow rings
+        self._draw_glow_circle(sx, cy, 14 * pulse, color, 0.25)
+        self._draw_glow_circle(sx, cy, 24 * pulse, color, 0.1)
+
+        # 3D Crystal rendering
+        width = 12 * pulse
+        height_top = 16 * pulse
+        height_bot = 14 * pulse
+        
+        # Left facet
+        ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.85)"
+        ctx.beginPath()
+        ctx.moveTo(sx, cy - height_top)
+        ctx.lineTo(sx - width, cy)
+        ctx.lineTo(sx, cy + height_bot)
+        ctx.lineTo(sx, cy)
+        ctx.fill()
+        
+        # Right facet (darker for 3D effect)
+        ctx.fillStyle = f"rgba({max(0, color[0]-50)}, {max(0, color[1]-50)}, {max(0, color[2]-50)}, 0.95)"
+        ctx.beginPath()
+        ctx.moveTo(sx, cy - height_top)
+        ctx.lineTo(sx + width, cy)
+        ctx.lineTo(sx, cy + height_bot)
+        ctx.lineTo(sx, cy)
+        ctx.fill()
+        
+        # Crystal outline
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.6)"
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(sx, cy - height_top)
+        ctx.lineTo(sx + width, cy)
+        ctx.lineTo(sx, cy + height_bot)
+        ctx.lineTo(sx - width, cy)
+        ctx.closePath()
+        ctx.stroke()
+        # Center edge line
+        ctx.beginPath()
+        ctx.moveTo(sx, cy - height_top)
+        ctx.lineTo(sx, cy + height_bot)
+        ctx.stroke()
+        
+        # Inner energy core flash
+        if math.sin(t * 8.0 + powerup.pos.x) > 0.8:
+            ctx.fillStyle = "rgba(255, 255, 255, 0.8)"
+            ctx.beginPath()
+            ctx.arc(sx, cy, 3, 0, TAU)
+            ctx.fill()
 
     def _draw_trap(self, trap, shake: Vec2) -> None:
         sx, sy = to_iso(trap.pos, shake)
@@ -1296,6 +1413,10 @@ class BrowserGame:
             ctx.arc(sx, py, radius * 1.6, 0, TAU)
             ctx.stroke()
 
+        # Outer Soft Glow
+        glow_alpha = 0.25 if is_enemy else 0.45
+        self._draw_glow_circle(sx, py, radius * 1.8, color, glow_alpha)
+
         # Main body
         ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
         ctx.beginPath()
@@ -1304,7 +1425,7 @@ class BrowserGame:
 
         # White-hot flare
         flare_r = max(1.5, radius * 0.45)
-        ctx.fillStyle = f"rgba(255, 255, 255, {0.35 if is_enemy else 0.5})"
+        ctx.fillStyle = f"rgba(255, 255, 255, {0.5 if is_enemy else 0.75})"
         ctx.beginPath()
         ctx.arc(sx, py, flare_r, 0, TAU)
         ctx.fill()
@@ -1800,30 +1921,48 @@ class BrowserGame:
 
     def _draw_entity_bar(self, x: float, y: float, width: float, ratio: float, color: tuple[int, int, int]) -> None:
         ctx = self.ctx
-        ctx.fillStyle = "rgba(8, 12, 20, 0.7)"
-        ctx.fillRect(x, y, width, 7)
-        ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
-        ctx.fillRect(x, y, width * ratio, 7)
+        # Background
+        ctx.fillStyle = "rgba(6, 10, 18, 0.8)"
+        ctx.fillRect(x, y, width, 8)
+        # Fill gradient
+        if ratio > 0:
+            bar_g = ctx.createLinearGradient(x, y, x + width * ratio, y)
+            bar_g.addColorStop(0, f"rgb({color[0]}, {color[1]}, {color[2]})")
+            bar_g.addColorStop(1, f"rgba({min(255, color[0] + 40)}, {min(255, color[1] + 30)}, {min(255, color[2] + 20)}, 0.9)")
+            ctx.fillStyle = bar_g
+            ctx.fillRect(x, y, width * ratio, 8)
+        # Border
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.08)"
+        ctx.lineWidth = 1
+        ctx.strokeRect(x, y, width, 8)
 
     def _draw_hud(self) -> None:
         if not self.state or not self.player:
             return
         ctx = self.ctx
         ctx.save()
-        ctx.fillStyle = "rgba(5, 9, 16, 0.72)"
-        ctx.fillRect(24, 24, 380, 142)
-        ctx.strokeStyle = "rgba(150, 220, 255, 0.18)"
-        ctx.strokeRect(24, 24, 380, 142)
+        self._draw_panel(20, 20, 400, 148)
 
-        self._draw_bar(44, 52, 210, 12, self.player.hp / max(1, self.player.max_hp), (110, 230, 170), "HP")
-        self._draw_bar(44, 78, 210, 12, max(0.0, min(1.0, self.player.shield / 120.0)), (110, 180, 255), "Shield")
+        # HP bar with gradient
+        self._draw_bar(42, 50, 220, 14, self.player.hp / max(1, self.player.max_hp), (90, 230, 160), "HP")
+        # Shield bar
+        self._draw_bar(42, 80, 220, 14, max(0.0, min(1.0, self.player.shield / 120.0)), (90, 170, 255), "SHD")
 
-        ctx.fillStyle = "rgba(232, 240, 255, 0.95)"
-        ctx.font = "700 16px Rajdhani, sans-serif"
-        ctx.fillText(f"Wave {self.state.wave}", 282, 58)
-        ctx.fillText(f"Score {self.score.score}", 282, 82)
-        ctx.fillText(f"Combo x{self.score.combo:.2f}", 282, 106)
-        ctx.fillText(f"Weapon {self.player.current_weapon.name}", 282, 130)
+        # Stats column
+        ctx.fillStyle = "rgba(120, 200, 255, 0.6)"
+        ctx.font = "700 12px Orbitron, sans-serif"
+        ctx.fillText("WAVE", 288, 50)
+        ctx.fillText("SCORE", 288, 78)
+        ctx.fillText("COMBO", 288, 106)
+        ctx.fillText("WEAPON", 288, 134)
+
+        ctx.fillStyle = "rgba(240, 248, 255, 0.96)"
+        ctx.font = "700 18px Rajdhani, sans-serif"
+        ctx.fillText(f"{self.state.wave}", 348, 52)
+        ctx.fillText(f"{self.score.score}", 348, 80)
+        ctx.fillText(f"x{self.score.combo:.1f}", 348, 108)
+        ctx.font = "600 16px Rajdhani, sans-serif"
+        ctx.fillText(f"{self.player.current_weapon.name}", 348, 136)
 
         laser_left = max(0.0, self.player.laser_until - self.state.time)
         laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
@@ -1840,7 +1979,7 @@ class BrowserGame:
         temp_txt = format_temp_hud(self._active_temp_rewards)
         perm_txt = format_perm_hud(self._run_permanent_rewards)
         status_parts = [text for text in (dash_txt, laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt) if text]
-        status = "  |  ".join(status_parts) if status_parts else "LMB auto-fire  |  Space dash  |  Q or RMB ultra"
+        status = "  \u2502  ".join(status_parts) if status_parts else "LMB auto-fire  \u2502  Space dash  \u2502  Q or RMB ultra"
 
         ctx.fillStyle = "rgba(232, 240, 255, 0.88)"
         ctx.font = "600 15px Rajdhani, sans-serif"
@@ -1853,25 +1992,46 @@ class BrowserGame:
             ratio = max(0.0, min(1.0, boss.hp / max_hp))
             width = min(self.view_w * 0.44, 520)
             x = (self.view_w - width) * 0.5
-            y = 28
-            ctx.fillStyle = "rgba(8, 12, 18, 0.8)"
+            y = 24
+            # Dark background bar
+            self._draw_panel(x - 8, y - 22, width + 16, 42)
+            ctx.fillStyle = "rgba(18, 22, 30, 0.85)"
             ctx.fillRect(x, y, width, 12)
-            ctx.fillStyle = "rgba(255, 142, 142, 0.95)"
-            ctx.fillRect(x, y, width * ratio, 12)
+            # HP fill with gradient
+            if ratio > 0:
+                bar_grad = ctx.createLinearGradient(x, y, x + width * ratio, y)
+                bar_grad.addColorStop(0, "rgba(255, 100, 100, 0.95)")
+                bar_grad.addColorStop(1, "rgba(255, 160, 120, 0.85)")
+                ctx.fillStyle = bar_grad
+                ctx.fillRect(x, y, width * ratio, 12)
             ctx.fillStyle = "rgba(244, 248, 255, 0.95)"
-            ctx.font = "700 14px Orbitron, sans-serif"
-            ctx.fillText(f"BOSS {boss_name}  HP {boss.hp}", x, y - 8)
+            ctx.font = "700 13px Orbitron, sans-serif"
+            ctx.textAlign = "center"
+            ctx.fillText(f"BOSS  {boss_name}  \u2014  HP {boss.hp}", self.view_w * 0.5, y - 6)
+            ctx.textAlign = "start"
         ctx.restore()
 
     def _draw_bar(self, x: float, y: float, width: float, height: float, ratio: float, color: tuple[int, int, int], label: str) -> None:
         ctx = self.ctx
-        ctx.fillStyle = "rgba(8, 12, 18, 0.72)"
+        # Background
+        ctx.fillStyle = "rgba(6, 10, 18, 0.78)"
         ctx.fillRect(x, y, width, height)
-        ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
-        ctx.fillRect(x, y, width * max(0.0, min(1.0, ratio)), height)
-        ctx.fillStyle = "rgba(245, 248, 255, 0.92)"
-        ctx.font = "700 12px Orbitron, sans-serif"
-        ctx.fillText(label, x, y - 6)
+        # Fill with gradient
+        fill_w = width * max(0.0, min(1.0, ratio))
+        if fill_w > 0:
+            bg = ctx.createLinearGradient(x, y, x + fill_w, y)
+            bg.addColorStop(0, f"rgb({color[0]}, {color[1]}, {color[2]})")
+            bg.addColorStop(1, f"rgba({min(255, color[0] + 50)}, {min(255, color[1] + 40)}, {min(255, color[2] + 30)}, 0.85)")
+            ctx.fillStyle = bg
+            ctx.fillRect(x, y, fill_w, height)
+        # Border
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.06)"
+        ctx.lineWidth = 1
+        ctx.strokeRect(x, y, width, height)
+        # Label
+        ctx.fillStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, 0.7)"
+        ctx.font = "700 11px Orbitron, sans-serif"
+        ctx.fillText(label, x, y - 5)
 
     def _draw_wave_banner(self) -> None:
         if not self.state:
@@ -1995,46 +2155,123 @@ class BrowserGame:
             self._draw_button(button)
 
     def _draw_pause(self) -> None:
-        self._draw_panel(self.view_w * 0.5 - 190, self.view_h * 0.5 - 180, 380, 340)
+        pw = 380
+        ph = 340
+        px = self.view_w * 0.5 - pw * 0.5
+        py = self.view_h * 0.5 - ph * 0.5
+        self._draw_panel(px, py, pw, ph)
         ctx = self.ctx
+        cx = self.view_w * 0.5
+
+        ctx.textAlign = "center"
         ctx.fillStyle = "rgba(244, 247, 255, 0.98)"
         ctx.font = "700 34px Orbitron, sans-serif"
-        ctx.fillText("PAUSED", self.view_w * 0.5 - 72, self.view_h * 0.5 - 110)
+        ctx.fillText("PAUSED", cx, py + 60)
+
+        ctx.strokeStyle = "rgba(120, 200, 255, 0.2)"
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(cx - 80, py + 72)
+        ctx.lineTo(cx + 80, py + 72)
+        ctx.stroke()
+
         ctx.font = "600 18px Rajdhani, sans-serif"
         ctx.fillStyle = "rgba(192, 208, 228, 0.92)"
-        ctx.fillText("Take a breath, then jump back in.", self.view_w * 0.5 - 102, self.view_h * 0.5 - 76)
+        ctx.fillText("Take a breath, then jump back in.", cx, py + 100)
+        ctx.textAlign = "start"
         for button in self.pause_buttons:
             self._draw_button(button)
 
     def _draw_reward_panel(self) -> None:
-        self._draw_panel(34, 34, self.view_w - 68, self.view_h - 68)
+        pw = min(1000, self.view_w - 80)
+        ph = min(800, self.view_h - 80)
+        px = self.view_w * 0.5 - pw * 0.5
+        py = self.view_h * 0.5 - ph * 0.5
+        
+        # Dimming backdrop overlay
         ctx = self.ctx
-        title = "Temporary Card" if self.reward_step == "temp" else "Permanent Run Boost"
-        ctx.fillStyle = "rgba(244, 247, 255, 0.98)"
-        ctx.font = "700 34px Orbitron, sans-serif"
-        ctx.fillText(title, 64, 96)
-        ctx.font = "600 18px Rajdhani, sans-serif"
-        ctx.fillStyle = "rgba(192, 208, 228, 0.92)"
-        ctx.fillText(self.reward_message or "Choose one", 64, 126)
+        ctx.fillStyle = "rgba(4, 6, 12, 0.6)"
+        ctx.fillRect(0, 0, self.view_w, self.view_h)
+        
+        self._draw_panel(px, py, pw, ph)
+        
+        # Top banner highlight
+        banner_grad = ctx.createLinearGradient(px, py, px, py + 140)
+        banner_grad.addColorStop(0, "rgba(80, 160, 255, 0.12)")
+        banner_grad.addColorStop(1, "rgba(80, 160, 255, 0)")
+        ctx.fillStyle = banner_grad
+        ctx.fillRect(px, py, pw, 140)
+
+        title = "TEMPORARY CARD" if self.reward_step == "temp" else "PERMANENT BOOST"
+        title_color = "rgba(180, 220, 255, 0.98)" if self.reward_step == "temp" else "rgba(255, 210, 130, 0.98)"
+        
+        ctx.fillStyle = title_color
+        ctx.font = "900 36px Orbitron, sans-serif"
+        ctx.fillText(title, px + 50, py + 80)
+        
+        ctx.font = "600 20px Rajdhani, sans-serif"
+        ctx.fillStyle = "rgba(180, 200, 220, 0.9)"
+        ctx.fillText((self.reward_message or "CHOOSE AN UPGRADE").upper(), px + 50, py + 115)
+
+        # Title underline
+        ctx.strokeStyle = "rgba(120, 200, 255, 0.2)"
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(px + 40, py + 130)
+        ctx.lineTo(px + pw - 40, py + 130)
+        ctx.stroke()
 
         for button in self.reward_buttons:
             self._draw_button(button, card_text=button.payload.get("desc", ""))
 
     def _draw_game_over(self) -> None:
-        self._draw_panel(self.view_w * 0.5 - 240, self.view_h * 0.5 - 210, 480, 390)
+        pw = 480
+        ph = 420
+        px = self.view_w * 0.5 - pw * 0.5
+        py = self.view_h * 0.5 - ph * 0.5
+        
+        # Dimming backdrop overlay
         ctx = self.ctx
-        ctx.fillStyle = "rgba(244, 247, 255, 0.98)"
-        ctx.font = "700 34px Orbitron, sans-serif"
-        ctx.fillText("RUN COMPLETE", self.view_w * 0.5 - 146, self.view_h * 0.5 - 136)
-        ctx.font = "700 20px Rajdhani, sans-serif"
+        ctx.fillStyle = "rgba(12, 4, 4, 0.75)"
+        ctx.fillRect(0, 0, self.view_w, self.view_h)
+        
+        self._draw_panel(px, py, pw, ph)
+        cx = self.view_w * 0.5
+
+        # Top banner highlight
+        banner_grad = ctx.createLinearGradient(px, py, px, py + 100)
+        banner_grad.addColorStop(0, "rgba(255, 80, 80, 0.15)")
+        banner_grad.addColorStop(1, "rgba(255, 80, 80, 0)")
+        ctx.fillStyle = banner_grad
+        ctx.fillRect(px, py, pw, 100)
+
+        ctx.textAlign = "center"
+        ctx.fillStyle = "rgba(255, 180, 160, 0.98)"
+        ctx.font = "900 38px Orbitron, sans-serif"
+        ctx.fillText("RUN COMPLETE", cx, py + 70)
+
+        # Accent line
+        ctx.strokeStyle = "rgba(255, 120, 100, 0.3)"
+        ctx.lineWidth = 1.5
+        ctx.beginPath()
+        ctx.moveTo(cx - 120, py + 95)
+        ctx.lineTo(cx + 120, py + 95)
+        ctx.stroke()
+
+        ctx.font = "700 22px Rajdhani, sans-serif"
         ctx.fillStyle = "rgba(208, 220, 238, 0.95)"
-        ctx.fillText(f"Wave Reached: {self.final_wave}", self.view_w * 0.5 - 90, self.view_h * 0.5 - 86)
-        ctx.fillText(f"Final Score: {self.final_score}", self.view_w * 0.5 - 90, self.view_h * 0.5 - 58)
-        ctx.fillText(f"High Score: {self.high_score}", self.view_w * 0.5 - 90, self.view_h * 0.5 - 30)
+        ctx.fillText(f"Wave Reached:  {self.final_wave}", cx, py + 140)
+        ctx.fillText(f"Final Score:  {self.final_score:,}", cx, py + 175)
+        ctx.fillStyle = "rgba(180, 200, 220, 0.7)"
+        ctx.fillText(f"High Score:  {self.high_score:,}", cx, py + 210)
+
         if self.is_new_high:
-            ctx.fillStyle = "rgba(255, 216, 132, 0.98)"
-            ctx.font = "700 24px Orbitron, sans-serif"
-            ctx.fillText("NEW HIGH SCORE", self.view_w * 0.5 - 112, self.view_h * 0.5 + 12)
+            ctx.fillStyle = "rgba(255, 216, 100, 1.0)"
+            ctx.font = "800 24px Orbitron, sans-serif"
+            pulse_y = 4 * math.sin(self.background_t * 6.0)
+            ctx.fillText("\u2605  NEW HIGH SCORE  \u2605", cx, py + 260 + pulse_y)
+
+        ctx.textAlign = "start"
         for button in self.game_over_buttons:
             self._draw_button(button)
 
@@ -2062,34 +2299,55 @@ class BrowserGame:
 
     def _draw_panel(self, x: float, y: float, width: float, height: float) -> None:
         ctx = self.ctx
-        r = 14  # corner radius
+        r = 16  # corner radius
         ctx.save()
 
-        # Rounded rect path
-        ctx.beginPath()
-        ctx.moveTo(x + r, y)
-        ctx.lineTo(x + width - r, y)
-        ctx.arcTo(x + width, y, x + width, y + r, r)
-        ctx.lineTo(x + width, y + height - r)
-        ctx.arcTo(x + width, y + height, x + width - r, y + height, r)
-        ctx.lineTo(x + r, y + height)
-        ctx.arcTo(x, y + height, x, y + height - r, r)
-        ctx.lineTo(x, y + r)
-        ctx.arcTo(x, y, x + r, y, r)
-        ctx.closePath()
+        # Rounded rect path helper
+        def _rrect():
+            ctx.beginPath()
+            ctx.moveTo(x + r, y)
+            ctx.lineTo(x + width - r, y)
+            ctx.arcTo(x + width, y, x + width, y + r, r)
+            ctx.lineTo(x + width, y + height - r)
+            ctx.arcTo(x + width, y + height, x + width - r, y + height, r)
+            ctx.lineTo(x + r, y + height)
+            ctx.arcTo(x, y + height, x, y + height - r, r)
+            ctx.lineTo(x, y + r)
+            ctx.arcTo(x, y, x + r, y, r)
+            ctx.closePath()
 
-        # Dark fill
-        ctx.fillStyle = "rgba(4, 8, 16, 0.88)"
+        # Outer glow shadow
+        _rrect()
+        ctx.shadowColor = "rgba(60, 140, 255, 0.12)"
+        ctx.shadowBlur = 30
+        ctx.fillStyle = "rgba(0,0,0,0)"
+        ctx.fill()
+        ctx.shadowColor = "transparent"
+        ctx.shadowBlur = 0
+
+        # Glassmorphism fill — dark with subtle gradient
+        _rrect()
+        panel_grad = ctx.createLinearGradient(x, y, x, y + height)
+        panel_grad.addColorStop(0, "rgba(8, 14, 26, 0.92)")
+        panel_grad.addColorStop(0.5, "rgba(6, 10, 20, 0.94)")
+        panel_grad.addColorStop(1, "rgba(4, 8, 16, 0.96)")
+        ctx.fillStyle = panel_grad
         ctx.fill()
 
-        # Border
-        ctx.strokeStyle = "rgba(100, 190, 255, 0.15)"
-        ctx.lineWidth = 1
+        # Border with glow
+        _rrect()
+        ctx.strokeStyle = "rgba(80, 170, 255, 0.2)"
+        ctx.lineWidth = 1.5
         ctx.stroke()
 
-        # Inner top glow line
-        ctx.strokeStyle = "rgba(120, 200, 255, 0.08)"
-        ctx.lineWidth = 1
+        # Top accent line — vivid
+        top_grad = ctx.createLinearGradient(x + r + 10, y, x + width - r - 10, y)
+        top_grad.addColorStop(0, "rgba(80, 180, 255, 0)")
+        top_grad.addColorStop(0.3, "rgba(100, 200, 255, 0.3)")
+        top_grad.addColorStop(0.7, "rgba(100, 200, 255, 0.3)")
+        top_grad.addColorStop(1, "rgba(80, 180, 255, 0)")
+        ctx.strokeStyle = top_grad
+        ctx.lineWidth = 2
         ctx.beginPath()
         ctx.moveTo(x + r + 10, y + 1)
         ctx.lineTo(x + width - r - 10, y + 1)
@@ -2102,62 +2360,73 @@ class BrowserGame:
         ctx = self.ctx
         accent = button.accent
         bx, by, bw, bh = button.x, button.y, button.width, button.height
-        r = 10  # corner radius
+        r = 12  # corner radius
 
         ctx.save()
-        # Rounded rect path
-        ctx.beginPath()
-        ctx.moveTo(bx + r, by)
-        ctx.lineTo(bx + bw - r, by)
-        ctx.arcTo(bx + bw, by, bx + bw, by + r, r)
-        ctx.lineTo(bx + bw, by + bh - r)
-        ctx.arcTo(bx + bw, by + bh, bx + bw - r, by + bh, r)
-        ctx.lineTo(bx + r, by + bh)
-        ctx.arcTo(bx, by + bh, bx, by + bh - r, r)
-        ctx.lineTo(bx, by + r)
-        ctx.arcTo(bx, by, bx + r, by, r)
-        ctx.closePath()
 
-        # Fill
-        fill_alpha = 0.16 if hovered else 0.06
-        ctx.fillStyle = f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {fill_alpha})"
+        # Rounded rect path helper
+        def _rrect():
+            ctx.beginPath()
+            ctx.moveTo(bx + r, by)
+            ctx.lineTo(bx + bw - r, by)
+            ctx.arcTo(bx + bw, by, bx + bw, by + r, r)
+            ctx.lineTo(bx + bw, by + bh - r)
+            ctx.arcTo(bx + bw, by + bh, bx + bw - r, by + bh, r)
+            ctx.lineTo(bx + r, by + bh)
+            ctx.arcTo(bx, by + bh, bx, by + bh - r, r)
+            ctx.lineTo(bx, by + r)
+            ctx.arcTo(bx, by, bx + r, by, r)
+            ctx.closePath()
+
+        # Hover underglow
+        if hovered:
+            _rrect()
+            ctx.shadowColor = f"rgba({accent[0]}, {accent[1]}, {accent[2]}, 0.3)"
+            ctx.shadowBlur = 20
+            ctx.fillStyle = "rgba(0,0,0,0)"
+            ctx.fill()
+            ctx.shadowColor = "transparent"
+            ctx.shadowBlur = 0
+
+        # Glassmorphism Fill
+        _rrect()
+        fill_alpha1 = 0.25 if hovered else 0.08
+        fill_alpha2 = 0.15 if hovered else 0.04
+        btn_grad = ctx.createLinearGradient(bx, by, bx, by + bh)
+        btn_grad.addColorStop(0, f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {fill_alpha1})")
+        btn_grad.addColorStop(1, f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {fill_alpha2})")
+        ctx.fillStyle = btn_grad
         ctx.fill()
 
         # Border
-        border_alpha = 0.7 if hovered else 0.22
+        border_alpha = 0.8 if hovered else 0.25
         ctx.strokeStyle = f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {border_alpha})"
-        ctx.lineWidth = 1.5 if hovered else 1
+        ctx.lineWidth = 2 if hovered else 1
         ctx.stroke()
 
         # Left accent bar
-        bar_alpha = 0.8 if hovered else 0.35
+        bar_w = 4 if hovered else 3
+        bar_alpha = 0.95 if hovered else 0.4
         ctx.fillStyle = f"rgba({accent[0]}, {accent[1]}, {accent[2]}, {bar_alpha})"
         ctx.beginPath()
         ctx.moveTo(bx, by + r)
         ctx.lineTo(bx, by + bh - r)
-        ctx.lineTo(bx + 3, by + bh - r)
-        ctx.lineTo(bx + 3, by + r)
+        ctx.arcTo(bx, by + bh, bx + bar_w, by + bh, r)
+        ctx.lineTo(bx + bar_w, by + r)
+        ctx.arcTo(bx + bar_w, by, bx, by, r)
         ctx.closePath()
         ctx.fill()
 
-        # Hover glow
-        if hovered:
-            glow = ctx.createRadialGradient(bx + bw * 0.5, by + bh * 0.5, 10, bx + bw * 0.5, by + bh * 0.5, bw * 0.6)
-            glow.addColorStop(0, f"rgba({accent[0]}, {accent[1]}, {accent[2]}, 0.06)")
-            glow.addColorStop(1, "rgba(0,0,0,0)")
-            ctx.fillStyle = glow
-            ctx.fill()
-
         # Label
-        ctx.fillStyle = "rgba(240, 246, 255, 0.96)" if hovered else "rgba(210, 224, 240, 0.9)"
-        ctx.font = "700 19px Rajdhani, sans-serif"
-        ctx.fillText(button.label, bx + 18, by + 30)
+        ctx.fillStyle = "rgba(255, 255, 255, 1.0)" if hovered else "rgba(210, 224, 240, 0.9)"
+        ctx.font = "700 20px Rajdhani, sans-serif"
+        ctx.fillText(button.label, bx + 22, by + 30)
         ctx.restore()
 
         if card_text:
             ctx.font = "500 15px Rajdhani, sans-serif"
-            ctx.fillStyle = "rgba(180, 200, 220, 0.85)"
-            self._wrap_text(card_text, bx + 18, by + 56, bw - 36, 20)
+            ctx.fillStyle = "rgba(200, 220, 240, 0.9)" if hovered else "rgba(180, 200, 220, 0.85)"
+            self._wrap_text(card_text, bx + 22, by + 56, bw - 40, 20)
 
     def _wrap_text(self, text: str, x: float, y: float, max_width: float, line_height: float) -> None:
         ctx = self.ctx

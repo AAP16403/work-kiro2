@@ -38,6 +38,7 @@ class Charger(Behavior):
                 enemy.ai["state"] = "WINDUP"
                 enemy.ai["state_timer"] = self.windup_time
                 enemy.vel = Vec2(0, 0) # Stop to telegraph
+                enemy.ai["charger_dashing"] = False
                 return
 
             # Move towards the player
@@ -45,36 +46,51 @@ class Charger(Behavior):
             move_dir = (dir_to_player + sep * 0.5).normalized()
             enemy.vel = move_dir * enemy.speed
             enemy.pos += enemy.vel * dt
+            enemy.ai["charger_dashing"] = False
 
         elif current_state == "WINDUP":
             # --- Telegraph the charge ---
             enemy.vel = Vec2(0, 0) # Stay still
+            enemy.ai["charger_dashing"] = False
             if enemy.ai["state_timer"] <= 0:
                 enemy.ai["state"] = "CHARGING"
-                # Lock on to a predicted position
-                prediction_time = dist_to_player / (enemy.speed * self.charge_speed_mult) * 0.5 # Simple prediction
-                enemy.ai["charge_target"] = player_pos + player_vel * prediction_time
-                enemy.ai["charge_dir"] = (enemy.ai["charge_target"] - enemy.pos).normalized()
+                # Lock on to a predicted position — store as floats for safe AI dict storage
+                prediction_time = dist_to_player / (enemy.speed * self.charge_speed_mult) * 0.5
+                charge_target = player_pos + player_vel * prediction_time
+                enemy.ai["charge_target_x"] = float(charge_target.x)
+                enemy.ai["charge_target_y"] = float(charge_target.y)
+                charge_dir = (charge_target - enemy.pos).normalized()
+                enemy.ai["charge_dir_x"] = float(charge_dir.x)
+                enemy.ai["charge_dir_y"] = float(charge_dir.y)
+                enemy.ai["charger_dashing"] = True
 
         elif current_state == "CHARGING":
             # --- Dash in a straight line ---
-            # Use the locked-on direction
-            charge_dir = enemy.ai["charge_dir"]
+            # Reconstruct direction from stored floats
+            cdx = float(enemy.ai.get("charge_dir_x", 1.0))
+            cdy = float(enemy.ai.get("charge_dir_y", 0.0))
+            charge_dir = Vec2(cdx, cdy)
             enemy.vel = charge_dir * enemy.speed * self.charge_speed_mult
             enemy.pos += enemy.vel * dt
+            enemy.ai["charger_dashing"] = True
 
             # Stop charging if we've gone far enough or are close to the target
-            # This prevents infinite charging across the map
-            dist_to_target = (enemy.ai["charge_target"] - enemy.pos).length()
-            if dist_to_target < 30 or (charge_dir.dot( (enemy.ai["charge_target"] - enemy.pos).normalized() ) < 0): # Overshot
+            ctx = float(enemy.ai.get("charge_target_x", enemy.pos.x))
+            cty = float(enemy.ai.get("charge_target_y", enemy.pos.y))
+            target = Vec2(ctx, cty)
+            dist_to_target = (target - enemy.pos).length()
+            to_target = (target - enemy.pos).normalized()
+            if dist_to_target < 30 or (charge_dir.dot(to_target) < 0): # Overshot
                 enemy.ai["state"] = "COOLDOWN"
                 enemy.ai["state_timer"] = self.cooldown_time
+                enemy.ai["charger_dashing"] = False
 
         elif current_state == "COOLDOWN":
             # --- Brief pause after charging ---
             # Slow down significantly
             enemy.vel *= 0.9 * (1.0 - dt)
             enemy.pos += enemy.vel * dt
+            enemy.ai["charger_dashing"] = False
             if enemy.ai["state_timer"] <= 0:
                 enemy.ai["state"] = "REPOSITIONING"
 

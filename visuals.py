@@ -11,6 +11,7 @@ from pyglet.graphics import Group
 
 from config import ENEMY_COLORS, SCREEN_H
 from enemy import brute_charge_lane
+from juice import JuiceOverlay, apply_hit_squash
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
@@ -65,6 +66,7 @@ class Visuals:
         self._scene_group = Group(order=-20000)
         self._projectile_group = Group(order=14000)
         self._overlay_group = Group(order=22000)
+        self._flash_group = Group(order=15500)  # Ultra flash: above the particle rings (15000)
 
         self._enemy_handles: dict[int, RenderHandle] = {}
         self._proj_handles: dict[int, RenderHandle] = {}
@@ -78,6 +80,7 @@ class Visuals:
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
         self._init_scene_fx()
+        self._juice = JuiceOverlay(self.batch, self._overlay_group, self._flash_group)
 
     def _init_scene_fx(self) -> None:
         self._scene_glows = [
@@ -167,6 +170,16 @@ class Visuals:
         bot.opacity = v_op
         left.opacity = int(v_op * 0.8)
         right.opacity = int(v_op * 0.8)
+
+    def trigger_ultra_flash(self, pos: Vec2, variant_color, radius: float, t: float) -> None:
+        """Start the Ultra flash at a world position. It is layered over the shockwave ring."""
+        self._juice.trigger_ultra_flash(pos, variant_color, radius, t)
+
+    def sync_juice(self, t: float, shake: Vec2, player, view_w: int, view_h: int) -> None:
+        """Per-frame low-health vignette and Ultra flash."""
+        hp_max = max(1, int(getattr(player, "max_hp", 100)))
+        hp_ratio = float(getattr(player, "hp", hp_max)) / float(hp_max)
+        self._juice.sync(t, shake, hp_ratio, view_w, view_h)
 
     def make_player(self):
         """Create player visual."""
@@ -586,6 +599,8 @@ class Visuals:
             body_obj = h.objs[body_idx]
             if hasattr(body_obj, "color") and body_obj.color != render_col:
                 body_obj.color = render_col
+            # Hit reaction: squash the body while hit_flash_timer runs, then spring back to rest.
+            apply_hit_squash(body_obj, float(getattr(enemy, "hit_flash_timer", 0.0)))
 
         if behavior.startswith("boss_"):
             sh = h.objs[0]

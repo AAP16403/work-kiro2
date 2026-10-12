@@ -45,6 +45,11 @@ class Enemy:
     vel: Vec2 = field(default_factory=lambda: Vec2(0.0, 0.0))
     seed: float = 0.0
     ai: dict = field(default_factory=dict)
+    max_hp: int = 0
+    is_elite: bool = False
+    elite_affix: str = ""
+    shield: int = 0
+    hit_flash_timer: float = 0.0
 
 
 def _safe_dir(v: Vec2, fallback: Vec2 | None = None) -> Vec2:

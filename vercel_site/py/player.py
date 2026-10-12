@@ -40,6 +40,16 @@ class Player:
     dash_charges: int = 1
     dash_max_charges: int = 1
     invincibility_timer: float = 0.0
+    # Boost / Overdrive system (LSHIFT)
+    boost_energy: float = 100.0
+    boost_max_energy: float = 100.0
+    is_boosting: bool = False
+    infinite_boost_until: float = 0.0
+    boost_recharge_rate: float = 22.0
+    boost_drain_rate: float = 28.0
+    crit_chance_bonus: float = 0.0
+    crit_mult_bonus: float = 0.0
+    damage_flash_timer: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -114,4 +124,47 @@ def format_dash_hud(player: Player, current_time: float) -> str:
     if max_ch > 1:
         return f"Dash {charges}/{max_ch}"
     return ""
+
+
+def update_boost(
+    player: Player,
+    dt: float,
+    boost_requested: bool,
+    current_time: float,
+    has_infinite: bool = False,
+) -> bool:
+    """Update player boost state and energy. Returns whether player is actively boosting."""
+    is_inf = has_infinite or (current_time < getattr(player, "infinite_boost_until", 0.0))
+    drain = float(getattr(player, "boost_drain_rate", 28.0))
+    recharge = float(getattr(player, "boost_recharge_rate", 22.0))
+    max_energy = float(getattr(player, "boost_max_energy", 100.0))
+
+    # Hysteresis: sustained boost can drain down to 0; starting boost requires >= 12 energy
+    can_start = is_inf or (player.boost_energy >= 12.0)
+    can_sustain = is_inf or (player.boost_energy > 0.0)
+
+    if boost_requested and ((player.is_boosting and can_sustain) or (not player.is_boosting and can_start)):
+        player.is_boosting = True
+        if not is_inf:
+            player.boost_energy = max(0.0, player.boost_energy - drain * dt)
+            if player.boost_energy <= 0.0:
+                player.is_boosting = False
+    else:
+        player.is_boosting = False
+        if player.boost_energy < max_energy:
+            player.boost_energy = min(max_energy, player.boost_energy + recharge * dt)
+
+    return player.is_boosting
+
+
+def format_boost_hud(player: Player, current_time: float, has_infinite: bool = False) -> str:
+    """Return a short HUD string for boost status."""
+    is_inf = has_infinite or (current_time < getattr(player, "infinite_boost_until", 0.0))
+    if is_inf:
+        left = max(0.0, getattr(player, "infinite_boost_until", 0.0) - current_time)
+        return f"BOOST [INF {left:.0f}s]" if left > 0 else "BOOST [INF]"
+    if player.is_boosting:
+        return f"BOOSTING {int(player.boost_energy)}%"
+    return f"Boost {int(player.boost_energy)}%"
+
 

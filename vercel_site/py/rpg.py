@@ -16,6 +16,8 @@ TEMP_REWARD_POOL: list[dict] = [
     {"key": "temp_magnet", "title": "Magnet Core", "desc": "Wider pickup magnet for 3 waves", "duration": 3},
     {"key": "temp_guard", "title": "Aegis Skin", "desc": "-18% incoming damage for 2 waves", "duration": 2},
     {"key": "temp_ultra_flux", "title": "Ultra Flux", "desc": "Ultra cooldown reduced for 3 waves", "duration": 3},
+    {"key": "temp_boost_overdrive", "title": "Hyper Thrusters", "desc": "+25% speed & infinite boost for 2 waves", "duration": 2},
+    {"key": "temp_crit_lens", "title": "Focusing Prism", "desc": "+25% crit chance & +50% crit dmg for 3 waves", "duration": 3},
 ]
 
 PERM_REWARD_POOL: list[dict] = [
@@ -27,6 +29,8 @@ PERM_REWARD_POOL: list[dict] = [
     {"key": "perm_ultra", "title": "Ultra Charge", "desc": "+1 Ultra charge now"},
     {"key": "perm_dash", "title": "Quick Dash", "desc": "Dash cooldown reduced this run"},
     {"key": "perm_double_dash", "title": "Double Dash", "desc": "+1 dash charge this run"},
+    {"key": "perm_boost_cap", "title": "Auxiliary Battery", "desc": "+30 max boost energy & +20% recharge"},
+    {"key": "perm_crit", "title": "Kinetic Calibrator", "desc": "+12% permanent crit chance this run"},
 ]
 
 TEMP_REWARD_NAMES: dict[str, str] = {
@@ -36,6 +40,8 @@ TEMP_REWARD_NAMES: dict[str, str] = {
     "temp_magnet": "Magnet",
     "temp_guard": "Guard",
     "temp_ultra_flux": "Ultra Flux",
+    "temp_boost_overdrive": "Hyper Boost",
+    "temp_crit_lens": "Focus Lens",
 }
 
 PERM_REWARD_NAMES: dict[str, str] = {
@@ -47,10 +53,12 @@ PERM_REWARD_NAMES: dict[str, str] = {
     "perm_ultra": "Ultra+",
     "perm_dash": "Dash+",
     "perm_double_dash": "Dash2",
+    "perm_boost_cap": "Aux Battery",
+    "perm_crit": "Crit Calibrator",
 }
 
 
-def recompute_temp_mods(active_temp_rewards: list[dict]) -> dict[str, float]:
+def recompute_temp_mods(active_temp_rewards: list[dict]) -> dict[str, float | bool]:
     """Return computed modifier values from active temp rewards."""
     dmg = 1.0
     speed = 1.0
@@ -58,6 +66,9 @@ def recompute_temp_mods(active_temp_rewards: list[dict]) -> dict[str, float]:
     magnet = 0.0
     incoming = 1.0
     ultra_cd = 1.0
+    crit_chance = 0.0
+    crit_mult = 0.0
+    boost_inf = False
     for fx in list(active_temp_rewards):
         k = str(fx.get("key", ""))
         if k == "temp_overdrive":
@@ -72,6 +83,12 @@ def recompute_temp_mods(active_temp_rewards: list[dict]) -> dict[str, float]:
             incoming *= 0.82
         elif k == "temp_ultra_flux":
             ultra_cd *= 0.7
+        elif k == "temp_boost_overdrive":
+            speed *= 1.25
+            boost_inf = True
+        elif k == "temp_crit_lens":
+            crit_chance += 0.25
+            crit_mult += 0.50
     return {
         "damage": dmg,
         "speed": speed,
@@ -79,6 +96,9 @@ def recompute_temp_mods(active_temp_rewards: list[dict]) -> dict[str, float]:
         "magnet": magnet,
         "incoming_damage": incoming,
         "ultra_cd": ultra_cd,
+        "crit_chance": crit_chance,
+        "crit_mult": crit_mult,
+        "boost_inf": boost_inf,
     }
 
 
@@ -86,9 +106,10 @@ def advance_temp_rewards(active_list: list[dict]) -> list[dict]:
     """Decrement wave counters and return kept rewards."""
     kept: list[dict] = []
     for fx in active_list:
-        left = int(fx.get("waves_left", 0)) - 1
+        left = int(fx.get("waves_left", fx.get("duration", 0))) - 1
         if left > 0:
             fx["waves_left"] = left
+            fx["duration"] = left
             kept.append(fx)
     return kept
 
@@ -99,9 +120,11 @@ def apply_temp_reward(active_list: list[dict], key: str, duration: int) -> list[
     dur = max(2, min(3, int(duration)))
     for fx in active_list:
         if str(fx.get("key", "")) == k:
-            fx["waves_left"] = max(int(fx.get("waves_left", 0)), dur)
+            cur = int(fx.get("waves_left", fx.get("duration", 0)))
+            fx["waves_left"] = max(cur, dur)
+            fx["duration"] = fx["waves_left"]
             return active_list
-    active_list.append({"key": k, "waves_left": dur})
+    active_list.append({"key": k, "waves_left": dur, "duration": dur})
     return active_list
 
 
@@ -133,6 +156,12 @@ def apply_perm_reward(
     elif k == "perm_double_dash":
         player.dash_max_charges = min(2, int(getattr(player, "dash_max_charges", 1)) + 1)
         player.dash_charges = int(player.dash_max_charges)
+    elif k == "perm_boost_cap":
+        player.boost_max_energy = float(getattr(player, "boost_max_energy", 100.0)) + 30.0
+        player.boost_energy = float(getattr(player, "boost_max_energy", 100.0))
+        player.boost_recharge_rate = float(getattr(player, "boost_recharge_rate", 22.0)) * 1.20
+    elif k == "perm_crit":
+        player.crit_chance_bonus = float(getattr(player, "crit_chance_bonus", 0.0)) + 0.12
     else:
         applied = False
 
@@ -172,7 +201,7 @@ def format_temp_hud(active_list: list[dict]) -> str:
     parts: list[str] = []
     for fx in active_list[:2]:
         key = str(fx.get("key", ""))
-        left = int(fx.get("waves_left", 0))
+        left = int(fx.get("waves_left", fx.get("duration", 0)))
         if key in TEMP_REWARD_NAMES and left > 0:
             parts.append(f"{TEMP_REWARD_NAMES[key]}:{left}")
     if not parts:

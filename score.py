@@ -56,10 +56,10 @@ class ScoreTracker:
     # Events
     # ------------------------------------------------------------------
 
-    def on_enemy_kill(self, behavior: str) -> int:
+    def on_enemy_kill(self, behavior: str, multiplier: float = 1.0) -> int:
         """Record an enemy kill.  Returns points awarded."""
         base = KILL_POINTS.get(behavior, 100)
-        points = int(base * self.combo)
+        points = int(base * self.combo * multiplier)
         self.score += points
         self.kills += 1
 

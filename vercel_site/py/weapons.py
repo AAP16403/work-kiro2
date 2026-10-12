@@ -25,11 +25,14 @@ class Weapon:
     projectile_count: int
     spread_angle: float  # degrees
     projectile_speed: float
-    projectile_type: str  # "bullet", "spread", "laser", "missile", "plasma"
+    projectile_type: str  # "bullet", "spread", "laser", "missile", "plasma", "railgun", "flak"
     recoil_kick: float  # degrees added per shot
     recoil_recover: float  # degrees per second
     recoil_max: float  # max recoil in degrees
     cadence_jitter: float  # +/- percent of cooldown
+    pierce: int = 0
+    crit_chance: float = 0.10
+    crit_mult: float = 2.0
 
 
 # Weapon definitions
@@ -98,6 +101,39 @@ WEAPONS = {
         recoil_recover=9.0,
         recoil_max=5.0,
         cadence_jitter=0.08,
+        crit_chance=0.15,
+        crit_mult=2.1,
+    ),
+    "railgun": Weapon(
+        name="Hyper Railgun",
+        damage=40,
+        fire_rate=0.50,
+        projectile_count=1,
+        spread_angle=0,
+        projectile_speed=780.0,
+        projectile_type="railgun",
+        recoil_kick=2.4,
+        recoil_recover=6.0,
+        recoil_max=8.0,
+        cadence_jitter=0.02,
+        pierce=3,
+        crit_chance=0.22,
+        crit_mult=2.6,
+    ),
+    "flak": Weapon(
+        name="Flak Battery",
+        damage=11,
+        fire_rate=0.35,
+        projectile_count=5,
+        spread_angle=36,
+        projectile_speed=340.0,
+        projectile_type="flak",
+        recoil_kick=1.5,
+        recoil_recover=8.5,
+        recoil_max=6.5,
+        cadence_jitter=0.06,
+        crit_chance=0.14,
+        crit_mult=1.85,
     ),
 }
 
@@ -108,8 +144,8 @@ def get_weapon_pool_for_wave(wave: int) -> list[str]:
     if wave <= 4:
         return ["basic", "rapid", "spread"]
     if wave <= 6:
-        return ["rapid", "spread", "plasma"]
-    return ["spread", "plasma", "heavy"]
+        return ["rapid", "spread", "plasma", "flak"]
+    return ["spread", "plasma", "heavy", "railgun", "flak"]
 
 
 def get_weapon_key_for_wave(wave: int) -> str:
@@ -120,12 +156,12 @@ def get_weapon_key_for_wave(wave: int) -> str:
         weights = [1.0]
     elif w <= 4:
         # Keep basic common early; introduce rapid/spread gradually.
-        weights = [0.55, 0.25, 0.20]  # basic, rapid, spread
+        weights = [0.50, 0.25, 0.25]
     elif w <= 6:
-        weights = [0.35, 0.35, 0.30]  # rapid, spread, plasma
+        weights = [0.30, 0.25, 0.25, 0.20]
     else:
-        # Heavy is intentionally rarer; it's a high-commitment weapon.
-        weights = [0.45, 0.45, 0.10]  # spread, plasma, heavy
+        # High wave variety
+        weights = [0.22, 0.22, 0.18, 0.18, 0.20]
     return random.choices(pool, weights=weights, k=1)[0]
 
 
@@ -142,9 +178,6 @@ def get_effective_fire_rate(weapon: Weapon, player_fire_rate: float) -> float:
     return max(FIRE_RATE_MIN, base * ratio)
 
 
-
-
-
 def get_weapon_for_wave(wave: int) -> Weapon:
     """Get a random weapon appropriate for the wave."""
     return WEAPONS[get_weapon_key_for_wave(int(wave))]
@@ -157,5 +190,7 @@ def get_weapon_color(weapon_type: str) -> tuple:
         "spread": (255, 200, 100),      # Orange
         "missile": (200, 100, 100),     # Red
         "plasma": (150, 100, 255),      # Purple
+        "railgun": (120, 245, 255),     # Electric cyan
+        "flak": (255, 140, 50),         # Fiery amber
     }
     return colors.get(weapon_type, (255, 255, 255))

@@ -1,6 +1,6 @@
 """Projectile entity and related functionality."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import math
 import random
 from typing import TYPE_CHECKING
@@ -18,16 +18,15 @@ class Projectile:
     damage: int
     ttl: float = 2.0
     owner: str = "player"  # "player" or "enemy"
-    projectile_type: str = "bullet"  # "bullet", "spread", "missile", "plasma", "bomb"
+    projectile_type: str = "bullet"  # "bullet", "spread", "missile", "plasma", "bomb", "railgun", "flak"
     prev_pos: Vec2 | None = None
-    history: list[Vec2] = field(default_factory=list)
+    pierce: int = 0
+    is_crit: bool = False
+    cluster_on_death: bool = False
 
     def update(self, dt: float) -> bool:
         """Update projectile position and TTL. Returns False if expired."""
         self.prev_pos = self.pos
-        self.history.append(Vec2(self.pos.x, self.pos.y))
-        if len(self.history) > 6:
-            self.history.pop(0)
         self.pos = self.pos + self.vel * dt
         self.ttl -= dt
         return self.ttl > 0
@@ -46,15 +45,27 @@ def spawn_projectiles(
     base_damage: int,
     recoil_deg: float = 0.0,
     rng: random.Random | None = None,
+    crit_chance_bonus: float = 0.0,
+    crit_mult_bonus: float = 0.0,
 ) -> list[Projectile]:
     """Spawn projectiles based on weapon type."""
     projectiles = []
     rng = rng or random
     
     # Weapon damage = weapon base damage + player damage bonus (50%)
-    final_damage = weapon.damage + int(base_damage * 0.5)
+    raw_damage = weapon.damage + int(base_damage * 0.5)
+
+    # Roll critical hit
+    effective_crit_chance = min(0.85, max(0.0, getattr(weapon, "crit_chance", 0.10) + crit_chance_bonus))
+    is_crit = rng.random() < effective_crit_chance
+    if is_crit:
+        mult = getattr(weapon, "crit_mult", 2.0) + crit_mult_bonus
+        final_damage = max(1, int(round(raw_damage * mult)))
+    else:
+        final_damage = max(1, raw_damage)
 
     recoil = float(recoil_deg) if recoil_deg and recoil_deg > 0 else 0.0
+    pierce_val = int(getattr(weapon, "pierce", 0))
     
     if weapon.projectile_type == "bullet":
         for i in range(weapon.projectile_count):
@@ -64,7 +75,8 @@ def spawn_projectiles(
             vel = d * weapon.projectile_speed
             projectiles.append(Projectile(
                 muzzle, vel, final_damage,
-                ttl=2.0, owner="player", projectile_type="bullet"
+                ttl=2.0, owner="player", projectile_type="bullet",
+                is_crit=is_crit,
             ))
     
     elif weapon.projectile_type == "spread":
@@ -75,7 +87,8 @@ def spawn_projectiles(
             vel = d * weapon.projectile_speed
             projectiles.append(Projectile(
                 muzzle, vel, final_damage,
-                ttl=2.2, owner="player", projectile_type="spread"
+                ttl=2.2, owner="player", projectile_type="spread",
+                is_crit=is_crit,
             ))
     
     elif weapon.projectile_type == "missile":
@@ -83,7 +96,11 @@ def spawn_projectiles(
         d = _rotate_dir(aim_direction, jitter) if jitter else aim_direction
         vel = d * weapon.projectile_speed
         muzzle_extended = muzzle + aim_direction * 4.0
-        projectiles.append(Projectile(muzzle_extended, vel, final_damage, ttl=3.0, owner="player", projectile_type="missile"))
+        projectiles.append(Projectile(
+            muzzle_extended, vel, final_damage,
+            ttl=3.0, owner="player", projectile_type="missile",
+            is_crit=is_crit,
+        ))
     
     elif weapon.projectile_type == "plasma":
         for i in range(weapon.projectile_count):
@@ -91,16 +108,40 @@ def spawn_projectiles(
             jitter = rng.uniform(-recoil, recoil) if recoil else 0.0
             d = _rotate_dir(aim_direction, angle_offset + jitter)
             vel = d * weapon.projectile_speed
-            projectiles.append(Projectile(muzzle, vel, final_damage, ttl=2.5, owner="player", projectile_type="plasma"))
+            projectiles.append(Projectile(
+                muzzle, vel, final_damage,
+                ttl=2.5, owner="player", projectile_type="plasma",
+                is_crit=is_crit,
+            ))
+
+    elif weapon.projectile_type == "railgun":
+        jitter = rng.uniform(-recoil * 0.4, recoil * 0.4) if recoil else 0.0
+        d = _rotate_dir(aim_direction, jitter) if jitter else aim_direction
+        vel = d * weapon.projectile_speed
+        projectiles.append(Projectile(
+            muzzle, vel, final_damage,
+            ttl=1.8, owner="player", projectile_type="railgun",
+            pierce=pierce_val, is_crit=is_crit,
+        ))
+
+    elif weapon.projectile_type == "flak":
+        for i in range(weapon.projectile_count):
+            angle_offset = (i - weapon.projectile_count / 2 + 0.5) * weapon.spread_angle
+            jitter = rng.uniform(-recoil, recoil) if recoil else 0.0
+            d = _rotate_dir(aim_direction, angle_offset + jitter)
+            vel = d * weapon.projectile_speed * rng.uniform(0.9, 1.1)
+            projectiles.append(Projectile(
+                muzzle, vel, final_damage,
+                ttl=rng.uniform(0.7, 1.1), owner="player", projectile_type="flak",
+                is_crit=is_crit, cluster_on_death=True,
+            ))
     
     elif weapon.projectile_type == "laser":
-        # Fast moving visual beam
         vel = aim_direction * 2000.0
         projectiles.append(Projectile(
             muzzle, vel, final_damage,
-            ttl=0.05, owner="player", projectile_type="laser"
+            ttl=0.05, owner="player", projectile_type="laser",
+            is_crit=is_crit,
         ))
-    
-        return projectiles
 
     return projectiles

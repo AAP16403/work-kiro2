@@ -1,4 +1,4 @@
-﻿﻿"""Menu system for game configuration and navigation."""
+"""Menu system for game configuration and navigation."""
 
 from dataclasses import dataclass, field
 from collections.abc import Callable
@@ -315,6 +315,18 @@ class Menu:
             batch=self.batch,
         )
 
+        self.footer = pyglet.text.Label(
+            "WASD move  |  LMB auto-fire  |  SPACE dash  |  RMB ultra  |  SHIFT boost  |  ESC pause",
+            font_name=UI_FONT_META,
+            font_size=12,
+            x=width // 2,
+            y=16,
+            anchor_x="center",
+            anchor_y="bottom",
+            color=(150, 165, 185, 220),
+            batch=self.batch,
+        )
+
         for btn in self.buttons:
             btn.ensure(self.batch)
         self.resize(width, height)
@@ -400,6 +412,9 @@ class Menu:
         _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
         self.subtitle.y = height - int(130 * scale)
         self.subtitle.width = max(320, width - 64)
+        self.footer.x = cx
+        self.footer.y = int(16 * scale)
+        _sync_label_style_if_ready(self.footer, UI_FONT_META, max(11, int(12 * min(scale, 1.25))))
 
         self._bg_a.width = width
         self._bg_a.height = height
@@ -446,6 +461,8 @@ class SettingsMenu:
         display_size: tuple[int, int] | None = None,
         advanced_fx_enabled: bool | None = None,
         map_type: str = MAP_CIRCLE,
+        music_volume: float = 0.5,
+        sfx_volume: float = 0.8,
     ):
         self.screen_width = width
         self.screen_height = height
@@ -547,6 +564,34 @@ class SettingsMenu:
             value_suffix="%",
         )
         
+        # Audio sliders (volumes are stored 0..1, shown as 0..100%).
+        self.music_volume = float(music_volume)
+        self.sfx_volume = float(sfx_volume)
+        self.music_slider = MenuSlider(
+            0,
+            0,
+            190,
+            "Music",
+            0,
+            100,
+            self.music_volume * 100.0,
+            lambda v: self._set_music_volume(v),
+            value_fmt="{:.0f}",
+            value_suffix="%",
+        )
+        self.sfx_slider = MenuSlider(
+            0,
+            0,
+            190,
+            "SFX",
+            0,
+            100,
+            self.sfx_volume * 100.0,
+            lambda v: self._set_sfx_volume(v),
+            value_fmt="{:.0f}",
+            value_suffix="%",
+        )
+
         # Back button
         self.back_button = MenuButton(0, 20, 160, 50, "Back to Menu", lambda: None, color=(100, 100, 150))
         
@@ -641,7 +686,8 @@ class SettingsMenu:
 
         for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
             btn.ensure(self.batch)
-        self.arena_slider.ensure(self.batch)
+        for slider in self._all_sliders():
+            slider.ensure(self.batch)
 
         self.resize(width, height)
 
@@ -838,6 +884,21 @@ class SettingsMenu:
         self.arena_slider.font_size = btn_font
         self.arena_slider.sync()
 
+        # --- Section 2b: Audio (Left Column, below Visuals) ---
+        # Music and SFX share one row: stacking them under Visuals would run into
+        # the Back button at 980x620. The track sits so its label starts section_gap
+        # below the FX button (MenuSlider draws its label 20px above the track).
+        audio_top_y = self.fx_button.y - section_gap
+        audio_track_y = audio_top_y - (20 + int(btn_font * 1.7))
+        audio_gap_x = int(20 * scale)
+        audio_w = (col_width - audio_gap_x) // 2
+        for i, slider in enumerate((self.music_slider, self.sfx_slider)):
+            slider.x = col1_x + i * (audio_w + audio_gap_x)
+            slider.y = audio_track_y
+            slider.width = audio_w
+            slider.font_size = btn_font
+            slider.sync()
+
         # --- Section 3: Display (Right Column) ---
         col2_x = panel_x + panel_w // 2 + content_pad_x // 2
         curr_y = content_top_y - int(30 * scale)
@@ -904,6 +965,12 @@ class SettingsMenu:
         self.window_size_idx = idx
         self.on_save(self.get_settings())
 
+    def _set_arena_pct(self, pct: float):
+        """Arena slider callback: percent (90-99) -> arena margin fraction."""
+        self.arena_pct = float(pct)
+        self.arena_margin = self.arena_pct / 100.0
+        self.on_save({"arena_margin": self.arena_margin})
+
     def _refresh_fx_button_text(self):
         self.fx_button.text = f"Advanced FX: {'On' if self.advanced_fx else 'Off'}"
         self.fx_button.sync()
@@ -921,7 +988,28 @@ class SettingsMenu:
         self.advanced_fx = not self.advanced_fx
         self._refresh_fx_button_text()
         self.on_save(self.get_settings())
-    
+
+    def _set_music_volume(self, v: float):
+        """Store music volume (slider 0..100) as 0..1 and notify the owner."""
+        self.music_volume = float(v) / 100.0
+        self.on_save({"music_volume": self.music_volume})
+
+    def _set_sfx_volume(self, v: float):
+        """Store SFX volume (slider 0..100) as 0..1 and notify the owner."""
+        self.sfx_volume = float(v) / 100.0
+        self.on_save({"sfx_volume": self.sfx_volume})
+
+    def _all_sliders(self) -> list[MenuSlider]:
+        return [self.arena_slider, self.music_slider, self.sfx_slider]
+
+    @staticmethod
+    def _slider_hit(slider: MenuSlider, px: float, py: float) -> bool:
+        """True when a press grabs the slider's knob or its track."""
+        return slider.contains_knob(px, py) or (
+            slider.x <= px <= slider.x + slider.width
+            and abs(py - slider.y) < max(10, int(slider.knob_radius + 4))
+        )
+
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
         for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
@@ -930,9 +1018,10 @@ class SettingsMenu:
 
     def on_mouse_drag(self, x: float, y: float, dx: float, dy: float):
         """Handle mouse drag for sliders."""
-        if self.arena_slider.is_dragging:
-            self.arena_slider.set_value_from_x(x)
-            self.arena_slider.sync()
+        for slider in self._all_sliders():
+            if slider.is_dragging:
+                slider.set_value_from_x(x)
+                slider.sync()
     
     def on_mouse_press(self, x: float, y: float, button: int) -> str | None:
         """Handle mouse clicks. Returns action string or None."""
@@ -951,21 +1040,20 @@ class SettingsMenu:
                 btn.callback()
                 return None
         
-        if self.arena_slider.contains_knob(x, y) or (
-            x >= self.arena_slider.x
-            and x <= self.arena_slider.x + self.arena_slider.width
-            and abs(y - self.arena_slider.y) < max(10, int(self.arena_slider.knob_radius + 4))
-        ):
-            self.arena_slider.is_dragging = True
-            self.arena_slider.set_value_from_x(x)
-            self.arena_slider.sync()
-        
+        for slider in self._all_sliders():
+            if self._slider_hit(slider, x, y):
+                slider.is_dragging = True
+                slider.set_value_from_x(x)
+                slider.sync()
+                break
+
         return None
-    
+
     def on_mouse_release(self, x: float, y: float, button: int):
         """Handle mouse release."""
-        self.arena_slider.is_dragging = False
-        self.arena_slider.sync()
+        for slider in self._all_sliders():
+            slider.is_dragging = False
+            slider.sync()
     
     def get_settings(self) -> dict:
         """Get current settings."""
@@ -977,8 +1065,10 @@ class SettingsMenu:
             "fullscreen": fullscreen,
             "arena_margin": float(self.arena_margin),
             "advanced_fx": bool(self.advanced_fx),
+            "music_volume": float(self.music_volume),
+            "sfx_volume": float(self.sfx_volume),
         }
-    
+
     def draw(self):
         """Draw the settings menu."""
         # Keep highlights in sync with the selected buttons.
@@ -1011,7 +1101,8 @@ class SettingsMenu:
         self._refresh_fx_button_text()
         for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
             btn.sync()
-        self.arena_slider.sync()
+        for slider in self._all_sliders():
+            slider.sync()
         self.batch.draw()
 
 
@@ -1046,12 +1137,15 @@ class GuideMenu:
         {"key": "vortex", "name": "Vortex (@)", "icon": "@", "what": "Temporary damaging aura around you.", "deal": "Play aggressively but keep exits open.", "lore": "Collapsed singularity shard in a containment ring."},
         {"key": "weapon", "name": "Weapon (W)", "icon": "W", "what": "Switches current weapon pattern.", "deal": "Adapt playstyle to the new spread/tempo.", "lore": "Recovered armament cache from dead merc squads."},
         {"key": "ultra", "name": "Ultra (U)", "icon": "U", "what": "Adds an Ultra charge for RMB/Q.", "deal": "Spend on boss spikes or dangerous swarms.", "lore": "A forbidden core spark meant for ship cannons."},
+        {"key": "boost", "name": "Overdrive (B)", "icon": "B", "what": "Restores boost and grants 6s infinite overdrive + shield.", "deal": "Grab to ram through swarms or kite aggressive bosses.", "lore": "Supercharged fusion capacitor designed for orbital interceptors."},
     ]
     BASICS_INFO = [
         {"key": "move", "name": "Movement", "icon": "MV", "what": "Use WASD or Arrow keys to move.", "deal": "Stay moving; linear retreats get punished.", "lore": "Mobility is your main defense layer."},
         {"key": "fire", "name": "Primary Fire", "icon": "LMB", "what": "LMB toggles auto-fire on/off.", "deal": "Keep auto-fire on, then focus on dodging and spacing.", "lore": "Auto-fire replaced hold-to-fire pacing."},
         {"key": "dash", "name": "Dash", "icon": "SP", "what": "Press SPACE to dash through pressure.", "deal": "Save dash for layered patterns, not chip damage.", "lore": "Dash timing decides most boss survivability windows."},
+        {"key": "boost_use", "name": "Boost / Overdrive", "icon": "SHF", "what": "Hold LSHIFT/RSHIFT to boost speed and kinetic ram enemies.", "deal": "Boost ramming shatters weak foes and grants 35% damage reduction.", "lore": "Forward deflection shielding channels kinetic thrust into a battering ram."},
         {"key": "ultra_use", "name": "Ultra Use", "icon": "U!", "what": "RMB or Q consumes one Ultra charge.", "deal": "Use Ultra during spike phases or add floods.", "lore": "Ultra is burst control, not passive DPS."},
+        {"key": "arsenal", "name": "Arsenal & Crits", "icon": "WPN", "what": "Weapons feature Crits (10% base, 2x dmg) and Piercing.", "deal": "Hyper Railgun pierces lines; Flak Battery cluster-bursts.", "lore": "Mil-spec kinetic accelerators retrofitted with variable-yield munitions."},
         {"key": "arena", "name": "Arena Control", "icon": "AR", "what": "Fight near edge lanes, avoid center traps.", "deal": "Rotate clockwise/counter-clockwise with intent.", "lore": "Bad pathing is deadlier than low HP."},
         {"key": "loot", "name": "Loot Priority", "icon": "LT", "what": "Powerups and weapon drops shape run tempo.", "deal": "Early damage/fire-rate usually beats greed picks.", "lore": "Boss waves guarantee high-value drops."},
         {"key": "rpg", "name": "Boss Rewards", "icon": "CRD", "what": "Boss kills open temp + permanent card picks.", "deal": "Pick consistency first, then high-risk scaling.", "lore": "Card flow is your long-run progression core."},

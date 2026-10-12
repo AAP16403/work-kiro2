@@ -1,5 +1,5 @@
-﻿# Pyglet isometric room survival prototype
-# Controls: WASD/Arrows move, LMB toggles auto-fire, SPACE dash, ESC menu.
+# Pyglet isometric room survival prototype
+# Controls: WASD/Arrows move, LMB toggles auto-fire, SPACE dash, LSHIFT boost, ESC menu.
 # Install: py -m pip install pyglet
 
 import math
@@ -21,6 +21,8 @@ from visuals import Visuals, GroupCache
 from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
+from audio import AudioManager, load_audio_settings, save_audio_settings
+from popups import DamagePopups
 from menu import (
     Menu,
     SettingsMenu,
@@ -78,6 +80,11 @@ class Game(pyglet.window.Window):
                 self.set_size(min(self.width, dw), min(self.height, dh))
         self._update_room_radius_from_view()
         
+        music_vol, sfx_vol = load_audio_settings()
+        self.audio = AudioManager(sfx_volume=sfx_vol, music_volume=music_vol)
+        self.popups = None
+        self._hitstop = 0.0
+
         self.settings = {
             "difficulty": "normal",
             "window_size": (self.width, self.height),
@@ -85,9 +92,11 @@ class Game(pyglet.window.Window):
             "arena_margin": float(getattr(config, "ARENA_MARGIN", 0.97)),
             "advanced_fx": bool(getattr(config, "ENABLE_ADVANCED_FX", True)),
             "map_type": MAP_CIRCLE,
+            "music_volume": music_vol,
+            "sfx_volume": sfx_vol,
         }
         self._windowed_size = (self.width, self.height)
-        
+
         # Menu system
         self.main_menu = Menu(self.width, self.height)
         self.settings_menu = SettingsMenu(
@@ -97,6 +106,8 @@ class Game(pyglet.window.Window):
             display_size=self._display_size,
             advanced_fx_enabled=bool(self.settings.get("advanced_fx", True)),
             map_type=self.settings.get("map_type", MAP_CIRCLE),
+            music_volume=music_vol,
+            sfx_volume=sfx_vol,
         )
         self.guide_menu = GuideMenu(self.width, self.height)
         self.pause_menu = PauseMenu(self.width, self.height)
@@ -134,9 +145,9 @@ class Game(pyglet.window.Window):
             font_name=UI_FONT_META,
             font_size=11,
             x=self.width - 10,
-            y=self.height - 14,
+            y=10,
             anchor_x="right",
-            anchor_y="top",
+            anchor_y="bottom",
             color=(168, 186, 206, 210),
         )
 
@@ -238,6 +249,9 @@ class Game(pyglet.window.Window):
         self._temp_fire_rate_mult = 1.0
         self._temp_incoming_damage_mult = 1.0
         self._ultra_cd_mult = 1.0
+        self._temp_crit_chance_bonus = 0.0
+        self._temp_crit_mult_bonus = 0.0
+        self._temp_boost_inf = False
         self._dash_cd_mult = 1.0
         self._dash_cd_difficulty = float(get_difficulty_mods(difficulty).get("dash_cd", 1.0))
 
@@ -245,6 +259,8 @@ class Game(pyglet.window.Window):
         self.visuals.make_player()
         
         self.particle_system = ParticleSystem(self.batch)
+        self.popups = DamagePopups()
+        self._hitstop = 0.0
 
         self.score = ScoreTracker(difficulty=difficulty)
         self.hud = HUD(self.width, self.height)
@@ -267,6 +283,22 @@ class Game(pyglet.window.Window):
             return 0.28
         return max(0.08, float(self.player.fire_rate) * float(getattr(self, "_temp_fire_rate_mult", 1.0)))
 
+    def _effective_crit_chance(self) -> float:
+        if not self.player:
+            return 0.0
+        return float(getattr(self.player, "crit_chance_bonus", 0.0)) + float(getattr(self, "_temp_crit_chance_bonus", 0.0))
+
+    def _effective_crit_mult(self) -> float:
+        if not self.player:
+            return 0.0
+        return float(getattr(self.player, "crit_mult_bonus", 0.0)) + float(getattr(self, "_temp_crit_mult_bonus", 0.0))
+
+    def _has_infinite_boost(self) -> bool:
+        if not self.player:
+            return False
+        cur_t = getattr(self.state, "time", 0.0) if self.state else 0.0
+        return bool(getattr(self, "_temp_boost_inf", False)) or (cur_t < float(getattr(self.player, "infinite_boost_until", 0.0)))
+
     def _recompute_temp_reward_mods(self) -> None:
         mods = recompute_temp_mods(getattr(self, "_active_temp_rewards", []))
         self._temp_damage_mult = mods["damage"]
@@ -275,6 +307,9 @@ class Game(pyglet.window.Window):
         self._pickup_magnet_bonus = mods["magnet"]
         self._temp_incoming_damage_mult = mods["incoming_damage"]
         self._ultra_cd_mult = mods["ultra_cd"]
+        self._temp_crit_chance_bonus = float(mods.get("crit_chance", 0.0))
+        self._temp_crit_mult_bonus = float(mods.get("crit_mult", 0.0))
+        self._temp_boost_inf = bool(mods.get("boost_inf", False))
 
     def _advance_temp_rewards(self) -> None:
         if not getattr(self, "_active_temp_rewards", None):
@@ -291,6 +326,7 @@ class Game(pyglet.window.Window):
             self._active_temp_rewards, self._last_reward_temp_key, self._last_reward_perm_key
         )
         self.rpg_menu.begin(temp_opts, perm_opts)
+        self.audio.play("reward_open", volume=0.8)
 
     def _apply_temp_reward(self, key: str, duration: int) -> None:
         if not self.player:
@@ -298,6 +334,7 @@ class Game(pyglet.window.Window):
         k = str(key or "").strip().lower()
         rpg_apply_temp(self._active_temp_rewards, k, duration)
         self._last_reward_temp_key = k
+        self.audio.play("pickup_rare", volume=0.8)
         if k == "temp_ultra_flux":
             self.player.ultra_charges = min(int(getattr(config, "ULTRA_MAX_CHARGES", 2)), int(self.player.ultra_charges) + 1)
         if self.particle_system:
@@ -318,6 +355,7 @@ class Game(pyglet.window.Window):
         if not applied:
             return
         self._last_reward_perm_key = k
+        self.audio.play("pickup_rare", volume=0.8)
         if self.particle_system:
             self.particle_system.add_powerup_collection(self.player.pos, (200, 235, 255))
         if self.state:
@@ -349,6 +387,9 @@ class Game(pyglet.window.Window):
             return
         if amount <= 0:
             return
+        if getattr(self.player, "is_boosting", False):
+            reduction = float(getattr(config, "BOOST_DAMAGE_REDUCTION", 0.35))
+            amount = max(1, int(round(amount * (1.0 - reduction))))
         mult = getattr(self, "_incoming_damage_mult", 1.0) * getattr(self, "_temp_incoming_damage_mult", 1.0)
         if mult != 1.0:
             amount = max(1, int(round(amount * mult)))
@@ -358,8 +399,16 @@ class Game(pyglet.window.Window):
             amount -= absorbed
             if absorbed > 0 and self.particle_system:
                 self.particle_system.add_shield_hit(self.player.pos, absorbed)
+            if absorbed > 0:
+                self.audio.play("shield_hit", volume=0.6, pitch_jitter=0.05, min_gap=0.05)
         if amount > 0:
             self.player.hp -= amount
+            self.player.damage_flash_timer = 0.12
+            self.audio.play("hurt", volume=0.9, pitch_jitter=0.04, min_gap=0.08)
+            if self.popups:
+                self.popups.spawn(self.player.pos, f"-{amount}", color=(255, 110, 110), big=amount >= 20)
+            if amount >= 25:
+                self._hitstop = max(self._hitstop, 0.05)
             if getattr(self, "advanced_fx", None):
                 self.advanced_fx.trigger_hit(min(1.0, 0.28 + amount * 0.03))
             if getattr(self, 'score', None):
@@ -386,21 +435,14 @@ class Game(pyglet.window.Window):
         beam_ttl = float(config.ULTRA_BEAM_TTL)
 
         def _hit_enemy(e, amount: int):
-            e.hp -= int(amount)
+            # Shared damage/kill path: respects shields, elite affixes and the kill guard.
+            PlayingState._damage_enemy(self, s, e, int(amount))
             behavior_name = enemy_behavior_name(e)
             enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
             if self.particle_system:
                 self.particle_system.add_hit_particles(e.pos, enemy_color)
             if e.hp <= 0:
-                if e in s.enemies:
-                    s.enemies.remove(e)
-                if self.visuals:
-                    self.visuals.drop_enemy(e)
-                if self.particle_system:
-                    self.particle_system.add_death_explosion(e.pos, enemy_color, behavior_name)
-                spawn_loot_on_enemy_death(s, behavior_name, e.pos)
-                if getattr(self, 'score', None):
-                    self.score.on_enemy_kill(behavior_name)
+                PlayingState._kill_enemy(self, s, e)
 
         def _spawn_player_beam(start: Vec2, direction: Vec2, length: float, damage: int, thickness: float, color):
             end = start + direction * length
@@ -460,6 +502,7 @@ class Game(pyglet.window.Window):
                 if dist(e.pos, self.player.pos) <= blast_r:
                     _hit_enemy(e, blast_dmg)
             if self.particle_system:
+                self.particle_system.add_shockwave(self.player.pos, (255, 220, 180), max_radius=blast_r)
                 self.particle_system.add_powerup_collection(self.player.pos, (255, 220, 180))
             _spawn_player_beam(
                 muzzle,
@@ -471,6 +514,8 @@ class Game(pyglet.window.Window):
             )
             s.shake = max(s.shake, 16.0)
 
+        self.audio.play("ultra_fire", volume=0.9)
+        self._hitstop = max(self._hitstop, 0.06)
         self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)
         self.player.ultra_cd_until = s.time + float(config.ULTRA_COOLDOWN) * float(getattr(self, "_ultra_cd_mult", 1.0))
         if getattr(self, "advanced_fx", None):
@@ -487,6 +532,7 @@ class Game(pyglet.window.Window):
             self._input_dir(), world_mouse,
         )
         if did_dash:
+            self.audio.play("dash", volume=0.7, pitch_jitter=0.05)
             self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction)
             if getattr(self, "advanced_fx", None):
                 self.advanced_fx.trigger_dash(0.7)
@@ -507,8 +553,13 @@ class Game(pyglet.window.Window):
         idx = int(getattr(player, "ultra_variant_idx", 0)) % len(names)
         return names[idx]
 
+    def _persist_audio_settings(self):
+        """Write the current music/SFX volumes to user_settings.json (called when leaving Settings)."""
+        save_audio_settings(float(self.settings.get("music_volume", 0.5)), float(self.settings.get("sfx_volume", 0.8)))
+
     def _quit_game(self):
         """Quit the game."""
+        self._persist_audio_settings()
         self._schedule_app_close()
 
     def _schedule_app_close(self):
@@ -537,6 +588,8 @@ class Game(pyglet.window.Window):
         if not isinstance(value, dict):
             return
         self.settings.update(value)
+        if "music_volume" in value or "sfx_volume" in value:
+            self.audio.set_volumes(music=value.get("music_volume"), sfx=value.get("sfx_volume"))
         advanced_fx = value.get("advanced_fx")
         if advanced_fx is not None:
             fx_enabled = self._coerce_bool(advanced_fx, default=bool(getattr(config, "ENABLE_ADVANCED_FX", True)))
@@ -610,7 +663,7 @@ class Game(pyglet.window.Window):
 
         if getattr(self, "_pause_hint", None):
             self._pause_hint.x = width - 10
-            self._pause_hint.y = height - 14
+            self._pause_hint.y = 10
         if getattr(self, "hud", None):
             self.hud.layout(width, height)
 
@@ -633,6 +686,8 @@ class Game(pyglet.window.Window):
         self.player = None
         self.visuals = None
         self.particle_system = None
+        self.popups = None
+        self._hitstop = 0.0
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.mouse_xy = (x, y)
@@ -642,6 +697,8 @@ class Game(pyglet.window.Window):
         self.fsm.on_mouse_drag(x, y, dx, dy, buttons, modifiers)
 
     def on_mouse_press(self, x, y, button, modifiers):
+        if not isinstance(self.fsm.current_state, PlayingState):
+            self.audio.play("ui_click", volume=0.6)
         self.fsm.on_mouse_press(x, y, button, modifiers)
 
     def on_mouse_release(self, x, y, button, modifiers):
@@ -686,6 +743,11 @@ class Game(pyglet.window.Window):
         """Update game logic."""
         frame_dt = max(0.0, min(float(dt), self._frame_dt_cap))
         self._render_time += frame_dt
+        self.audio.update(frame_dt)
+        if self.popups:
+            self.popups.update(frame_dt)
+        if getattr(self, "hud", None):
+            self.hud.tick(frame_dt)
         self._accumulator += frame_dt
         steps = 0
         while self._accumulator >= self._fixed_dt and steps < self._max_catchup_steps:

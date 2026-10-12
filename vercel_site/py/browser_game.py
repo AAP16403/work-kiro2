@@ -34,7 +34,7 @@ from level import (
 )
 from logic import BalanceLogic
 from physics import resolve_circle_obstacles
-from player import Player, perform_dash, recharge_dash, format_dash_hud
+from player import Player, perform_dash, recharge_dash, format_dash_hud, update_boost
 from powerup import apply_powerup
 from particles import ParticleSystem
 from projectile import spawn_projectiles
@@ -162,8 +162,10 @@ class BrowserGame:
         self._temp_speed_mult = 1.0
         self._temp_fire_rate_mult = 1.0
         self._temp_incoming_damage_mult = 1.0
-        self._incoming_damage_mult = 1.0
         self._ultra_cd_mult = 1.0
+        self._temp_crit_chance_bonus = 0.0
+        self._temp_crit_mult_bonus = 0.0
+        self._temp_boost_inf = False
         self._dash_cd_mult = 1.0
         self._dash_cd_difficulty = 1.0
         self._wave_banner_t = 0.0
@@ -346,6 +348,22 @@ class BrowserGame:
             return 0.28
         return max(0.08, float(self.player.fire_rate) * float(self._temp_fire_rate_mult))
 
+    def _effective_crit_chance(self) -> float:
+        if not self.player:
+            return 0.0
+        return float(getattr(self.player, "crit_chance_bonus", 0.0)) + float(getattr(self, "_temp_crit_chance_bonus", 0.0))
+
+    def _effective_crit_mult(self) -> float:
+        if not self.player:
+            return 0.0
+        return float(getattr(self.player, "crit_mult_bonus", 0.0)) + float(getattr(self, "_temp_crit_mult_bonus", 0.0))
+
+    def _has_infinite_boost(self) -> bool:
+        if not self.player:
+            return False
+        cur_t = getattr(self.state, "time", 0.0) if self.state else 0.0
+        return bool(getattr(self, "_temp_boost_inf", False)) or (cur_t < float(getattr(self.player, "infinite_boost_until", 0.0)))
+
     def _recompute_temp_reward_mods(self) -> None:
         mods = recompute_temp_mods(self._active_temp_rewards)
         self._temp_damage_mult = mods["damage"]
@@ -354,6 +372,9 @@ class BrowserGame:
         self._pickup_magnet_bonus = mods["magnet"]
         self._temp_incoming_damage_mult = mods["incoming_damage"]
         self._ultra_cd_mult = mods["ultra_cd"]
+        self._temp_crit_chance_bonus = float(mods.get("crit_chance", 0.0))
+        self._temp_crit_mult_bonus = float(mods.get("crit_mult", 0.0))
+        self._temp_boost_inf = bool(mods.get("boost_inf", False))
 
     def _advance_temp_rewards(self) -> None:
         self._active_temp_rewards = advance_temp_rewards(self._active_temp_rewards)
@@ -427,6 +448,9 @@ class BrowserGame:
     def _damage_player(self, amount: int) -> None:
         if not self.player or self.player.invincibility_timer > 0 or amount <= 0:
             return
+        if getattr(self.player, "is_boosting", False):
+            reduction = float(getattr(config, "BOOST_DAMAGE_REDUCTION", 0.35))
+            amount = max(1, int(round(amount * (1.0 - reduction))))
         mult = float(self._incoming_damage_mult) * float(self._temp_incoming_damage_mult)
         amount = max(1, int(round(amount * mult)))
         if self.player.shield > 0:
@@ -517,16 +541,72 @@ class BrowserGame:
                 self.particles.add_dash_effect(self.player.pos, self.player.dash_direction)
             self.flash = max(self.flash, 0.2)
 
-    def _remove_projectile(self, projectile) -> None:
+    def _damage_enemy(self, enemy_obj, amount: int, is_crit: bool = False) -> None:
+        if amount <= 0:
+            return
+        enemy_obj.hit_flash_timer = 0.12
+        if getattr(enemy_obj, "shield", 0) > 0:
+            absorbed = min(enemy_obj.shield, amount)
+            enemy_obj.shield -= absorbed
+            amount -= absorbed
+        if amount > 0:
+            enemy_obj.hp -= amount
+
+    def _spawn_cluster_shrapnel(self, p, ignore_entity_id: int | None = None) -> None:
+        if not self.state:
+            return
+        self.state.shake = max(self.state.shake, 5.0)
+        base_dmg = max(1, int(round(p.damage * 0.45)))
+        for angle_deg in (0.0, 90.0, 180.0, 270.0):
+            ang = math.radians(angle_deg + self.state.rng.uniform(-20.0, 20.0))
+            sdir = Vec2(math.cos(ang), math.sin(ang))
+            svel = sdir * self.state.rng.uniform(340.0, 460.0)
+            spawn_pos = Vec2(p.pos.x + sdir.x * 8.0, p.pos.y + sdir.y * 8.0)
+            shrapnel = Projectile(
+                spawn_pos, svel, base_dmg,
+                ttl=self.state.rng.uniform(0.24, 0.40),
+                owner="player",
+                projectile_type="bullet",
+                is_crit=getattr(p, "is_crit", False),
+                cluster_on_death=False,
+            )
+            shrapnel.prev_pos = Vec2(p.pos.x, p.pos.y)
+            if ignore_entity_id is not None:
+                shrapnel._hit_entities = {ignore_entity_id}
+            self.state.projectiles.append(shrapnel)
+
+    def _remove_projectile(self, projectile, detonating_enemy=None) -> None:
+        if getattr(projectile, "cluster_on_death", False):
+            projectile.cluster_on_death = False
+            ignore_id = id(detonating_enemy) if detonating_enemy is not None else None
+            self._spawn_cluster_shrapnel(projectile, ignore_entity_id=ignore_id)
         if self.state and projectile in self.state.projectiles:
             self.state.projectiles.remove(projectile)
 
     def _kill_enemy(self, enemy_obj) -> None:
-        if not self.state:
+        if not self.state or getattr(enemy_obj, "_is_dead", False):
             return
+        enemy_obj._is_dead = True
         behavior = enemy_behavior_name(enemy_obj)
         if enemy_obj in self.state.enemies:
             self.state.enemies.remove(enemy_obj)
+
+        # Volatile elite death explosion
+        if getattr(enemy_obj, "elite_affix", None) == "volatile":
+            v_r = 130.0
+            v_dmg = 45
+            self.state.shake = max(self.state.shake, 14.0)
+            self.particles.add_death_explosion(enemy_obj.pos, (255, 100, 30), "bomber")
+            for other in list(self.state.enemies):
+                if other not in self.state.enemies or other.hp <= 0 or getattr(other, "_is_dead", False):
+                    continue
+                if dist(other.pos, enemy_obj.pos) <= v_r:
+                    self._damage_enemy(other, v_dmg)
+                    if other.hp <= 0:
+                        self._kill_enemy(other)
+            if self.player and dist(self.player.pos, enemy_obj.pos) <= v_r:
+                self._damage_player(20)
+
         spawn_loot_on_enemy_death(self.state, behavior, enemy_obj.pos)
         self.particles.add_death_explosion(enemy_obj.pos, ENEMY_COLORS.get(behavior, (220, 220, 220)), behavior)
         self.score.on_enemy_kill(behavior)
@@ -680,6 +760,12 @@ class BrowserGame:
             if thunder.t >= thunder.warn + thunder.ttl:
                 s.thunders.remove(thunder)
 
+        # Boost handling (Shift key)
+        input_dir = self._input_dir()
+        is_boost_key = any(k in self.keys_down for k in ("shift", "shiftleft", "shiftright"))
+        boost_requested = is_boost_key and (input_dir.length() > 0 or getattr(self.player, "is_dashing", False))
+        is_boosting = update_boost(self.player, dt, boost_requested, s.time, has_infinite=self._has_infinite_boost())
+
         old_pos = Vec2(self.player.pos.x, self.player.pos.y)
         if self.player.is_dashing:
             self.player.pos += self.player.dash_direction * self.player.dash_speed * dt
@@ -687,9 +773,11 @@ class BrowserGame:
             if self.player.dash_timer <= 0:
                 self.player.is_dashing = False
         else:
-            input_dir = self._input_dir()
             if input_dir.length() > 0:
-                self.player.pos = self.player.pos + input_dir.normalized() * self._effective_player_speed() * dt
+                speed = self._effective_player_speed()
+                if is_boosting:
+                    speed *= float(getattr(config, "BOOST_SPEED_MULT", 1.65))
+                self.player.pos = self.player.pos + input_dir.normalized() * speed * dt
                 # Step dust particles
                 if s.rng.random() < 0.3:
                     self.particles.add_step_dust(self.player.pos, input_dir.normalized())
@@ -730,9 +818,11 @@ class BrowserGame:
                 beam = LaserBeam(start=muzzle, end=end, damage=dmg, thickness=12.0, ttl=0.08, owner="player")
                 s.lasers.append(beam)
                 for enemy_obj in list(s.enemies):
+                    if enemy_obj not in s.enemies or enemy_obj.hp <= 0 or getattr(enemy_obj, "_is_dead", False):
+                        continue
                     hit_r = beam.thickness * 0.5 + self._enemy_radius(enemy_obj)
                     if point_segment_distance_sq(enemy_obj.pos, muzzle, end) <= hit_r * hit_r:
-                        enemy_obj.hp -= dmg
+                        self._damage_enemy(enemy_obj, dmg)
                         if enemy_obj.hp <= 0:
                             self._kill_enemy(enemy_obj)
             else:
@@ -747,6 +837,8 @@ class BrowserGame:
                         self._effective_player_damage(),
                         recoil_deg=float(self.player.recoil),
                         rng=s.rng,
+                        crit_chance_bonus=self._effective_crit_chance(),
+                        crit_mult_bonus=self._effective_crit_mult(),
                     )
                 )
 
@@ -754,6 +846,8 @@ class BrowserGame:
             self.player.next_shot_time = s.time + weapon_cd
 
         for enemy_obj in list(s.enemies):
+            if enemy_obj not in s.enemies or enemy_obj.hp <= 0 or getattr(enemy_obj, "_is_dead", False):
+                continue
             update_enemy(enemy_obj, self.player.pos, s, dt, self, player_vel=player_vel)
             behavior = enemy_behavior_name(enemy_obj)
             enemy_obj._behavior_name = behavior
@@ -763,10 +857,38 @@ class BrowserGame:
                 enemy_obj.pos = resolve_circle_obstacles(enemy_obj.pos, enemy_obj._radius, s.obstacles)
                 enemy_obj.pos = clamp_to_map(enemy_obj.pos, config.ROOM_RADIUS * 0.96, s.map_type)
             hit_r = float(enemy_obj._radius) + float(player_radius)
-            if dist_sq(enemy_obj.pos, self.player.pos) <= hit_r * hit_r:
-                self._damage_player(self.balance.enemy_contact_damage)
-                self._kill_enemy(enemy_obj)
-                s.shake = 9.0
+            d_sq = dist_sq(enemy_obj.pos, self.player.pos)
+            if d_sq <= hit_r * hit_r:
+                if getattr(self.player, "is_boosting", False):
+                    ram_dmg = int(getattr(config, "BOOST_RAM_DAMAGE", 28))
+                    self._damage_enemy(enemy_obj, ram_dmg, is_crit=True)
+                    s.shake = max(s.shake, 8.0)
+                    diff = enemy_obj.pos - self.player.pos
+                    cur_d = math.sqrt(d_sq)
+                    if cur_d > 1e-4:
+                        push_dir = diff / cur_d
+                    else:
+                        push_dir = input_dir.normalized() if input_dir.length() > 0 else Vec2(1.0, 0.0)
+
+                    is_boss = behavior.startswith("boss_")
+                    if is_boss:
+                        push_dist = 20.0
+                        enemy_obj.pos = clamp_to_map(enemy_obj.pos + push_dir * push_dist, config.ROOM_RADIUS * 0.96, s.map_type)
+                        self.player.pos = clamp_to_map(self.player.pos - push_dir * 36.0, config.ROOM_RADIUS * 0.90, s.map_type)
+                    else:
+                        push_dist = max(45.0, (hit_r - cur_d) + 24.0)
+                        enemy_obj.pos = clamp_to_map(enemy_obj.pos + push_dir * push_dist, config.ROOM_RADIUS * 0.96, s.map_type)
+
+                    if enemy_obj.hp <= 0:
+                        self._kill_enemy(enemy_obj)
+
+                    if self.player.invincibility_timer <= 0:
+                        self._damage_player(int(self.balance.enemy_contact_damage * 0.4))
+                        self.player.invincibility_timer = max(self.player.invincibility_timer, 0.25)
+                else:
+                    self._damage_player(self.balance.enemy_contact_damage)
+                    self._kill_enemy(enemy_obj)
+                    s.shake = 9.0
 
         obstacles = s.obstacles if (config.ENABLE_OBSTACLES and getattr(s, "obstacles", None)) else None
         for projectile in list(s.projectiles):
@@ -787,18 +909,45 @@ class BrowserGame:
             p_prev = projectile.prev_pos or projectile.pos
             pr = self._projectile_radius(projectile)
             if projectile.owner == "player":
+                hit_entities = getattr(projectile, "_hit_entities", None)
+                if hit_entities is None:
+                    hit_entities = set()
+                    projectile._hit_entities = hit_entities
+
                 for enemy_obj in list(s.enemies):
+                    if enemy_obj not in s.enemies or enemy_obj.hp <= 0 or getattr(enemy_obj, "_is_dead", False):
+                        continue
+                    if id(enemy_obj) in hit_entities:
+                        continue
                     er = getattr(enemy_obj, "_radius", self._enemy_radius(enemy_obj))
-                    hit_r2 = (float(pr) + float(er)) ** 2
+                    reach = er + pr
+                    if (
+                        enemy_obj.pos.x < min(p_prev.x, projectile.pos.x) - reach
+                        or enemy_obj.pos.x > max(p_prev.x, projectile.pos.x) + reach
+                        or enemy_obj.pos.y < min(p_prev.y, projectile.pos.y) - reach
+                        or enemy_obj.pos.y > max(p_prev.y, projectile.pos.y) + reach
+                    ):
+                        continue
+
+                    hit_r2 = reach * reach
                     if self._segment_hits_circle(enemy_obj.pos, p_prev, projectile.pos, hit_r2):
-                        enemy_obj.hp -= projectile.damage
-                        self._remove_projectile(projectile)
+                        hit_entities.add(id(enemy_obj))
+                        is_crit = getattr(projectile, "is_crit", False)
+                        self._damage_enemy(enemy_obj, projectile.damage, is_crit=is_crit)
+                        s.shake = max(s.shake, 6.0 if is_crit else 4.0)
+
                         if enemy_obj.hp <= 0:
                             behavior = getattr(enemy_obj, "_behavior_name", enemy_behavior_name(enemy_obj))
                             self._kill_enemy(enemy_obj)
                             if behavior == "tank" and dist(enemy_obj.pos, self.player.pos) < self.balance.tank_death_blast_radius:
                                 self._damage_player(self.balance.tank_death_blast_damage)
-                        break
+
+                        pierce = getattr(projectile, "pierce", 0)
+                        if pierce > 0:
+                            projectile.pierce = pierce - 1
+                        else:
+                            self._remove_projectile(projectile, detonating_enemy=enemy_obj)
+                            break
             else:
                 hit_r2 = (float(pr) + float(player_radius)) ** 2
                 ptype = str(getattr(projectile, "projectile_type", "bullet"))
@@ -1362,6 +1511,8 @@ class BrowserGame:
             "missile": (255, 132, 132),
             "plasma": (175, 130, 255),
             "bomb": (255, 152, 88),
+            "railgun": (120, 245, 255),
+            "flak": (255, 140, 50),
         }
         if is_enemy:
             palette = {
@@ -1370,8 +1521,11 @@ class BrowserGame:
                 "missile": (200, 80, 80),
                 "plasma": (255, 100, 200),
                 "bomb": (255, 152, 88),
+                "railgun": (120, 245, 255),
+                "flak": (255, 140, 50),
             }
-        color = palette.get(ptype, (240, 240, 240))
+        is_crit = bool(getattr(projectile, "is_crit", False))
+        color = (255, 225, 75) if is_crit else palette.get(ptype, (240, 240, 240))
         radius = max(3.0, self._projectile_radius(projectile) * 0.72)
 
         vel = getattr(projectile, "vel", None)
@@ -1391,19 +1545,19 @@ class BrowserGame:
                 ctx.lineTo(hx, hy - 10)
             ctx.lineTo(sx, py)
             ctx.stroke()
-        elif ptype in ("missile", "bomb", "plasma") and vel:
+        elif (ptype in ("missile", "bomb", "plasma", "railgun", "flak") or is_crit) and vel:
             # Fallback streak
             speed = math.sqrt(vel.x * vel.x + vel.y * vel.y)
             if speed > 1e-6:
                 vdx, vdy = vel.x / speed, vel.y / speed
-                trail_len = 8 + min(16.0, speed * 0.03)
-                trail_alpha = 0.32 if is_enemy else 0.42
+                trail_len = (18.0 if ptype == "railgun" else 8.0) + min(22.0, speed * 0.035)
+                trail_alpha = 0.32 if is_enemy else (0.65 if is_crit else 0.42)
                 ctx.strokeStyle = f"rgba({color[0]}, {color[1]}, {color[2]}, {trail_alpha:.2f})"
                 ctx.lineWidth = max(1.5, radius * 0.65)
                 ctx.beginPath()
                 ctx.moveTo(sx, py)
                 ctx.lineTo(sx - vdx * trail_len, py - vdy * trail_len * 0.65)
-                ctx.stroke()        # Bomb: dark casing ring + orange core
+                ctx.stroke()
         if ptype == "bomb":
             ctx.fillStyle = f"rgba(120, 70, 45, 0.85)"
             ctx.beginPath()
@@ -1455,14 +1609,19 @@ class BrowserGame:
         if boss:
             sy -= 26
         
-        ctx.fillStyle = "rgba(10, 12, 18, 0.5)"
-        ctx.beginPath()
-        ctx.ellipse(sx, sy + 10 + (26 if boss else 0), rx * 0.95, ry * 0.74, 0, 0, TAU)
-        ctx.fill()
+        is_flashing = float(getattr(enemy_obj, "hit_flash_timer", 0.0)) > 0
+        is_elite = bool(getattr(enemy_obj, "is_elite", False))
+        if is_flashing:
+            render_col = (255, 255, 255)
+        elif is_elite:
+            render_col = (255, 215, 75)
+        else:
+            render_col = color
 
+        if is_elite:
+            self._draw_glow_circle(sx, sy - 14 + bob, rx * 1.5, (255, 215, 60), 0.35)
 
-
-        ctx.fillStyle = f"rgb({color[0]}, {color[1]}, {color[2]})"
+        ctx.fillStyle = f"rgb({render_col[0]}, {render_col[1]}, {render_col[2]})"
         ctx.beginPath()
         ctx.ellipse(sx, sy - 14 + bob, rx, ry, 0, 0, TAU)
         ctx.fill()
@@ -1858,17 +2017,21 @@ class BrowserGame:
         self._draw_glow_circle(sx, cy, 20, hull, 0.15)
         self._draw_glow_circle(sx, cy, 28, (80, 120, 220), 0.06)
 
-        # ── Thruster jets (dash) ──
-        if getattr(self.player, "is_dashing", False):
-            dash_pulse = 0.6 + 0.4 * math.sin(t * 40.0)
-            jet_len = 20 + 12 * dash_pulse
-            ctx.strokeStyle = f"rgba(130, 210, 255, {0.5 + 0.35 * dash_pulse:.3f})"
+        # ── Thruster jets (boost / dash) ──
+        is_dash = getattr(self.player, "is_dashing", False)
+        is_boost = getattr(self.player, "is_boosting", False)
+        if is_dash or is_boost:
+            dash_pulse = 0.6 + 0.4 * math.sin(t * (45.0 if is_boost else 40.0))
+            jet_len = (26.0 if is_boost else 20.0) + 12 * dash_pulse
+            jet_col1 = "rgba(255, 160, 60," if is_boost else "rgba(130, 210, 255,"
+            jet_col2 = "rgba(255, 230, 120," if is_boost else "rgba(200, 240, 255,"
+            ctx.strokeStyle = f"{jet_col1} {0.5 + 0.35 * dash_pulse:.3f})"
             ctx.lineWidth = 4
             ctx.beginPath()
             ctx.moveTo(sx - aim_dir.x * 9, cy - aim_dir.y * 4)
             ctx.lineTo(sx - aim_dir.x * jet_len, cy - aim_dir.y * (jet_len * 0.6))
             ctx.stroke()
-            ctx.strokeStyle = f"rgba(200, 240, 255, {0.3 + 0.25 * dash_pulse:.3f})"
+            ctx.strokeStyle = f"{jet_col2} {0.3 + 0.25 * dash_pulse:.3f})"
             ctx.lineWidth = 3
             ctx.beginPath()
             ctx.moveTo(sx - aim_dir.x * 5, cy - aim_dir.y * 7)
@@ -2024,12 +2187,30 @@ class BrowserGame:
             return
         ctx = self.ctx
         ctx.save()
-        self._draw_panel(20, 20, 400, 148)
+        self._draw_panel(20, 20, 400, 156)
 
         # HP bar with gradient
-        self._draw_bar(42, 50, 220, 14, self.player.hp / max(1, self.player.max_hp), (90, 230, 160), "HP")
+        self._draw_bar(42, 46, 220, 12, self.player.hp / max(1, self.player.max_hp), (90, 230, 160), "HP")
         # Shield bar
-        self._draw_bar(42, 80, 220, 14, max(0.0, min(1.0, self.player.shield / 120.0)), (90, 170, 255), "SHD")
+        self._draw_bar(42, 72, 220, 12, max(0.0, min(1.0, self.player.shield / 120.0)), (90, 170, 255), "SHD")
+        # Boost bar
+        b_now = max(0.0, float(getattr(self.player, "boost_energy", 100.0)))
+        b_max = max(1.0, float(getattr(self.player, "boost_max_energy", 100.0)))
+        b_inf = self._has_infinite_boost()
+        b_ratio = 1.0 if b_inf else max(0.0, min(1.0, b_now / b_max))
+        b_label = "BST [INF]" if b_inf else "BST"
+        b_color = (255, 230, 90) if b_inf else ((255, 145, 45) if getattr(self.player, "is_boosting", False) else (205, 120, 40))
+        self._draw_bar(42, 98, 220, 12, b_ratio, b_color, b_label)
+
+        # Weapon readout with Pierce & Crit
+        wp = self.player.current_weapon
+        wp_name = wp.name if wp else "Basic"
+        p_str = f" [P+{wp.pierce}]" if (wp and getattr(wp, "pierce", 0) > 0) else ""
+        tot_crit = min(1.0, max(0.0, (getattr(wp, "crit_chance", 0.10) if wp else 0.10) + self._effective_crit_chance()))
+        crit_pct = int(round(tot_crit * 100))
+        ctx.fillStyle = "rgba(160, 215, 255, 0.9)"
+        ctx.font = "600 12px Orbitron, sans-serif"
+        ctx.fillText(f"{wp_name.upper()}{p_str}  CRIT {crit_pct}%", 42, 134)
 
         # Stats column
         ctx.fillStyle = "rgba(120, 200, 255, 0.6)"
@@ -2037,15 +2218,15 @@ class BrowserGame:
         ctx.fillText("WAVE", 288, 50)
         ctx.fillText("SCORE", 288, 78)
         ctx.fillText("COMBO", 288, 106)
-        ctx.fillText("WEAPON", 288, 134)
+        ctx.fillText("STATUS", 288, 134)
 
         ctx.fillStyle = "rgba(240, 248, 255, 0.96)"
         ctx.font = "700 18px Rajdhani, sans-serif"
         ctx.fillText(f"{self.state.wave}", 348, 52)
         ctx.fillText(f"{self.score.score}", 348, 80)
         ctx.fillText(f"x{self.score.combo:.1f}", 348, 108)
-        ctx.font = "600 16px Rajdhani, sans-serif"
-        ctx.fillText(f"{self.player.current_weapon.name}", 348, 136)
+        ctx.font = "600 15px Rajdhani, sans-serif"
+        ctx.fillText("ACTIVE" if not getattr(self.player, "is_boosting", False) else "OVERDRIVE", 348, 136)
 
         laser_left = max(0.0, self.player.laser_until - self.state.time)
         laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
@@ -2058,10 +2239,11 @@ class BrowserGame:
             ultra_txt = f"Ultra {ultra_charges} [{self._ultra_variant_name()}]"
             if ultra_cd > 0:
                 ultra_txt += f" {ultra_cd:.0f}s"
+        boost_txt = format_boost_hud(self.player, self.state.time, has_infinite=self._has_infinite_boost())
         dash_txt = format_dash_hud(self.player, self.state.time)
         temp_txt = format_temp_hud(self._active_temp_rewards)
         perm_txt = format_perm_hud(self._run_permanent_rewards)
-        status_parts = [text for text in (dash_txt, laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt) if text]
+        status_parts = [text for text in (boost_txt, dash_txt, laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt) if text]
         status = "  \u2502  ".join(status_parts) if status_parts else "LMB auto-fire  \u2502  Space dash  \u2502  Q or RMB ultra"
 
         ctx.fillStyle = "rgba(232, 240, 255, 0.88)"

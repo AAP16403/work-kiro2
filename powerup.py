@@ -29,7 +29,8 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
     elif p.kind == "speed":
         player.speed += 18
     elif p.kind == "firerate":
-        player.fire_rate = max(0.16, player.fire_rate - 0.03)
+        # Never raise the fire-rate interval: permanent rewards can already push it below the 0.16 floor.
+        player.fire_rate = min(player.fire_rate, max(0.16, player.fire_rate - 0.03))
     elif p.kind == "shield":
         player.shield = min(120, player.shield + 45)
     elif p.kind == "laser":
@@ -43,3 +44,8 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
             player.current_weapon = WEAPONS[key]
     elif p.kind == "ultra":
         player.ultra_charges = min(ULTRA_MAX_CHARGES, int(getattr(player, "ultra_charges", 0)) + 1)
+    elif p.kind == "boost":
+        max_energy = float(getattr(player, "boost_max_energy", 100.0))
+        player.boost_energy = max_energy
+        player.infinite_boost_until = max(getattr(player, "infinite_boost_until", 0.0), now + 6.0)
+        player.shield = min(120, int(getattr(player, "shield", 0)) + 20)

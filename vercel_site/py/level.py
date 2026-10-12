@@ -68,7 +68,7 @@ def spawn_wave(state: GameState, center: Vec2):
         behavior_name = get_boss_for_wave(state.wave)
         hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
         pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type, rng=state.rng)
-        e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name)
+        e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name, max_hp=hp)
         lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
         atk_cd_scale = max(0.6, min(1.6, float(attack_mult)))
         e.attack_cd = state.rng.uniform(lo, hi) / atk_cd_scale
@@ -86,7 +86,27 @@ def spawn_wave(state: GameState, center: Vec2):
         for _ in range(int(behavior_count)):
             hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
             pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type, rng=state.rng)
-            e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name)
+            
+            # Elite enemies roll on wave 3+
+            is_elite = False
+            affix = ""
+            shield_val = 0
+            elite_min_wave = int(getattr(config, "ELITE_SPAWN_BASE_WAVE", 3))
+            if state.wave >= elite_min_wave and not behavior_name.startswith("boss_"):
+                chance = min(0.35, float(getattr(config, "ELITE_SPAWN_CHANCE", 0.14)) + (state.wave - elite_min_wave) * 0.015)
+                if state.rng.random() < chance:
+                    is_elite = True
+                    affix = state.rng.choice(["volatile", "swift", "shielded"])
+                    hp = int(round(hp * float(getattr(config, "ELITE_HP_MULT", 2.2))))
+                    if affix == "swift":
+                        speed *= 1.30
+                    elif affix == "shielded":
+                        shield_val = int(round(hp * 0.40))
+
+            e = Enemy(
+                pos=pos, hp=hp, speed=speed, behavior=behavior_name,
+                max_hp=hp, is_elite=is_elite, elite_affix=affix, shield=shield_val,
+            )
             lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
             atk_cd_scale = max(0.6, min(1.6, float(attack_mult)))
             e.attack_cd = state.rng.uniform(lo, hi) / atk_cd_scale
@@ -179,12 +199,14 @@ def _append_powerup(state: GameState, pos: Vec2, kind: str) -> None:
 
 
 def _pick_powerup_kind_for_wave(state: GameState, source: str) -> str:
-    # Base pool.
-    kind = state.rng.choice(["heal", "damage", "speed", "firerate", "shield", "laser"])
+    # Base pool with balanced utilities
+    kind = state.rng.choice(["heal", "damage", "speed", "firerate", "shield", "laser", "boost"])
     r = state.rng.random()
-    if r < 0.06:
+    if r < 0.07:
+        kind = "boost"
+    elif r < 0.13:
         kind = "vortex"
-    elif state.wave >= 3 and r < 0.11:
+    elif state.wave >= 3 and r < 0.20:
         kind = "weapon"
 
     min_wave = int(getattr(config, "ULTRA_SPAWN_MIN_WAVE", 4))

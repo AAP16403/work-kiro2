@@ -45,6 +45,11 @@ class Enemy:
     vel: Vec2 = field(default_factory=lambda: Vec2(0.0, 0.0))
     seed: float = 0.0
     ai: dict = field(default_factory=dict)
+    max_hp: int = 0
+    is_elite: bool = False
+    elite_affix: str = ""
+    shield: int = 0
+    hit_flash_timer: float = 0.0
 
 
 def _safe_dir(v: Vec2, fallback: Vec2 | None = None) -> Vec2:
@@ -735,12 +740,12 @@ def _update_boss_swarmqueen(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
                 sac.ai["hatch_timer"] = 4.0 if phase == 0 else 3.0
                 state.enemies.append(sac)
         
-        elif roll < 0.85:
+        elif roll < 0.85 or current_adds + 2 > adds_cap:
             proj_speed = 190.0
             dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)
             aim = _safe_dir(player_pos - enemy.pos)
             _fire_fan(state, enemy.pos, aim, count=5 + min(phase, 1), spread_deg=56.0, speed=proj_speed, damage=dmg, projectile_type="plasma")
-        
+
         else:
             for _ in range(2):
                  ang = state.rng.uniform(0, math.tau)
@@ -916,7 +921,8 @@ def _update_boss_womb_core(enemy: Enemy, player_pos: Vec2, state, dt: float, gam
         pulse_r = 86.0 if phase < 2 else 94.0
         pulse_dmg = _boss_damage(state, base=11.5, wave_scale=0.2, cap=24)
         _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r + 16.0, damage=0, ttl=1.0, armed_delay=0.52, kind="womb_warn"))
-        _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r, damage=pulse_dmg, ttl=0.52, armed_delay=0.52, kind="womb_pulse"))
+        # ttl must outlive armed_delay, otherwise the trap expires on the same step it would arm and never hurts.
+        _append_trap_capped(state, Trap(pos=Vec2(player_pos.x, player_pos.y), radius=pulse_r, damage=pulse_dmg, ttl=0.72, armed_delay=0.52, kind="womb_pulse"))
 
         proj_speed = 212.0 + state.wave * 1.9
         dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)

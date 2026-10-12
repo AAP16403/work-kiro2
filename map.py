@@ -1,4 +1,4 @@
-﻿"""Game map/room and isometric rendering."""
+"""Game map/room and isometric rendering."""
 
 import math
 import random
@@ -108,15 +108,16 @@ class Room:
         self._rebuild_floor()
 
     def _rebuild_floor(self):
-        if self._floor is not None:
-            self._floor.delete()
-            self._floor = None
+        # Free the previous floor shapes; otherwise old polygons stay in the batch (ghost floor, GPU leak).
+        for poly in getattr(self, "_floor_polys", []):
+            poly.delete()
+        self._floor_polys = []
         if self._edge is not None:
             self._edge.delete()
             self._edge = None
-        if self._intensity_overlay is not None:
-            self._intensity_overlay.delete()
-            self._intensity_overlay = None
+        for io in getattr(self, "_intensity_overlays", []):
+            io.delete()
+        self._intensity_overlays = []
         for o in self._grid:
             if hasattr(o, "delete"):
                 o.delete()
@@ -137,14 +138,7 @@ class Room:
             if hasattr(o, "delete"):
                 o.delete()
         self._decor.clear()
-        for ln, _base, _phase in self._scanlines:
-            if hasattr(ln, "delete"):
-                ln.delete()
-        self._scanlines.clear()
-        for ln, _base, _phase in self._bg_grid:
-            if hasattr(ln, "delete"):
-                ln.delete()
-        self._bg_grid.clear()
+        # Scanlines and the background grid are built once in _build_ambient; keep them across floor rebuilds.
         self._build_floor()
 
     def _build_floor(self):
@@ -512,6 +506,24 @@ class Room:
                 io.color = (r, g, b)
                 io.opacity = int(24 * ci)
 
+        # Ambient background orbs position update
+        for orb, vx, vy, phase in self._ambient:
+            orb.x += vx * dt
+            orb.y += vy * dt
+            if orb.x < -60:
+                orb.x = self._w + 60
+            elif orb.x > self._w + 60:
+                orb.x = -60
+            if orb.y < -60:
+                orb.y = self._h + 60
+            elif orb.y > self._h + 60:
+                orb.y = -60
+
+        # Performance: Throttle static floor decorative opacity recalculations to every 2nd frame
+        self._decor_tick = (getattr(self, "_decor_tick", 0) + 1) % 2
+        if self._decor_tick != 0:
+            return
+
         # Subtle pulsing grid opacity for depth.
         pulse = 0.5 + 0.5 * math.sin(self._t * 0.8)
         for ln in self._grid:
@@ -532,18 +544,7 @@ class Room:
             if hasattr(node, "opacity"):
                 node.opacity = int(base * (0.6 + 0.4 * (0.5 + 0.5 * math.sin(self._t * 2.9 + phase))))
 
-        # Ambient background orbs.
-        for orb, vx, vy, phase in self._ambient:
-            orb.x += vx * dt
-            orb.y += vy * dt
-            if orb.x < -60:
-                orb.x = self._w + 60
-            elif orb.x > self._w + 60:
-                orb.x = -60
-            if orb.y < -60:
-                orb.y = self._h + 60
-            elif orb.y > self._h + 60:
-                orb.y = -60
+        for orb, _vx, _vy, phase in self._ambient:
             orb.opacity = int(18 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.6 + phase)))
 
         for ln, base, phase in self._scanlines:

@@ -1,4 +1,4 @@
-﻿﻿"""Visual rendering system."""
+"""Visual rendering system."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from config import ENEMY_COLORS, SCREEN_H
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
-DEPTH_BUCKET = 4
+DEPTH_BUCKET = 16
 
 
 class GroupCache:
@@ -62,6 +62,7 @@ class Visuals:
         self.batch = batch
         self.groups = group_cache
         self._scene_group = Group(order=-20000)
+        self._projectile_group = Group(order=14000)
         self._overlay_group = Group(order=22000)
 
         self._enemy_handles: dict[int, RenderHandle] = {}
@@ -210,9 +211,11 @@ class Visuals:
         shield_ring2.opacity = 0
         laser_ring = shapes.Arc(0, 0, 22, segments=64, thickness=3, color=(255, 120, 255), batch=self.batch)
         laser_ring.opacity = 0
+        boost_ring = shapes.Arc(0, 0, 26, segments=48, thickness=3, color=(255, 145, 45), batch=self.batch)
+        boost_ring.opacity = 0
 
         self._player_handle = RenderHandle(
-            sh, glow, glow2, shield_ring2, shield_ring, laser_ring,
+            sh, glow, glow2, shield_ring2, shield_ring, laser_ring, boost_ring,
             wing, body, cockpit, engine_glow,
             gun, gun_core, thruster_l, thruster_r
         )
@@ -221,7 +224,7 @@ class Visuals:
         """Update player visual position."""
         assert self._player_handle is not None
         (
-            sh, glow, glow2, shield_ring2, shield_ring, laser_ring,
+            sh, glow, glow2, shield_ring2, shield_ring, laser_ring, boost_ring,
             wing, body, cockpit, engine_glow,
             gun, gun_core, thruster_l, thruster_r
         ) = self._player_handle.objs
@@ -239,7 +242,18 @@ class Visuals:
         glow.x, glow.y = cx, cy
         glow2.x, glow2.y = cx, cy + 1
 
-        hull = (132, 224, 255) if getattr(player, "invincibility_timer", 0) <= 0 else (255, 236, 160)
+        is_dashing = bool(getattr(player, "is_dashing", False))
+        is_boosting = bool(getattr(player, "is_boosting", False))
+        is_flashing = float(getattr(player, "damage_flash_timer", 0.0)) > 0
+
+        if is_flashing:
+            hull = (255, 120, 120)
+        elif is_boosting:
+            hull = (255, 215, 130)
+        elif getattr(player, "invincibility_timer", 0) > 0:
+            hull = (255, 236, 160)
+        else:
+            hull = (132, 224, 255)
         body.color = hull
         
         for part in (wing, body, cockpit):
@@ -250,7 +264,8 @@ class Visuals:
         by = cy - aim_dir.y * 10
         engine_glow.x, engine_glow.y = bx, by
             
-        engine_pulse = 0.7 + 0.3 * math.sin(t * 15.0)
+        engine_pulse = 0.7 + 0.3 * math.sin(t * (30.0 if is_boosting else 15.0))
+        engine_glow.color = (255, 180, 70) if is_boosting else (100, 220, 255)
         engine_glow.opacity = int(255 * engine_pulse)
 
         # Aim direction affects gun orientation.
@@ -262,21 +277,43 @@ class Visuals:
         gun_core.x, gun_core.y = gun.x, gun.y
         gun_core.x2, gun_core.y2 = gun.x2, gun.y2
 
-        if bool(getattr(player, "is_dashing", False)):
-            dash_pulse = 0.6 + 0.4 * math.sin(t * 40.0)
-            back = Vec2(-aim_dir.x, -aim_dir.y)
-            tx1, ty1 = cx - aim_dir.y * 4 - aim_dir.x * 9, cy + aim_dir.x * 4 - aim_dir.y * 9
-            tx2, ty2 = cx + aim_dir.y * 4 - aim_dir.x * 9, cy - aim_dir.x * 4 - aim_dir.y * 9
-            jet_len = 20 + 12 * dash_pulse
+        back = Vec2(-aim_dir.x, -aim_dir.y)
+        tx1, ty1 = cx - aim_dir.y * 4 - aim_dir.x * 9, cy + aim_dir.x * 4 - aim_dir.y * 9
+        tx2, ty2 = cx + aim_dir.y * 4 - aim_dir.x * 9, cy - aim_dir.x * 4 - aim_dir.y * 9
+
+        if is_dashing or is_boosting:
+            pulse = 0.7 + 0.3 * math.sin(t * 45.0)
+            jet_len = (26.0 if is_boosting else 22.0) + 12.0 * pulse
             thruster_l.x, thruster_l.y = tx1, ty1
             thruster_l.x2, thruster_l.y2 = tx1 + back.x * jet_len, ty1 + back.y * (jet_len * 0.6)
             thruster_r.x, thruster_r.y = tx2, ty2
-            thruster_r.x2, thruster_r.y2 = tx2 + back.x * (jet_len * 0.8), ty2 + back.y * (jet_len * 0.5)
-            thruster_l.opacity = int(120 + 110 * dash_pulse)
-            thruster_r.opacity = int(90 + 90 * dash_pulse)
+            thruster_r.x2, thruster_r.y2 = tx2 + back.x * (jet_len * 0.85), ty2 + back.y * (jet_len * 0.5)
+            jet_color = (255, 170, 70) if is_boosting else (130, 210, 255)
+            thruster_l.color = jet_color
+            thruster_r.color = jet_color
+            thruster_l.opacity = int(140 + 110 * pulse)
+            thruster_r.opacity = int(110 + 100 * pulse)
         else:
-            thruster_l.opacity = 0
-            thruster_r.opacity = 0
+            # Active movement idle thruster
+            idle_pulse = 0.5 + 0.5 * math.sin(t * 18.0)
+            jet_len = 10.0 + 4.0 * idle_pulse
+            thruster_l.x, thruster_l.y = tx1, ty1
+            thruster_l.x2, thruster_l.y2 = tx1 + back.x * jet_len, ty1 + back.y * (jet_len * 0.6)
+            thruster_r.x, thruster_r.y = tx2, ty2
+            thruster_r.x2, thruster_r.y2 = tx2 + back.x * jet_len, ty2 + back.y * (jet_len * 0.5)
+            thruster_l.color = (130, 210, 255)
+            thruster_r.color = (130, 210, 255)
+            thruster_l.opacity = int(60 + 40 * idle_pulse)
+            thruster_r.opacity = int(50 + 35 * idle_pulse)
+
+        # Boost overdrive aura
+        if is_boosting:
+            bpulse = 0.65 + 0.35 * math.sin(t * 22.0)
+            boost_ring.x, boost_ring.y = cx, cy
+            boost_ring.radius = 26 + 3.0 * bpulse
+            boost_ring.opacity = int(140 + 80 * bpulse)
+        else:
+            boost_ring.opacity = 0
 
         # Shield aura
         if getattr(player, "shield", 0) > 0:
@@ -523,8 +560,25 @@ class Visuals:
         """Update enemy visual position."""
         h = self._enemy_handles[id(enemy)]
         behavior = enemy_behavior_name(enemy)
+        base = ENEMY_COLORS.get(behavior, (200, 120, 120))
         sx, sy = to_iso(enemy.pos, shake)
         bob = math.sin(enemy.t * 6.0) * 1.5
+
+        # Hit flash & elite visual feedback
+        is_flashing = float(getattr(enemy, "hit_flash_timer", 0.0)) > 0
+        is_elite = bool(getattr(enemy, "is_elite", False))
+        if is_flashing:
+            render_col = (255, 255, 255)
+        elif is_elite:
+            render_col = (255, 215, 75)
+        else:
+            render_col = base
+
+        body_idx = 4 if behavior.startswith("boss_") else 1
+        if len(h.objs) > body_idx:
+            body_obj = h.objs[body_idx]
+            if hasattr(body_obj, "color") and body_obj.color != render_col:
+                body_obj.color = render_col
 
         if behavior.startswith("boss_"):
             sh = h.objs[0]
@@ -793,12 +847,24 @@ class Visuals:
         # Different visuals for different projectile types
         projectile_type = getattr(proj, 'projectile_type', 'bullet')
         is_enemy = str(getattr(proj, "owner", "player")) == "enemy"
-        simple_dot = projectile_type in ("bullet", "spread")
+        is_crit = bool(getattr(proj, "is_crit", False))
+        simple_dot = projectile_type in ("bullet", "spread") and not is_crit
         
-        if projectile_type == "bomb":
+        if is_crit:
+            sh = shapes.Circle(0, 0, 5, color=(255, 205, 50), batch=self.batch)
+            core = shapes.Circle(0, 0, 3, color=(255, 255, 240), batch=self.batch)
+        elif projectile_type == "bomb":
             # Bomb: heavy orange core with dark casing.
             sh = shapes.Circle(0, 0, 7, color=(120, 70, 45), batch=self.batch)
             core = shapes.Circle(0, 0, 4, color=(255, 145, 90), batch=self.batch)
+        elif projectile_type == "railgun":
+            # Railgun: high-velocity electric slug with glowing sheath
+            sh = shapes.Circle(0, 0, 6, color=(60, 180, 255), batch=self.batch)
+            core = shapes.Circle(0, 0, 3, color=(230, 255, 255), batch=self.batch)
+        elif projectile_type == "flak":
+            # Flak: cluster fragmentation shell
+            sh = shapes.Circle(0, 0, 5, color=(255, 130, 40), batch=self.batch)
+            core = shapes.Circle(0, 0, 2.5, color=(255, 235, 160), batch=self.batch)
         elif projectile_type == "missile":
             # Larger missile
             if is_enemy:
@@ -833,18 +899,23 @@ class Visuals:
                 core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
 
         if simple_dot:
-            # Tight dot (no trailing streak) to avoid "sperm" look.
+            # Tight dot (no trailing streak) to avoid visual noise.
             flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch)
             flare.opacity = 90 if is_enemy else 130
-            self._proj_handles[id(proj)] = RenderHandle(sh, core, flare)
-            return
+            handle = RenderHandle(sh, core, flare)
+        else:
+            # Streaked projectile for heavier/kinetic types.
+            trail_color = (255, 220, 80) if is_crit else sh.color
+            trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=trail_color, batch=self.batch)
+            trail.opacity = 95 if is_enemy else (150 if is_crit else 125)
+            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch)
+            flare.opacity = 150 if is_crit else 120
+            handle = RenderHandle(trail, sh, core, flare)
 
-        # Streaked projectile for heavier types.
-        trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=sh.color, batch=self.batch)
-        trail.opacity = 95 if is_enemy else 125
-        flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch)
-        flare.opacity = 120
-        self._proj_handles[id(proj)] = RenderHandle(trail, sh, core, flare)
+        # Performance optimization: projectiles all render in a unified foreground group
+        # avoiding constant depth-group churn in pyglet batch!
+        handle.set_group(self._projectile_group)
+        self._proj_handles[id(proj)] = handle
 
     def sync_projectile(self, proj, shake: Vec2):
         """Update projectile visual position."""
@@ -863,15 +934,12 @@ class Visuals:
                 v2 = Vec2(1.0, 0.0)
                 speed = 1.0
             vd = v2.normalized()
-            trail_len = 8 + min(16.0, speed * 0.03)
+            trail_len = (18.0 if getattr(proj, "projectile_type", "") == "railgun" else 8.0) + min(22.0, speed * 0.035)
             trail.x, trail.y = sx, sy
             trail.x2, trail.y2 = sx - vd.x * trail_len, sy - vd.y * trail_len * 0.65
-            trail.opacity = 95 if str(getattr(proj, "owner", "player")) == "enemy" else 125
         sh.x, sh.y = sx, sy
         core.x, core.y = sx, sy
         flare.x, flare.y = sx, sy
-        flare.opacity = 90 if str(getattr(proj, "owner", "player")) == "enemy" else 130
-        self._set_depth(h, sy)
 
     def drop_projectile(self, proj):
         """Remove projectile visual."""
@@ -895,6 +963,7 @@ class Visuals:
             "vortex": ((180, 140, 255), "@", 14),    # Vortex
             "weapon": ((220, 230, 255), "W", 14),    # Weapon pickup
             "ultra": ((255, 230, 170), "U", 14),     # Ultra ability charge
+            "boost": ((255, 145, 45), "B", 14),      # Overdrive Boost
         }.get(p.kind, ((200, 200, 200), "?", 12))
 
         # Large, glowing center orb

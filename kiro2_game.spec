@@ -1,6 +1,8 @@
 ﻿# PyInstaller spec for the pyglet game.
 # Build: .\.venv\Scripts\python.exe -m PyInstaller .\kiro2_game.spec
 
+import glob
+
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
@@ -18,7 +20,7 @@ a = Analysis(
         ("assets/fonts/Rajdhani-SemiBold.ttf", "assets/fonts"),
         ("assets/fonts/OFL-Orbitron.txt", "assets/fonts"),
         ("assets/fonts/OFL-Rajdhani.txt", "assets/fonts"),
-    ],
+    ] + [(path, "assets/audio") for path in sorted(glob.glob("assets/audio/*.wav"))],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

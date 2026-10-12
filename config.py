@@ -1,4 +1,4 @@
-﻿ # Game Configuration Constants
+ # Game Configuration Constants
 
 # Screen dimensions
 SCREEN_W = 980
@@ -74,11 +74,34 @@ POWERUP_COLORS = {
     "vortex": (200, 160, 255),
     "weapon": (230, 230, 255),
     "ultra": (255, 240, 180),
+    "boost": (255, 145, 45),
 }
 
-# Particle budget (prevents spikes when the screen is saturated).
-PARTICLE_SOFT_CAP = 550
-PARTICLE_HARD_CAP = 800
+# Boost / Overdrive mechanic (LSHIFT key)
+BOOST_SPEED_MULT = 1.65
+BOOST_MAX_ENERGY = 100.0
+BOOST_DRAIN_RATE = 28.0
+BOOST_RECHARGE_RATE = 22.0
+BOOST_DAMAGE_REDUCTION = 0.35
+BOOST_RAM_DAMAGE = 28
+BOOST_COLOR = (255, 145, 45)
+
+# Critical hits
+CRIT_CHANCE_BASE = 0.10
+CRIT_MULT_BASE = 2.0
+CRIT_SPARK_COLOR = (255, 225, 75)
+
+# Elite enemy settings
+ELITE_SPAWN_BASE_WAVE = 3
+ELITE_SPAWN_CHANCE = 0.14
+ELITE_HP_MULT = 2.2
+ELITE_SCORE_MULT = 2.5
+ELITE_AURA_COLOR = (255, 215, 60)
+
+# Particle & Rendering budget (prevents frame drops under heavy load)
+PARTICLE_SOFT_CAP = 450
+PARTICLE_HARD_CAP = 650
+DEPTH_BUCKET = 16
 
 # Enemy Colors
 ENEMY_COLORS = {

@@ -43,3 +43,8 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
             player.current_weapon = WEAPONS[key]
     elif p.kind == "ultra":
         player.ultra_charges = min(ULTRA_MAX_CHARGES, int(getattr(player, "ultra_charges", 0)) + 1)
+    elif p.kind == "boost":
+        max_energy = float(getattr(player, "boost_max_energy", 100.0))
+        player.boost_energy = max_energy
+        player.infinite_boost_until = max(getattr(player, "infinite_boost_until", 0.0), now + 6.0)
+        player.shield = min(120, int(getattr(player, "shield", 0)) + 20)

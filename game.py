@@ -6,6 +6,10 @@ import math
 import random
 
 import pyglet
+
+import config
+# pyglet reads debug_gl when pyglet.gl loads, so this must come before the shapes import below.
+pyglet.options["debug_gl"] = bool(config.PYGLET_DEBUG_GL)
 from pyglet import shapes
 
 pyglet.options["shadow_window"] = False

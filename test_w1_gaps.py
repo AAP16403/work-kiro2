@@ -11,6 +11,7 @@ import pyglet
 
 import config
 import powerup
+import progress as meta_progress
 import rpg
 import score as score_mod
 import visuals
@@ -24,6 +25,7 @@ _KEY = pyglet.window.key
 _LEFT = pyglet.window.mouse.LEFT
 _TMP_DIR = tempfile.mkdtemp(prefix="plouto_w1_gaps_")
 _REAL_SCORE_FILE = score_mod.HIGH_SCORE_FILE
+_REAL_PROGRESS_FILE = meta_progress.PROGRESS_FILE
 _REVEAL_T = float(config.GAME_OVER_REVEAL_S)
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _SKIP_DIRS = {"build", "dist", "__pycache__", "vercel_site"}
@@ -331,6 +333,8 @@ def test_game_over_click_silent_while_locked(g):
 def run_all():
     # Keep every test off the real high_scores.json, which is tracked in git.
     score_mod.HIGH_SCORE_FILE = os.path.join(_TMP_DIR, "high_scores.json")
+    # Game Over ends the run through progress.end_run; keep that write off the developer's progress.json.
+    meta_progress.PROGRESS_FILE = os.path.join(_TMP_DIR, "progress.json")
     g = Game()
     g.set_visible(False)
     g.switch_to()
@@ -350,6 +354,7 @@ def run_all():
     finally:
         g.close()
         score_mod.HIGH_SCORE_FILE = _REAL_SCORE_FILE
+        meta_progress.PROGRESS_FILE = _REAL_PROGRESS_FILE
         shutil.rmtree(_TMP_DIR, ignore_errors=True)
     print("\nALL W1 GAPS REGRESSION TESTS PASSED")
 

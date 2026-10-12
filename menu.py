@@ -13,6 +13,7 @@ from config import MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
 from drone import DRONE_DURATION, DRONE_FIRE_INTERVAL, DRONE_RANGE
 from fonts import register_ui_fonts
 import guide_info
+import mutators
 import title_fx
 import ui_theme
 from ui_theme import FONT_HEAD as UI_FONT_HEAD, FONT_BODY as UI_FONT_BODY, FONT_META as UI_FONT_META
@@ -2214,6 +2215,9 @@ class GameOverMenu:
         for i, label in enumerate(self.stats_labels):
             label.x = cx + int((i - 1.5) * col_w)
             _sync_label_style_if_ready(label, UI_FONT_META, stat_font)
+
+        self.mutator_label.x = cx
+        _sync_label_style_if_ready(self.mutator_label, UI_FONT_META, max(10, int(13 * scale)))
 
         self.hint_label.x = cx
         _sync_label_style_if_ready(self.hint_label, UI_FONT_META, max(10, int(13 * scale)))

@@ -969,6 +969,7 @@ class PlayingState(State):
         if getattr(game.state, "arena_event", None) is not None:
             game.visuals.sync_arena_event(game.state.arena_event, shake)
 
+        game.visuals.sync_fx(game.state, game.player, shake, t=s.time, aim_dir=aim_dir)
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:

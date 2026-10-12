@@ -9,6 +9,9 @@ FPS = 60
 ENABLE_OBSTACLES = False
 ENABLE_ADVANCED_FX = True
 ADVANCED_FX_STRENGTH = 0.55
+# pyglet's debug_gl checks every GL call with a glGetError round trip. Off by default: frozen builds
+# already run with it off, and the source run draws about 3x slower with it on. Set True to debug GL.
+PYGLET_DEBUG_GL = False
 USE_PLAYER_ART = True  # Pod-robot player character (player_art.py). False draws the legacy ship.
 REDUCE_MOTION = False  # True stops ambient UI motion: title shimmer, bobbing, starfield and orb drift
 
@@ -161,6 +164,17 @@ SHAKE_HIT_CEILING = 4.0     # sustained weapon fire holds at or below this; bigg
 SHAKE_PLAYER_HIT_BASE = 2.0  # player damage shake: base + SHAKE_PLAYER_HIT_PER_HP * HP lost after shields
 SHAKE_PLAYER_HIT_PER_HP = 0.25
 SHAKE_PLAYER_HIT_MAX = 8.0
+
+# Graphics polish (wave 1). Each effect has its own switch, and all of them default on.
+ENABLE_GLOW = True               # additive glow sprites: projectile heads, pickups, enemy eyes, player thruster
+GLOW_POOL_CAP = 96               # hard cap on live glow quads; once full, the lowest-priority glows (eyes) are skipped
+ENABLE_PARALLAX_STARS = True     # three screen-space star layers drifting at different speeds behind the arena
+ENABLE_DASH_AFTERIMAGE = True    # glow streak left behind a dash, fading out over about 0.3 s
+ENABLE_RIM_PULSE = True          # arena rim brightens with combat intensity
+# Draw-order groups (lower values draw first): room backdrop, then the starfield, then the floor (order 0).
+ROOM_BG_LAYER_ORDER = -19990
+STARFIELD_LAYER_ORDER = -19980
+GLOW_LAYER_ORDER = 14500         # above projectiles (14000), below the overlay (22000)
 
 # Enemy Colors
 ENEMY_COLORS = {

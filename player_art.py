@@ -440,8 +440,9 @@ class PlayerArt:
             self._put("sh2_pos", self.aura_shield2, "position", (cx, cy))
             self._put("sh1_r", self.aura_shield, "radius", _half_px(18.0 + 2.0 * pulse))
             self._put("sh2_r", self.aura_shield2, "radius", _half_px(24.0 + 3.0 * pulse))
-            self._put("sh1_op", self.aura_shield, "opacity", int(90 + min(float(SHIELD_MAX), shield) * pulse))
-            self._put("sh2_op", self.aura_shield2, "opacity", int(60 + min(float(SHIELD_MAX), shield) * 0.5 * pulse))
+            cap = float(SHIELD_MAX)
+            self._put("sh1_op", self.aura_shield, "opacity", int(90 + min(cap, shield) * pulse))
+            self._put("sh2_op", self.aura_shield2, "opacity", int(60 + min(cap, shield) * 0.5 * pulse))
         else:
             self._put("sh1_op", self.aura_shield, "opacity", 0)
             self._put("sh2_op", self.aura_shield2, "opacity", 0)

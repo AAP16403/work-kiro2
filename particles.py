@@ -393,13 +393,14 @@ class ParticleSystem:
                 sh = self._shapes[dot_i]
                 dot_i += 1
                 sx, sy = to_iso(p.pos, shake)
-                sh.x = sx
-                sh.y = sy
+                sh.position = (sx, sy)  # one translation upload instead of two
                 ratio = max(0.0, p.life / p.max_life)
                 new_opacity = max(0, min(255, int(255 * ratio)))
-                sh.opacity = new_opacity
-                if sh.color != p.color:
-                    sh.color = p.color
+                # Circle.color is RGBA and p.color is RGB, so the old `sh.color != p.color` was always true
+                # and rewrote every live dot each frame. Compare the RGB channels, then write RGB and alpha
+                # in one call. The result is the same colour buffer as before.
+                if sh.opacity != new_opacity or sh.color[:3] != p.color:
+                    sh.color = (p.color[0], p.color[1], p.color[2], new_opacity)
             elif kind == "ring" or kind == "glow":
                 age = p.max_life - p.life - p.delay
                 if age < 0.0:

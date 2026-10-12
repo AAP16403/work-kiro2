@@ -147,5 +147,6 @@ def end_run(run, path=None) -> dict:
 
 # Names from the cross-wave contract. daily.py, hangar.py and hud.py import these.
 PROGRESS_PATH = PROGRESS_FILE
+# Contract spellings for load and save, so callers written against the cross-wave contract also work.
 load_progress = load
 save_progress = save

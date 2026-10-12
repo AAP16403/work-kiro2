@@ -11,6 +11,7 @@ import tempfile
 import pyglet
 
 import config
+import progress as meta_progress
 import score as score_mod
 from game import Game
 from score import ScoreTracker
@@ -18,6 +19,7 @@ from states import GameOverState, GameStateName, MenuState, PlayingState
 
 _TMP_DIR = tempfile.mkdtemp(prefix="plouto_gameover_")
 _REAL_SCORE_FILE = score_mod.HIGH_SCORE_FILE
+_REAL_PROGRESS_FILE = meta_progress.PROGRESS_FILE
 _board_ids = itertools.count()
 _REVEAL_T = float(config.GAME_OVER_REVEAL_S)
 
@@ -391,6 +393,8 @@ def test_game_over_layout_has_no_collisions(g):
 def run_all():
     # Keep every test on a temp board: the real high_scores.json is tracked in git.
     score_mod.HIGH_SCORE_FILE = _set_board([])
+    # Game Over ends the run through progress.end_run; keep that write off the developer's progress.json.
+    meta_progress.PROGRESS_FILE = os.path.join(_TMP_DIR, "progress.json")
     test_tie_with_top_score_is_not_new_high()
     test_zero_point_first_run_is_not_new_high()
     test_strict_best_is_new_high()
@@ -419,6 +423,7 @@ def run_all():
     finally:
         g.close()
         score_mod.HIGH_SCORE_FILE = _REAL_SCORE_FILE
+        meta_progress.PROGRESS_FILE = _REAL_PROGRESS_FILE
         shutil.rmtree(_TMP_DIR, ignore_errors=True)
     print("\nALL GAME OVER SWARM REGRESSION TESTS PASSED")
 

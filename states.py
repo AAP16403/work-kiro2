@@ -26,6 +26,7 @@ from powerup import apply_powerup
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
 from drone import drone_bullets
+from projectile_art import flak_detonation, spawn_impact
 from fsm import State
 from hazards import LaserBeam
 from events import begin_wave_event, update_arena_event, end_wave_event, event_banner_suffix, event_status_text
@@ -274,7 +275,7 @@ class PlayingState(State):
     @staticmethod
     def _spawn_cluster_shrapnel(game, s, p, ignore_entity_id: int | None = None) -> None:
         if game.particle_system:
-            game.particle_system.add_flak_burst(p.pos)
+            flak_detonation(game.particle_system, p.pos)
         add_shake(s, 5.0)
         base_dmg = max(1, int(round(p.damage * 0.45)))
         for angle_deg in (0.0, 90.0, 180.0, 270.0):
@@ -690,7 +691,7 @@ class PlayingState(State):
 
                         behavior_name = getattr(e, "_behavior_name", enemy_behavior_name(e))
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
-                        game.particle_system.add_hit_particles(e.pos, enemy_color)
+                        spawn_impact(game.particle_system, p, e.pos, enemy_color)
 
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e)

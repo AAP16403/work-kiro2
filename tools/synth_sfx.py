@@ -8,16 +8,21 @@ its own random.Random from its name.
 
 Run from the project root:
     .venv\\Scripts\\python.exe tools\\synth_sfx.py
+    .venv\\Scripts\\python.exe tools\\synth_sfx.py --jobs 4        (same bytes, rendered in 4 processes)
+    .venv\\Scripts\\python.exe tools\\synth_sfx.py --out-dir DIR   (write somewhere other than assets/audio)
 
 Prints a table of name, duration (s), peak (0..1) and RMS (0..1) per file.
 """
 
+import argparse
 import math
+import multiprocessing
 import os
 import random
 import struct
 import sys
 import wave
+from concurrent.futures import ProcessPoolExecutor
 
 SR = 22050
 TWO_PI = 2.0 * math.pi
@@ -642,33 +647,62 @@ def _spawn_in(rng):
 # Driver
 # ---------------------------------------------------------------------------
 
-def render(name, fn, level, drive):
+def render(name, fn, level, drive, out_dir=OUT_DIR):
     """Renders one recipe, writes its WAV, and returns (duration, peak, rms)."""
     rng = random.Random(seed_for(name))
     samples = to_pcm16(finish(fn(rng), level, drive))
-    write_wav(os.path.join(OUT_DIR, "sfx_%s.wav" % name), samples)
+    write_wav(os.path.join(out_dir, "sfx_%s.wav" % name), samples)
     count = len(samples)
     peak = max(abs(s) for s in samples) / float(PCM_FULL)
     rms = math.sqrt(sum(s * s for s in samples) / float(count)) / PCM_FULL
     return count / float(SR), peak, rms
 
 
-def main():
+def render_job(name, out_dir=OUT_DIR):
+    """Renders the registered sound called ``name``. Entry point for --jobs worker processes.
+
+    Only the name and the output directory cross the process boundary. The worker finds the recipe
+    in its own SOUNDS registry, which the spawn start method rebuilds by importing this file.
+    """
+    for sname, fn, level, drive in SOUNDS:
+        if sname == name:
+            return render(sname, fn, level, drive, out_dir)
+    raise KeyError("unknown sound: %s" % name)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Render the PLOUTO sound effects to WAV files.")
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="render sounds in N worker processes; the WAV bytes do not depend on N")
+    ap.add_argument("--out-dir", default=OUT_DIR, help="directory for the WAV files (default: assets/audio)")
+    args = ap.parse_args(argv)
+    if args.jobs < 1:
+        raise SystemExit("--jobs must be at least 1")
     if len(set(name for name, _, _, _ in SOUNDS)) != len(SOUNDS):
         raise SystemExit("duplicate sound name in registry")
-    os.makedirs(OUT_DIR, exist_ok=True)
-    rows = []
-    for name, fn, level, drive in SOUNDS:
+    for name, _fn, level, _drive in SOUNDS:
         if level > MAX_PEAK:
             raise SystemExit("level for %s exceeds %.2f" % (name, MAX_PEAK))
-        dur, peak, rms = render(name, fn, level, drive)
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    names = [name for name, _, _, _ in SOUNDS]
+    if args.jobs == 1:
+        stats = [render_job(name, args.out_dir) for name in names]
+    else:
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=min(args.jobs, len(names)), mp_context=ctx) as pool:
+            futures = [pool.submit(render_job, name, args.out_dir) for name in names]
+            stats = [fut.result() for fut in futures]
+
+    rows = []
+    for name, (dur, peak, rms) in zip(names, stats):
         if peak > MAX_PEAK:
             raise SystemExit("peak for %s is %.3f" % (name, peak))
         rows.append((name, dur, peak, rms))
     print("%-14s %9s %8s %8s" % ("name", "dur_s", "peak", "rms"))
     for name, dur, peak, rms in rows:
         print("%-14s %9.3f %8.3f %8.4f" % (name, dur, peak, rms))
-    print("wrote %d files to %s" % (len(rows), OUT_DIR))
+    print("wrote %d files to %s" % (len(rows), args.out_dir))
     return 0
 
 

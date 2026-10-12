@@ -195,3 +195,13 @@ EVENT_NEBULA_WARN = 1.0             # the cloud shows this long before it become
 EVENT_NEBULA_TTL = 8.0              # seconds the cloud is active; enemies inside gain shield
 EVENT_NEBULA_RADIUS = 110.0
 EVENT_NEBULA_SHIELD = 24            # shield an enemy gains on entering the cloud; the leftover is removed on exit or at the end
+
+# Multi-core job layer (parallel.py). Pool work is opt-in. tools/bench_steer.py measures it: the pool
+# steers slower than the serial loop below ~20 live enemies and faster from ~24 up (1.6x to 2.9x at 32,
+# over two runs).
+# It stays off by default because the game's wave caps keep most fights below that, and because a
+# spawned worker costs seconds of start-up on Windows (warmed on the first playing frame).
+PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a process pool
+PARALLEL_STEER_MIN_ENEMIES = 32     # live enemy count at which the batch path is used
+PARALLEL_STEER_WORKERS = 3          # process-pool size when enabled
+PARALLEL_LOADER_WORKERS = 4         # threads for I/O-bound asset reads

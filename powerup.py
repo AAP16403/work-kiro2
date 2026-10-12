@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from config import PLAYER_HP, SHIELD_MAX
+from drone import DRONE_DURATION
 from utils import Vec2
 from weapons import WEAPONS, is_weapon_upgrade
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 class PowerUp:
     """PowerUp entity."""
     pos: Vec2
-    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon", "ultra"
+    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon", "ultra", "boost", "drone"
     data: str | None = None
 
 
@@ -55,3 +56,6 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
         player.boost_energy = max_energy
         player.infinite_boost_until = max(getattr(player, "infinite_boost_until", 0.0), now + 6.0)
         player.shield = min(SHIELD_MAX, int(getattr(player, "shield", 0)) + 20)
+    elif p.kind == "drone":
+        # Rare companion: one drone orbits for DRONE_DURATION. Re-picking only refreshes the timer; drones never stack.
+        player.drone_until = max(float(getattr(player, "drone_until", 0.0)), now + DRONE_DURATION)

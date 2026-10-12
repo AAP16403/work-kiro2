@@ -1237,6 +1237,7 @@ class GuideMenu:
         {"key": "weapon", "name": "Weapon (W)", "icon": "W", "what": "Switches current weapon pattern.", "deal": "Adapt playstyle to the new spread/tempo.", "lore": "Recovered armament cache from dead merc squads."},
         {"key": "ultra", "name": "Ultra (U)", "icon": "U", "what": "Adds an Ultra charge for RMB/Q.", "deal": "Spend on boss spikes or dangerous swarms.", "lore": "A forbidden core spark meant for ship cannons."},
         {"key": "boost", "name": "Overdrive (B)", "icon": "B", "what": "Restores boost and grants 6s infinite overdrive + shield.", "deal": "Grab to ram through swarms or kite aggressive bosses.", "lore": "Supercharged fusion capacitor designed for orbital interceptors."},
+        {"key": "drone", "name": "Drone (D)", "icon": "D", "what": "Rare. A drone orbits you for 12s and fires at the nearest enemy.", "deal": "Shoots every 0.6s within 300 units; re-picks refresh the timer.", "lore": "Salvaged escort drone reflashed to fight beside its owner."},
     ]
     BASICS_INFO = [
         {"key": "move", "name": "Movement", "icon": "MV", "what": "Use WASD or Arrow keys to move.", "deal": "Stay moving; linear retreats get punished.", "lore": "Mobility is your main defense layer."},

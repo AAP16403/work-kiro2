@@ -871,33 +871,88 @@ class BossRewardState(State):
         self.game.rpg_menu.draw()
 
 
+_GAME_OVER_RETRY_KEYS = (
+    pyglet.window.key.ENTER,
+    pyglet.window.key.RETURN,
+    pyglet.window.key.NUM_ENTER,
+    pyglet.window.key.R,
+)
+_GAME_OVER_MENU_KEYS = (pyglet.window.key.ESCAPE, pyglet.window.key.M)
+_GAME_OVER_KEYS = _GAME_OVER_RETRY_KEYS + _GAME_OVER_MENU_KEYS
+
+
 class GameOverState(State):
+    """Run-over screen. Input unlocks when the staged reveal ends."""
+
     def enter(self):
-        wave = int(self.game.state.wave)
-        score_obj = getattr(self.game, 'score', None)
+        game = self.game
+        wave = int(game.state.wave)
+        score_obj = getattr(game, 'score', None)
         final_score = score_obj.score if score_obj else 0
         is_new_high = False
         high_score = 0
         if score_obj:
             is_new_high = score_obj.submit_score(wave)
             high_score = score_obj.get_high_score()
-        self.game.game_over_menu.set_results(wave, final_score, high_score, is_new_high)
-        self.game._reset_input_flags()
-        self.game.audio.play("game_over", volume=0.9)
-        self.game.audio.play_music(None, fade=1.5)
+        game.game_over_menu.set_results(wave, final_score, high_score, is_new_high)
+        game.game_over_menu.set_run_stats(
+            survived=float(game.state.time),
+            kills=int(getattr(score_obj, "kills", 0)),
+            best_combo=float(getattr(score_obj, "best_combo", 1.0)),
+            rank=int(getattr(score_obj, "last_rank", 0)),
+            points_to_next=getattr(score_obj, "last_points_to_next", None),
+            is_new_high=is_new_high,
+        )
+        # One instance serves every run, so the reveal clock and the input lock restart on each entry.
+        self._t0 = float(game._render_time)
+        self._armed_at = self._t0 + float(config.GAME_OVER_REVEAL_S)
+        # Keys already held when the screen appears must be released before they count.
+        self._blocked_keys = {k for k in _GAME_OVER_KEYS if game.keys[k]}
+        game.game_over_menu.set_reveal(0.0)
+        game._reset_input_flags()
+        game.audio.play("game_over", volume=0.9)
+        game.audio.play_music(None, fade=1.5)
+
+    def _input_armed(self) -> bool:
+        return float(self.game._render_time) >= self._armed_at
+
+    def _retry(self):
+        self.game._init_game()
+        self.game.fsm.set_state(GameStateName.PLAYING)
+
+    def _quit_to_menu(self):
+        self.game._return_to_menu()
+        self.game.fsm.set_state(GameStateName.MENU)
+
+    def update(self, dt: float):
+        held = {k for k in _GAME_OVER_KEYS if self.game.keys[k]}
+        if self._input_armed():
+            # Once armed, a held key stays blocked until released, so auto-repeat cannot restart the run.
+            self._blocked_keys &= held
+        else:
+            self._blocked_keys = held
 
     def on_mouse_press(self, x, y, button, modifiers):
+        if not self._input_armed():
+            return
         action = self.game.game_over_menu.on_mouse_press(x, y, button)
         if action == "retry":
-            self.game._init_game()
-            self.game.fsm.set_state(GameStateName.PLAYING)
+            self._retry()
         elif action == "quit_to_menu":
-            self.game._return_to_menu()
-            self.game.fsm.set_state(GameStateName.MENU)
+            self._quit_to_menu()
+
+    def on_key_press(self, symbol, modifiers):
+        if not self._input_armed() or symbol in self._blocked_keys:
+            return
+        if symbol in _GAME_OVER_RETRY_KEYS:
+            self._retry()
+        elif symbol in _GAME_OVER_MENU_KEYS:
+            self._quit_to_menu()
 
     def on_mouse_motion(self, x, y, dx, dy):
         self.game.game_over_menu.on_mouse_motion(x, y)
 
     def draw(self):
         _draw_playing_scene(self.game)
+        self.game.game_over_menu.set_reveal(float(self.game._render_time) - self._t0)
         self.game.game_over_menu.draw()

@@ -35,6 +35,9 @@ WAVE_COOLDOWN = 2.0
 MAX_ENEMIES = 12  # Maximum concurrent enemies in a wave
 MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter
 
+# Game Over: the staged reveal runs this long, and input (click or key) unlocks when it ends.
+GAME_OVER_REVEAL_S = 1.0
+
 # Ultra ability (special powerup -> right click)
 ULTRA_MAX_CHARGES = 2
 ULTRA_COOLDOWN = 10.0

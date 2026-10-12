@@ -181,26 +181,26 @@ def powerup_entries() -> list[dict]:
     bounce = "once" if int(config.RICOCHET_BOUNCES) == 1 else f"{int(config.RICOCHET_BOUNCES)} times"
     return [
         {
-            "key": "ricochet", "name": "Ricochet (R)", "icon": "R",
-            "what": f"Your bullets bounce off the arena edge {bounce}, for {config.RICOCHET_SECONDS:g}s.",
+            "key": "ricochet", "name": "Ricochet (<>)", "icon": "<>",
+            "what": f"Your bullets bounce off the arena edge {bounce}, for {config.RICOCHET_DURATION:g}s.",
             "deal": "Bank shots off the rim into blind spots.",
             "lore": "Edge-tuned rounds that refuse to die on first contact.",
         },
         {
             "key": "homing", "name": "Homing (H)", "icon": "H",
-            "what": f"Bullets curve to the nearest enemy within {config.HOMING_RANGE:g} px for {config.HOMING_SECONDS:g}s.",
+            "what": f"Bullets curve to the nearest enemy within {config.HOMING_RANGE:g} px for {config.HOMING_DURATION:g}s.",
             "deal": "Fire into packs; the shots find targets.",
             "lore": "Seeking rounds with a capped turn rate, so they stay readable.",
         },
         {
-            "key": "time_slow", "name": "Time Slow (T)", "icon": "T",
-            "what": f"Enemies and their shots move at {config.TIME_SLOW_FACTOR * 100:g}% speed for {config.TIME_SLOW_SECONDS:g}s.",
+            "key": "time_slow", "name": "Time Slow (~)", "icon": "~",
+            "what": f"Enemies and their shots move at {config.TIME_SLOW_SCALE * 100:g}% speed for {config.TIME_SLOW_DURATION:g}s.",
             "deal": "You keep full speed: reposition or line up shots.",
             "lore": "The whole field slows down, you do not.",
         },
         {
             "key": "magnet", "name": "Magnet (M)", "icon": "M",
-            "what": f"Pickups are pulled from {config.MAGNET_RADIUS_MULT:g}x as far, and faster, for {config.MAGNET_SECONDS:g}s.",
+            "what": f"Pickups are pulled from {config.MAGNET_RADIUS_MULT:g}x as far, and faster, for {config.MAGNET_DURATION:g}s.",
             "deal": "Clear the field, then sweep up distant loot.",
             "lore": "Drops pulled in like filings to a lodestone.",
         },

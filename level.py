@@ -204,9 +204,33 @@ def _append_powerup(state: GameState, pos: Vec2, kind: str) -> None:
         state.powerups.append(PowerUp(pos, k))
 
 
+# Powerup spawn table. Every ordinary powerup roll goes through these steps, in order:
+#   1. r < 0.07 -> boost, r < 0.13 -> vortex, wave >= 3 and r < 0.20 -> weapon (one roll, r, decides all three).
+#   2. Otherwise the ordinary pool below is picked by weight. A kind's share of the pool is its weight
+#      divided by the sum of all weights. The pool gets 87% of rolls before wave 3 and 80% from wave 3 on.
+#   3. The wave and kill pity rules can replace the result with Ultra (see _pick_powerup_kind_for_wave).
+# Rarity is separate from weight: homing and time_slow are the rare tier (pickup_rare sound, pickup ring).
+# Weights are relative. Changing one changes the pool share of every other kind.
+POWERUP_POOL_WEIGHTS = (
+    ("heal", 1.0),        # common
+    ("damage", 1.0),      # common
+    ("speed", 1.0),       # common
+    ("firerate", 1.0),    # common
+    ("shield", 1.0),      # common
+    ("laser", 1.0),       # rare
+    ("boost", 1.0),       # common
+    ("ricochet", 0.5),    # common, 8 s
+    ("homing", 0.3),      # rare, 6 s
+    ("time_slow", 0.2),   # rare, 4 s
+    ("magnet", 0.5),      # common, 10 s
+)
+_POOL_KINDS = tuple(k for k, _w in POWERUP_POOL_WEIGHTS)
+_POOL_WEIGHTS = tuple(float(w) for _k, w in POWERUP_POOL_WEIGHTS)
+
+
 def _pick_powerup_kind_for_wave(state: GameState, source: str) -> str:
-    # Base pool with balanced utilities
-    kind = state.rng.choice(["heal", "damage", "speed", "firerate", "shield", "laser", "boost"])
+    # Base pool with balanced utilities, weighted by POWERUP_POOL_WEIGHTS
+    kind = state.rng.choices(_POOL_KINDS, weights=_POOL_WEIGHTS, k=1)[0]
     r = state.rng.random()
     if r < 0.07:
         kind = "boost"

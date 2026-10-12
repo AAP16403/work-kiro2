@@ -137,15 +137,15 @@ def test_enemy_entry_numbers_come_from_config():
 
 
 def test_powerup_entry_numbers_come_from_config():
-    saved = config.RICOCHET_BOUNCES, config.HOMING_RANGE, config.TIME_SLOW_FACTOR, config.MAGNET_RADIUS_MULT
+    saved = config.RICOCHET_BOUNCES, config.HOMING_RANGE, config.TIME_SLOW_SCALE, config.MAGNET_RADIUS_MULT
     try:
         config.RICOCHET_BOUNCES = 2
         config.HOMING_RANGE = 300.0
-        config.TIME_SLOW_FACTOR = 0.25
+        config.TIME_SLOW_SCALE = 0.25
         config.MAGNET_RADIUS_MULT = 2.0
         entries = {e["key"]: e for e in guide_info.powerup_entries()}
     finally:
-        config.RICOCHET_BOUNCES, config.HOMING_RANGE, config.TIME_SLOW_FACTOR, config.MAGNET_RADIUS_MULT = saved
+        config.RICOCHET_BOUNCES, config.HOMING_RANGE, config.TIME_SLOW_SCALE, config.MAGNET_RADIUS_MULT = saved
     assert "edge 2 times" in entries["ricochet"]["what"], entries["ricochet"]["what"]
     assert "within 300 px" in entries["homing"]["what"], entries["homing"]["what"]
     assert "25% speed" in entries["time_slow"]["what"], entries["time_slow"]["what"]

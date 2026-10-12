@@ -82,11 +82,23 @@ POWERUP_COLORS = {
     "ultra": (255, 240, 180),
     "boost": (255, 145, 45),
     "drone": (90, 255, 225),
-    "ricochet": (110, 245, 210),
-    "homing": (255, 105, 185),
-    "time_slow": (200, 200, 255),
-    "magnet": (255, 190, 60),
+    "ricochet": (60, 255, 200),
+    "homing": (255, 80, 170),
+    "time_slow": (110, 130, 255),
+    "magnet": (170, 255, 70),
 }
+
+# Timed powerups (see powerup.py). Each one refreshes its expiry; picking it up again does not stack.
+RICOCHET_DURATION = 8.0       # player bullets bounce once off the arena edge
+HOMING_DURATION = 6.0         # player bullets steer toward the nearest live enemy
+HOMING_RANGE = 260.0          # world units, measured from the bullet
+HOMING_TURN_RATE = 2.4        # max steering in radians per second, so the curve stays readable
+TIME_SLOW_DURATION = 4.0      # enemies and enemy projectiles run at TIME_SLOW_SCALE; the player does not
+TIME_SLOW_SCALE = 0.5         # the one scalar for enemy time: enemy dt = frame dt * this
+MAGNET_DURATION = 10.0        # pickups are pulled from a wider radius and faster
+MAGNET_RADIUS_MULT = 3.0      # multiplies the pickup magnet radius
+MAGNET_PULL_MULT = 1.5        # multiplies the pickup pull speed
+RICOCHET_BOUNCES = 1          # bounces per bullet while Ricochet runs (shot_mods reads it; the Guide too)
 
 # Boost / Overdrive mechanic (LSHIFT key)
 BOOST_SPEED_MULT = 1.65
@@ -98,15 +110,6 @@ BOOST_RAM_DAMAGE = 28
 BOOST_COLOR = (255, 145, 45)
 BOOST_OVERDRIVE_SECONDS = 6.0  # Overdrive powerup: infinite boost and shield top-up duration
 
-# Timed powerups: ricochet, homing, time slow and magnet. The Guide reads these values.
-RICOCHET_SECONDS = 8.0       # Player bullets bounce off the arena edge for this long
-RICOCHET_BOUNCES = 1         # Bounces per bullet
-HOMING_SECONDS = 6.0         # Player bullets steer toward the nearest live enemy for this long
-HOMING_RANGE = 260.0         # px: homing search radius around each bullet
-TIME_SLOW_SECONDS = 4.0      # Enemies and enemy projectiles run slowed for this long
-TIME_SLOW_FACTOR = 0.5       # Their speed multiplier while slowed; the player keeps full speed
-MAGNET_SECONDS = 10.0        # Pickup magnet stays boosted for this long
-MAGNET_RADIUS_MULT = 3.0     # Pickup magnet radius multiplier while boosted
 
 # Critical hits
 CRIT_CHANCE_BASE = 0.10

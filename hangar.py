@@ -22,8 +22,8 @@ from hangar_rules import TAB_ACHIEVEMENTS, TAB_SKINS, describe_unlock, grid_step
 from menu import MenuButton, UI_FONT_BODY, UI_FONT_HEAD, UI_FONT_META, _sync_label_style_if_ready, _ui_scale
 from player import Player
 from player_art import PlayerArt
-from progress import load_progress, save_progress
-from ui_theme import ACCENT, BG, DANGER, MUTED, PANEL, SUCCESS, TEXT, draw_chip, draw_panel, font_size
+import progress as meta_progress
+from ui_theme import ACCENT, BACKGROUND as BG, DANGER, MUTED, PANEL, SUCCESS, TEXT, draw_panel, font_name, font_size
 from utils import Vec2, to_iso
 
 
@@ -47,12 +47,30 @@ def _drop(objs) -> None:
             obj.delete()
 
 
+def _px(base: int, s: float) -> int:
+    """Pixel size for a base size at the UI scale. The layout numbers below were tuned in these units."""
+    return max(8, int(base * s))
+
+
+def _status_chip(batch, x: float, y: float, w: float, h: float, text: str, color, scale: float) -> list:
+    """Fixed-size status tag: a ui_theme panel filled with the status colour, and one centred caption."""
+    parts = draw_panel(batch, x, y, w, h, fill=color, border_pad=1.0)
+    label = pyglet.text.Label(
+        text,
+        font_name=font_name("caption"),
+        font_size=font_size("caption", scale),
+        x=x + w / 2.0,
+        y=y + h / 2.0,
+        anchor_x="center",
+        anchor_y="center",
+        color=(*BG, 255),
+        batch=batch,
+    )
+    return [*parts, label]
+
+
 def _ordered_skin_ids() -> list[str]:
-    ids = list(skins.SKINS.keys())
-    if "default" in ids:
-        ids.remove("default")
-        ids.insert(0, "default")
-    return ids
+    return [skin.id for skin in skins.SKINS]  # catalogue order: the default skin comes first
 
 
 class HangarMenu:
@@ -62,7 +80,7 @@ class HangarMenu:
         self.screen_width = width
         self.screen_height = height
         self.progress_path = progress_path
-        self.progress = load_progress(progress_path)
+        self.progress = meta_progress.load(progress_path)
         self.tab = TAB_SKINS
         self.cursor = 0
         self.ach_page = 0
@@ -76,8 +94,8 @@ class HangarMenu:
 
         self.skin_ids = _ordered_skin_ids()
         self._achievement_names = {a.id: a.name for a in achievements.ACHIEVEMENTS}
-        self._unlock_text = {sid: describe_unlock(skins.SKINS[sid], self._achievement_names) for sid in self.skin_ids}
-        self._palettes = {sid: skins.palette_for(sid) for sid in self.skin_ids}
+        self._unlock_text = {sid: describe_unlock(skins.get(sid), self._achievement_names) for sid in self.skin_ids}
+        self._palettes = {sid: skins.get(sid).palette for sid in self.skin_ids}
         self._player = Player(pos=Vec2(0.0, 0.0))  # fixed character for every preview
         self._aim = Vec2(1.0, 0.0)
 
@@ -174,7 +192,7 @@ class HangarMenu:
 
     def open(self) -> None:
         """Reload progress and put the cursor on the selected skin. Called on every visit."""
-        self.progress = load_progress(self.progress_path)
+        self.progress = meta_progress.load(self.progress_path)
         self._message_left = 0.0
         self._message = ""
         selected = self._selected_id()
@@ -192,16 +210,16 @@ class HangarMenu:
 
         Callers rebuild the panel after a successful choice so the chips reflect it, or only the ring after a refusal.
         """
-        if skin_id not in skins.SKINS:
+        if skins.get(skin_id) is None:
             return False
-        skin = skins.SKINS[skin_id]
+        skin = skins.get(skin_id)
         if not skins.unlocked(self.progress, skin_id):
             self._flash(f"{skin.name} is locked. {self._unlock_text[skin_id]}", DANGER)
             return False
         if not skins.select(self.progress, skin_id):
             self._flash(f"{skin.name} could not be selected", DANGER)
             return False
-        save_progress(self.progress, self.progress_path)
+        meta_progress.save(self.progress, self.progress_path)
         self._flash(f"{skin.name} selected", SUCCESS)
         return True
 
@@ -222,13 +240,13 @@ class HangarMenu:
 
         self.title.x = cx
         self.title.y = height - int(46 * s)
-        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, font_size(30, s))
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, _px(30, s))
         self.subtitle.x = cx
         self.subtitle.y = self.title.y - int(40 * s)  # clears the title at both sizes
-        _sync_label_style_if_ready(self.subtitle, UI_FONT_META, font_size(13, s))
+        _sync_label_style_if_ready(self.subtitle, UI_FONT_META, _px(13, s))
         self.footer.x = cx
         self.footer.y = int(14 * s)
-        _sync_label_style_if_ready(self.footer, UI_FONT_META, font_size(12, s))
+        _sync_label_style_if_ready(self.footer, UI_FONT_META, _px(12, s))
 
         pad = int(18 * s)
         panel_w = min(int(width * 0.94), int(1220 * s))
@@ -245,7 +263,7 @@ class HangarMenu:
         self.btn_ach.width = int(190 * s)
         for b in (self.btn_skins, self.btn_ach, self.btn_back):
             b.height = btn_h
-            b.font_size = max(11, font_size(16, s))
+            b.font_size = max(11, _px(16, s))
         self.btn_skins.x = panel_x + pad
         self.btn_skins.y = top_row_y
         self.btn_ach.x = self.btn_skins.x + self.btn_skins.width + gap
@@ -258,7 +276,7 @@ class HangarMenu:
         for b in (self.btn_prev, self.btn_next):
             b.width = int(120 * s)
             b.height = int(34 * s)
-            b.font_size = max(10, font_size(14, s))
+            b.font_size = max(10, _px(14, s))
             b.y = panel_y + (band_h - b.height) // 2
         self.btn_prev.x = panel_x + pad
         self.btn_next.x = panel_x + panel_w - pad - self.btn_next.width
@@ -301,7 +319,7 @@ class HangarMenu:
         self.cursor = max(0, min(self.cursor, len(self._cards) - 1))
         x, y, w, h, _sid = self._cards[self.cursor]
         ring = max(2, int(3 * self._s))
-        self._ring_shapes = draw_panel(self._ring_batch, x - ring, y - ring, w + 2 * ring, h + 2 * ring, color=ACCENT)
+        self._ring_shapes = draw_panel(self._ring_batch, x - ring, y - ring, w + 2 * ring, h + 2 * ring, fill=ACCENT)
 
     def _build_skins(self) -> None:
         batch = self._skin_batch
@@ -330,21 +348,21 @@ class HangarMenu:
 
         selected = self._selected_id()
         unlocked_n = sum(1 for sid in self.skin_ids if skins.unlocked(self.progress, sid))
-        band = f"Selected: {skins.SKINS[selected].name}   |   {unlocked_n} of {n} unlocked"
-        self._content.append(self._label(batch, band, px + pw // 2, py + int(25 * s), font_size(13, s), MUTED,
+        band = f"Selected: {skins.get(selected).name}   |   {unlocked_n} of {n} unlocked"
+        self._content.append(self._label(batch, band, px + pw // 2, py + int(25 * s), _px(13, s), MUTED,
                                          anchor_x="center", anchor_y="center"))
 
     def _build_card(self, sid: str, x: float, y: float, w: float, h: float, s: float) -> None:
         batch = self._skin_batch
         pad = int(12 * s)
-        skin = skins.SKINS[sid]
+        skin = skins.get(sid)
         state = self._card_state(sid)
 
-        self._content.extend(draw_panel(batch, x, y, w, h, color=PANEL))
+        self._content.extend(draw_panel(batch, x, y, w, h, fill=PANEL))
 
         name_color = MUTED if state == "locked" else TEXT
         name_top = y + h - pad
-        self._content.append(self._label(batch, skin.name, x + pad, name_top, font_size(16, s), name_color,
+        self._content.append(self._label(batch, skin.name, x + pad, name_top, _px(16, s), name_color,
                                          font=UI_FONT_HEAD, anchor_x="left", anchor_y="top", width=w - 2 * pad))
 
         chip_text, chip_color = {
@@ -355,12 +373,12 @@ class HangarMenu:
         chip_w = int(96 * s)
         chip_h = int(20 * s)
         chip_y = name_top - int(26 * s) - chip_h
-        self._content.extend(draw_chip(batch, x + pad, chip_y, chip_w, chip_h, chip_text, chip_color))
+        self._content.extend(_status_chip(batch, x + pad, chip_y, chip_w, chip_h, chip_text, chip_color, s))
 
         plate_top = chip_y - int(8 * s)
         plate_bottom = y + int(46 * s)
         plate_h = plate_top - plate_bottom
-        self._content.extend(draw_panel(batch, x + pad, plate_bottom, w - 2 * pad, plate_h, color=BG))
+        self._content.extend(draw_panel(batch, x + pad, plate_bottom, w - 2 * pad, plate_h, fill=BG))
 
         # Preview: the dummy player sits at world origin, so shake carries it to the plate centre.
         ox, oy = to_iso(Vec2(0.0, 0.0), Vec2(0.0, 0.0))
@@ -370,7 +388,7 @@ class HangarMenu:
         self._sync_art(sid)
 
         self._content.append(self._label(batch, self._unlock_text[sid], x + pad, y + int(10 * s),
-                                         font_size(11, s), MUTED, anchor_x="left", anchor_y="bottom",
+                                         _px(11, s), MUTED, anchor_x="left", anchor_y="bottom",
                                          width=w - 2 * pad, multiline=True))
 
     def _build_achievements(self) -> None:
@@ -399,27 +417,27 @@ class HangarMenu:
         for i, ach in enumerate(items[start:start + per_page]):
             is_earned = ach.id in earned
             row_y = ay + ah - (i + 1) * row_h - i * gap
-            self._content.extend(draw_panel(batch, ax, row_y, aw, row_h, color=PANEL))
-            self._content.extend(draw_panel(batch, ax, row_y, max(3, int(5 * s)), row_h, color=SUCCESS if is_earned else MUTED))
+            self._content.extend(draw_panel(batch, ax, row_y, aw, row_h, fill=PANEL))
+            self._content.extend(draw_panel(batch, ax, row_y, max(3, int(5 * s)), row_h, fill=SUCCESS if is_earned else MUTED))
             top = row_y + row_h - int(10 * s)
-            self._content.append(self._label(batch, str(ach.name), text_x, top, font_size(16, s),
+            self._content.append(self._label(batch, str(ach.name), text_x, top, _px(16, s),
                                              TEXT if is_earned else MUTED, font=UI_FONT_BODY, anchor_x="left",
                                              anchor_y="top", width=text_w))
-            self._content.append(self._label(batch, str(ach.description), text_x, top - int(24 * s), font_size(12, s), MUTED,
+            self._content.append(self._label(batch, str(ach.description), text_x, top - int(24 * s), _px(12, s), MUTED,
                                              anchor_x="left", anchor_y="top", width=text_w, multiline=True))
             right_edge = ax + aw - pad
             chip_text, chip_color = ("EARNED", SUCCESS) if is_earned else ("LOCKED", MUTED)
-            self._content.extend(draw_chip(batch, right_edge - chip_w, row_y + row_h - int(10 * s) - chip_h,
-                                           chip_w, chip_h, chip_text, chip_color))
+            self._content.extend(_status_chip(batch, right_edge - chip_w, row_y + row_h - int(10 * s) - chip_h,
+                                           chip_w, chip_h, chip_text, chip_color, s))
             if is_earned:
                 when = earned.get(ach.id)
                 date_text = f"Earned {when}" if when else "Earned"
-                self._content.append(self._label(batch, date_text, right_edge, row_y + int(9 * s), font_size(11, s), MUTED,
+                self._content.append(self._label(batch, date_text, right_edge, row_y + int(9 * s), _px(11, s), MUTED,
                                                  anchor_x="right", anchor_y="bottom"))
 
         earned_n = sum(1 for a in items if a.id in earned)
         info = f"Page {self.ach_page + 1}/{self._page_count}   |   {earned_n} of {len(items)} earned"
-        self._content.append(self._label(batch, info, px + pw // 2, py + int(25 * s), font_size(13, s), MUTED,
+        self._content.append(self._label(batch, info, px + pw // 2, py + int(25 * s), _px(13, s), MUTED,
                                          anchor_x="center", anchor_y="center"))
 
     # ------------------------------------------------------------------ input

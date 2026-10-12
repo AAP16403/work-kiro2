@@ -1,8 +1,8 @@
 """In-run HUD widgets: the radial Ultra gauge, the weapon chip, the skin chip and the toast view.
 
 ToastQueue and ultra_fraction are plain Python with no window, so tests call them directly.
-Panels and chips are drawn with ui_theme's helpers when that module exists. Until wave 1 adds
-ui_theme.py, the fallbacks below use the HUD's existing palette so the game keeps running.
+Panels and chips are drawn with ui_theme's helpers. ui_theme and projectile_art are required, so a
+missing module fails loudly instead of quietly drawing a different palette.
 """
 
 import math
@@ -12,18 +12,9 @@ import pyglet
 from pyglet import shapes
 
 import config
+import ui_theme as _ui_theme
+import projectile_art as _projectile_art
 from menu import UI_FONT_BODY, UI_FONT_HEAD, UI_FONT_META
-from weapons import get_weapon_color
-
-try:
-    import ui_theme as _ui_theme
-except ImportError:  # wave 1 owns ui_theme.py; the HUD falls back to its own palette until it lands
-    _ui_theme = None
-
-try:
-    import projectile_art as _projectile_art
-except ImportError:  # wave 1 owns projectile_art.py; weapon swatches use weapons.get_weapon_color
-    _projectile_art = None
 
 
 TOAST_SECONDS = 2.5          # a toast is on screen this long, fades included
@@ -35,16 +26,8 @@ RING_PULSE_HZ = 0.9          # full-charge pulse rate
 RING_PULSE_MIN = 170         # opacity range of the full-charge pulse
 RING_PULSE_MAX = 255
 
-# The HUD's existing palette, used only while ui_theme.py is absent from the tree.
-_FALLBACK_TOKENS = {
-    "BG": (10, 16, 24),
-    "PANEL": (14, 21, 30),
-    "ACCENT": (82, 146, 212),
-    "TEXT": (238, 245, 255),
-    "DANGER": (196, 78, 70),
-    "SUCCESS": (120, 210, 120),
-    "MUTED": (168, 194, 222),
-}
+# HUD token names that differ from ui_theme's names.
+_TOKEN_NAMES = {"BG": "BACKGROUND"}
 
 
 # ----------------------------------------------------------------------
@@ -74,29 +57,22 @@ def fit_text(label, text: str, max_w: float) -> None:
 
 
 def token(name: str, theme=None) -> tuple:
-    """A colour token from ui_theme, or the HUD's own palette when ui_theme is not available."""
+    """A colour token from ui_theme (or from ``theme`` when one is given)."""
     source = _ui_theme if theme is None else theme
-    value = getattr(source, name, None)
-    return tuple(value) if value is not None else _FALLBACK_TOKENS[name]
+    return tuple(getattr(source, _TOKEN_NAMES.get(name, name)))
 
 
 def draw_panel(batch, x, y, w, h, color=None, theme=None) -> list:
     """Background panel from ui_theme.draw_panel; returns the shapes so the caller can delete them."""
     source = _ui_theme if theme is None else theme
     fill = token("PANEL", theme) if color is None else tuple(color)
-    if source is not None and hasattr(source, "draw_panel"):
-        return list(source.draw_panel(batch, x, y, w, h, color=fill))
-    return [shapes.Rectangle(x, y, w, h, color=fill, batch=batch)]
+    return list(source.draw_panel(batch, x, y, w, h, fill=fill))
 
 
 def weapon_swatch(weapon) -> tuple:
-    """Colour for a weapon's swatch: projectile_art's style when present, else the weapon table colour."""
-    if _projectile_art is not None:
-        style = getattr(_projectile_art, "STYLES", {}).get(getattr(weapon, "name", ""))
-        color = getattr(style, "color", None)
-        if color is not None:
-            return tuple(color)[:3]
-    return tuple(get_weapon_color(getattr(weapon, "projectile_type", "bullet")))[:3]
+    """Head colour of the weapon's projectile_art style, so the swatch matches the shot it fires."""
+    style = _projectile_art.style_for(getattr(weapon, "name", ""), getattr(weapon, "projectile_type", "bullet"))
+    return tuple(style.head)[:3]
 
 
 def set_opacity(shape_list, value: int) -> None:

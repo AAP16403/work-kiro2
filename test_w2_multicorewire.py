@@ -122,18 +122,89 @@ def test_parallel_threshold_is_a_named_config_value(g):
     print(f"[PASS] test_parallel_threshold_is_a_named_config_value passed (PARALLEL_MIN_ENEMIES={value})")
 
 
-def test_parallel_on_matches_parallel_off_final_state(g):
-    if not _parallel_module_present():
-        _skip_requires_wave1("test_parallel_on_matches_parallel_off_final_state", "parallel.py is not in this worktree")
-        return
-    _skip_requires_wave1("test_parallel_on_matches_parallel_off_final_state", "the enemy-update hook that selects the batch path is not wired in this worktree")
+def _run_frames_through_playing_hook(game, count: int, frames: int, seed: int) -> list:
+    """Same frames as bench.run_frames, but each frame goes through parallel.maybe_update_enemies first.
+
+    This is the order PlayingState.update uses: the batch path takes the enemies it handles, and the
+    serial loop updates the rest. With batching off, maybe_update_enemies returns None and the loop
+    updates every enemy, which is the bench path.
+    """
+    import random
+    from utils import Vec2
+    import parallel
+    from enemy import update_enemy
+
+    s = bench.build_forced_wave(game, count, seed)
+    random.seed(seed)
+    player = game.player
+    zero = Vec2(0.0, 0.0)
+    for _ in range(frames):
+        s.time += bench.FRAME_DT
+        s.projectiles.clear()
+        s.traps.clear()
+        s.lasers.clear()
+        s.thunders.clear()
+        batched = parallel.maybe_update_enemies(s, game, bench.FRAME_DT, player.pos, zero)
+        for e in list(s.enemies):
+            if batched is not None and id(e) in batched:
+                continue
+            update_enemy(e, player.pos, s, bench.FRAME_DT, game, player_vel=zero)
+    return bench.snapshot(s)
+
+
+def test_parallel_on_is_repeatable_and_matches_inline_reference(g):
+    """Batched steering repeats exactly and agrees with its inline reference on every frame.
+
+    This is the property wave 1 promises for the batch path. It is NOT a claim that batch-on equals
+    batch-off over a multi-frame run: parallel.py phase 1 steers each enemy without the serial loop's
+    coordination, so the two diverge over time. batch-off is the shipped default (PARALLEL_STEER_ENABLED
+    is False), so the game itself is unchanged. Enabling batching is a gameplay decision, not a
+    performance-only switch.
+    """
+    import parallel
+
+    first_batcher = parallel.SteerBatcher(workers=0, min_enemies=1, verify=True)
+    parallel.set_batcher(first_batcher)
+    try:
+        with pinned_identities():
+            first = _run_frames_through_playing_hook(g, 30, frames=40, seed=5)
+    finally:
+        parallel.set_batcher(None)
+    assert first_batcher.frames > 0, "the batch path never ran, so the check proves nothing"
+    assert first_batcher.mismatches == 0, f"{first_batcher.mismatches} frames differed from the inline reference"
+
+    repeat_batcher = parallel.SteerBatcher(workers=0, min_enemies=1)
+    parallel.set_batcher(repeat_batcher)
+    try:
+        with pinned_identities():
+            repeat = _run_frames_through_playing_hook(g, 30, frames=40, seed=5)
+    finally:
+        parallel.set_batcher(None)
+    assert repeat == first, "two batched runs with the same seed must repeat exactly"
+    print(f"[PASS] test_parallel_on_is_repeatable_and_matches_inline_reference passed (30 enemies, 40 frames, {first_batcher.frames} batched frames, 0 mismatches, repeat exact)")
 
 
 def test_pool_closed_on_window_close_and_exit(g):
-    if not _parallel_module_present():
-        _skip_requires_wave1("test_pool_closed_on_window_close_and_exit", "parallel.py WorkerPool is not in this worktree")
-        return
-    _skip_requires_wave1("test_pool_closed_on_window_close_and_exit", "the game shutdown hook for WorkerPool is not wired in this worktree")
+    import parallel
+
+    class _Probe:
+        closed = 0
+
+        def wants(self, live_count):
+            return False
+
+        def close(self):
+            self.closed += 1
+
+    probe = _Probe()
+    parallel.set_batcher(probe)
+    g._schedule_app_close = lambda: None  # the window close path without quitting the test process
+    try:
+        g.on_close()
+    finally:
+        parallel.set_batcher(None)
+    assert probe.closed >= 1, "window close must shut the steering batcher's pool down"
+    print("[PASS] test_pool_closed_on_window_close_and_exit passed (window close closes the steering pool)")
 
 
 def run_all():
@@ -147,7 +218,7 @@ def run_all():
         test_bench_measure_reports_both_sizes(g)
         test_no_multiprocessing_children_left_after_bench(g)
         test_parallel_threshold_is_a_named_config_value(g)
-        test_parallel_on_matches_parallel_off_final_state(g)
+        test_parallel_on_is_repeatable_and_matches_inline_reference(g)
         test_pool_closed_on_window_close_and_exit(g)
     finally:
         g.close()

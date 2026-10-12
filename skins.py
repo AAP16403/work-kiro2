@@ -34,7 +34,7 @@ import achievements
 
 
 DEFAULT_SKIN_ID = "classic"
-PALETTE_KEYS = ("body", "accent", "eye", "glow", "trail", "bullet")
+PALETTE_KEYS = ("body", "accent", "eye", "glow", "trail", "bullet", "cheek")
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ SKINS: tuple[Skin, ...] = (
         "classic", "Classic Pod", "The original cyan pod. Always unlocked.",
         {
             "body": (132, 224, 255), "accent": (10, 200, 255), "eye": (30, 60, 90),
-            "glow": (60, 140, 220), "trail": (100, 220, 255), "bullet": (150, 235, 255),
+            "glow": (60, 140, 220), "trail": (100, 220, 255), "bullet": (150, 235, 255), "cheek": (255, 140, 175),
         },
         UnlockRule("default"),
     ),
@@ -73,7 +73,7 @@ SKINS: tuple[Skin, ...] = (
         "ember", "Ember Pod", "A hot orange shell that glows like a reactor core.",
         {
             "body": (255, 170, 110), "accent": (255, 110, 60), "eye": (255, 245, 220),
-            "glow": (255, 120, 50), "trail": (255, 160, 80), "bullet": (255, 190, 110),
+            "glow": (255, 120, 50), "trail": (255, 160, 80), "bullet": (255, 190, 110), "cheek": (255, 140, 175),
         },
         UnlockRule("score", 5000),
     ),
@@ -81,7 +81,7 @@ SKINS: tuple[Skin, ...] = (
         "frost", "Frost Pod", "Pale ice-blue plating with cold white trails.",
         {
             "body": (210, 240, 255), "accent": (150, 220, 255), "eye": (40, 80, 140),
-            "glow": (170, 230, 255), "trail": (200, 240, 255), "bullet": (220, 250, 255),
+            "glow": (170, 230, 255), "trail": (200, 240, 255), "bullet": (220, 250, 255), "cheek": (255, 140, 175),
         },
         UnlockRule("wave", 10),
     ),
@@ -89,7 +89,7 @@ SKINS: tuple[Skin, ...] = (
         "verdant", "Verdant Pod", "Leaf-green hull that leaves a soft mint haze.",
         {
             "body": (150, 240, 160), "accent": (80, 200, 120), "eye": (30, 70, 40),
-            "glow": (120, 255, 150), "trail": (140, 255, 170), "bullet": (190, 255, 200),
+            "glow": (120, 255, 150), "trail": (140, 255, 170), "bullet": (190, 255, 200), "cheek": (255, 140, 175),
         },
         UnlockRule("kills", 250),
     ),
@@ -97,7 +97,7 @@ SKINS: tuple[Skin, ...] = (
         "solar", "Solar Pod", "Gold plating that blazes like a sunrise.",
         {
             "body": (255, 235, 150), "accent": (255, 200, 60), "eye": (90, 50, 10),
-            "glow": (255, 220, 90), "trail": (255, 230, 120), "bullet": (255, 245, 180),
+            "glow": (255, 220, 90), "trail": (255, 230, 120), "bullet": (255, 245, 180), "cheek": (255, 140, 175),
         },
         UnlockRule("bosses", 2),
     ),
@@ -105,7 +105,7 @@ SKINS: tuple[Skin, ...] = (
         "storm", "Storm Pod", "Slate-blue hull with lightning-yellow sparks.",
         {
             "body": (120, 140, 200), "accent": (255, 235, 80), "eye": (255, 255, 255),
-            "glow": (90, 170, 255), "trail": (150, 210, 255), "bullet": (255, 250, 140),
+            "glow": (90, 170, 255), "trail": (150, 210, 255), "bullet": (255, 250, 140), "cheek": (255, 140, 175),
         },
         UnlockRule("bosses", 5),
     ),
@@ -113,7 +113,7 @@ SKINS: tuple[Skin, ...] = (
         "void", "Void Pod", "Violet shell that pulls light into its trail.",
         {
             "body": (110, 70, 160), "accent": (190, 120, 255), "eye": (255, 240, 255),
-            "glow": (170, 90, 255), "trail": (200, 140, 255), "bullet": (230, 190, 255),
+            "glow": (170, 90, 255), "trail": (200, 140, 255), "bullet": (230, 190, 255), "cheek": (255, 140, 175),
         },
         UnlockRule("achievement", "combo_6x"),
     ),
@@ -121,7 +121,7 @@ SKINS: tuple[Skin, ...] = (
         "neon", "Neon Pod", "Hot pink hull with aqua accents.",
         {
             "body": (255, 120, 220), "accent": (120, 255, 240), "eye": (25, 20, 40),
-            "glow": (255, 80, 200), "trail": (120, 255, 240), "bullet": (255, 160, 240),
+            "glow": (255, 80, 200), "trail": (120, 255, 240), "bullet": (255, 160, 240), "cheek": (255, 140, 175),
         },
         UnlockRule("achievement", "elite_slayer"),
     ),
@@ -129,7 +129,7 @@ SKINS: tuple[Skin, ...] = (
         "crimson", "Crimson Pod", "Deep red armour for those who push the score.",
         {
             "body": (235, 70, 80), "accent": (120, 20, 30), "eye": (255, 230, 230),
-            "glow": (255, 60, 70), "trail": (255, 110, 110), "bullet": (255, 150, 150),
+            "glow": (255, 60, 70), "trail": (255, 110, 110), "bullet": (255, 150, 150), "cheek": (255, 140, 175),
         },
         UnlockRule("score", 25000),
     ),
@@ -137,7 +137,7 @@ SKINS: tuple[Skin, ...] = (
         "ghost", "Ghost Pod", "Near-white shell that fades into the starfield.",
         {
             "body": (235, 240, 250), "accent": (170, 180, 200), "eye": (60, 70, 90),
-            "glow": (200, 210, 235), "trail": (220, 225, 240), "bullet": (250, 250, 255),
+            "glow": (200, 210, 235), "trail": (220, 225, 240), "bullet": (250, 250, 255), "cheek": (255, 140, 175),
         },
         UnlockRule("achievement", "no_damage_wave"),
     ),

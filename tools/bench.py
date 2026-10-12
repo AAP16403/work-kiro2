@@ -15,12 +15,13 @@ Timings are wall-clock perf_counter values for the AI update only. Rendering and
 post-update pass are excluded. Warmup frames are discarded. Reported values are medians
 over the repeats, and every repeat uses the same seed so the workload is identical.
 
-The parallel column is the wave-1 parallel.py batch steering path. While parallel.py is
-not in the worktree the column prints [SKIP requires-wave1] instead of a number.
+Two batch columns come from the wave-1 parallel.py path: "inline batch" runs the batch steering with
+no worker processes, and "pooled batch" runs it in a process pool of config.PARALLEL_STEER_WORKERS.
+Both route each frame through parallel.maybe_update_enemies, as PlayingState does. The pool is
+closed after its column is measured.
 """
 
 import argparse
-import importlib.util
 import math
 import os
 import random
@@ -36,11 +37,6 @@ FRAME_DT = 1.0 / 60.0
 WARMUP_FRAMES = 15
 WAVE_NUMBER = 12
 FORCED_MIX = ["chaser", "swarm", "charger", "ranged", "tank", "spitter", "flyer", "engineer", "bomber"]
-
-
-def parallel_available() -> bool:
-    """True when wave 1's parallel.py is importable from this worktree."""
-    return importlib.util.find_spec("parallel") is not None
 
 
 def build_forced_wave(game, count: int, seed: int):
@@ -72,10 +68,16 @@ def build_forced_wave(game, count: int, seed: int):
     return s
 
 
-def run_frames(game, count: int, frames: int, seed: int):
-    """Run `frames` AI frames on a forced wave. Returns (state, per-frame seconds)."""
+def run_frames(game, count: int, frames: int, seed: int, batcher=None):
+    """Run `frames` AI frames on a forced wave. Returns (state, per-frame seconds).
+
+    batcher=None is the serial loop. A batcher (parallel.SteerBatcher) is installed for the run, and each
+    frame goes through parallel.maybe_update_enemies first, in the order PlayingState.update uses: the
+    enemies it returns are skipped by the serial loop.
+    """
     from utils import Vec2
     from enemy import update_enemy
+    import parallel
 
     s = build_forced_wave(game, count, seed)
     # Some behaviours draw from the module-level random; seed it after the build so each run repeats.
@@ -83,16 +85,25 @@ def run_frames(game, count: int, frames: int, seed: int):
     player = game.player
     zero = Vec2(0.0, 0.0)
     frame_times = []
-    for _ in range(frames):
-        s.time += FRAME_DT
-        s.projectiles.clear()
-        s.traps.clear()
-        s.lasers.clear()
-        s.thunders.clear()
-        t0 = time.perf_counter()
-        for e in list(s.enemies):
-            update_enemy(e, player.pos, s, FRAME_DT, game, player_vel=zero)
-        frame_times.append(time.perf_counter() - t0)
+    parallel.set_batcher(batcher)
+    try:
+        for _ in range(frames):
+            s.time += FRAME_DT
+            s.projectiles.clear()
+            s.traps.clear()
+            s.lasers.clear()
+            s.thunders.clear()
+            t0 = time.perf_counter()
+            batched = None
+            if batcher is not None:
+                batched = parallel.maybe_update_enemies(s, game, FRAME_DT, player.pos, zero)
+            for e in list(s.enemies):
+                if batched is not None and id(e) in batched:
+                    continue
+                update_enemy(e, player.pos, s, FRAME_DT, game, player_vel=zero)
+            frame_times.append(time.perf_counter() - t0)
+    finally:
+        parallel.set_batcher(None)
     return s, frame_times
 
 
@@ -109,12 +120,12 @@ def run_snapshot(game, count: int, frames: int, seed: int) -> list:
     return snapshot(s)
 
 
-def measure(game, count: int, frames: int = 300, repeats: int = 5, seed: int = 1) -> dict:
-    """Median frame cost of the serial AI update for a forced wave of `count` enemies."""
+def measure(game, count: int, frames: int = 300, repeats: int = 5, seed: int = 1, batcher=None) -> dict:
+    """Median frame cost of the AI update for a forced wave of `count` enemies (serial, or with `batcher`)."""
     run_medians = []
     run_means = []
     for _ in range(repeats):
-        _, times = run_frames(game, count, WARMUP_FRAMES + frames, seed)
+        _, times = run_frames(game, count, WARMUP_FRAMES + frames, seed, batcher=batcher)
         timed = [t * 1000.0 for t in times[WARMUP_FRAMES:]]
         run_medians.append(statistics.median(timed))
         run_means.append(statistics.fmean(timed))
@@ -140,15 +151,21 @@ def main(argv=None) -> int:
     game = Game()
     game.set_visible(False)
     try:
+        import config
+        import parallel
+
         print(f"forced wave {WAVE_NUMBER}, enemy AI update per frame, {args.frames} timed frames x {args.repeats} repeats")
-        print(f"{'enemies':>8} {'serial median ms':>17} {'serial mean ms':>15}  parallel")
+        print(f"{'enemies':>8} {'serial median ms':>17} {'inline batch ms':>16} {'pooled batch ms':>16}  (median of repeats)")
         for count in args.wave:
-            r = measure(game, count, frames=args.frames, repeats=args.repeats)
-            if parallel_available():
-                par = "[SKIP requires-wave1] parallel path not wired into this bench revision"
-            else:
-                par = "[SKIP requires-wave1] parallel.py not in this worktree"
-            print(f"{r['count']:>8} {r['median_ms']:>17.3f} {r['mean_ms']:>15.3f}  {par}")
+            serial = measure(game, count, frames=args.frames, repeats=args.repeats)
+            inline = measure(game, count, frames=args.frames, repeats=args.repeats,
+                             batcher=parallel.SteerBatcher(workers=0, min_enemies=1))
+            pooled_batcher = parallel.SteerBatcher(workers=int(config.PARALLEL_STEER_WORKERS), min_enemies=1)
+            try:
+                pooled = measure(game, count, frames=args.frames, repeats=args.repeats, batcher=pooled_batcher)
+            finally:
+                pooled_batcher.close()
+            print(f"{serial['count']:>8} {serial['median_ms']:>17.3f} {inline['median_ms']:>16.3f} {pooled['median_ms']:>16.3f}")
     finally:
         game.close()
     return 0

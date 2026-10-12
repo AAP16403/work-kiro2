@@ -303,8 +303,8 @@ def test_title_daily_button_is_clear_of_the_subtitle(g):
             bottoms = [base_y for (base_x, base_y) in menu._button_base_positions]
             sub_bottom = menu.subtitle.y - menu.subtitle.content_height / 2.0
             assert sub_bottom > max(tops) + 4, f"subtitle collides with the top title button at {w}x{h}"
-            assert menu._panel.y < min(bottoms), f"title panel does not wrap the lowest button at {w}x{h}"
-            assert menu._panel.y + menu._panel.height > max(tops), f"title panel does not wrap the top button at {w}x{h}"
+            assert menu._panel[1].y < min(bottoms), f"title panel does not wrap the lowest button at {w}x{h}"
+            assert menu._panel[1].y + menu._panel[1].height > max(tops), f"title panel does not wrap the top button at {w}x{h}"
             assert min(bottoms) > 0, f"lowest title button falls off the screen at {w}x{h}"
     finally:
         menu.resize(g.width, g.height)

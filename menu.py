@@ -411,18 +411,7 @@ class Menu:
         panel_h = total_h + pad_y * 2
         panel_x = cx - panel_w // 2
         panel_y = stack_top - total_h - pad_y
-        self._panel_border.x = panel_x - 3
-        self._panel_border.y = panel_y - 3
-        self._panel_border.width = panel_w + 6
-        self._panel_border.height = panel_h + 6
-        self._panel.x = panel_x
-        self._panel.y = panel_y
-        self._panel.width = panel_w
-        self._panel.height = panel_h
-        self._panel_shine.x = panel_x + 4
-        self._panel_shine.y = panel_y + panel_h - max(8, int(22 * scale))
-        self._panel_shine.width = panel_w - 8
-        self._panel_shine.height = max(6, int(16 * scale))
+        ui_theme.place_panel(self._panel, panel_x, panel_y, panel_w, panel_h, border_pad=3)
 
         self.title.x = cx
         _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(22, int(38 * scale)))
@@ -1297,7 +1286,7 @@ class GuideMenu:
         {"key": "ultra_use", "name": "Ultra Use", "icon": "U!", "what": "RMB or Q consumes one Ultra charge.", "deal": "Use Ultra during spike phases or add floods.", "lore": "Ultra is burst control, not passive DPS."},
         {"key": "arsenal", "name": "Arsenal & Crits", "icon": "WPN", "what": "Weapons feature Crits (10% base, 2x dmg) and Piercing.", "deal": "Hyper Railgun pierces lines; Flak Battery cluster-bursts.", "lore": "Mil-spec kinetic accelerators retrofitted with variable-yield munitions."},
         {"key": "arena", "name": "Arena Control", "icon": "AR", "what": "Fight near edge lanes, avoid center traps.", "deal": "Rotate clockwise/counter-clockwise with intent.", "lore": "Bad pathing is deadlier than low HP."},
-        {"key": "elites", "name": "Elites", "icon": "EL", "what": "Wave 3+ elites: 2.2x HP, one affix each.", "deal": "Volatile: 45 blast in 130 px, hits you too. Shielded: break shield first.", "lore": "Swift moves 30% faster. Affixes are rogue overclocks on standard frames."},
+        {"key": "elites", "name": "Elites", "icon": "EL", "what": "Wave 3+ elites: 2.2x HP, one affix each, 2.5x score on a kill.", "deal": "Volatile: 45 blast in 130 px, hits you too. Shielded: break shield first. Splitter: two half-HP enemies on death. Reflector: sends one shot back every 3 s.", "lore": "Swift moves 30% faster. Affixes are rogue overclocks on standard frames."},
         {"key": "boss_schedule", "name": "Boss Schedule", "icon": "BS", "what": "A boss arrives every 5th wave (5, 10, 15...).", "deal": "Save dash and ultra for it; clearing the wave opens card picks.", "lore": "Boss kills always drop a weapon plus a heal, shield or laser."},
         {"key": "loot", "name": "Loot Priority", "icon": "LT", "what": "Powerups and weapon drops shape run tempo.", "deal": "Early damage/fire-rate usually beats greed picks.", "lore": "Boss waves guarantee high-value drops."},
         {"key": "rpg", "name": "Boss Rewards", "icon": "CRD", "what": "Boss kills open temp + permanent card picks.", "deal": "Pick consistency first, then high-risk scaling.", "lore": "Card flow is your long-run progression core."},

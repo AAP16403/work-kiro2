@@ -201,9 +201,9 @@ def test_weapon_chip_swatch_uses_projectile_art_when_present(g):
         return
     import projectile_art
     from hud_widgets import weapon_swatch
-    style = projectile_art.STYLES.get(WEAPONS["basic"].name)
+    style = projectile_art.WEAPON_STYLES.get(WEAPONS["basic"].name)
     assert style is not None, "projectile_art must define a style for Basic Gun"
-    assert weapon_swatch(WEAPONS["basic"]) == tuple(style.color)[:3]
+    assert weapon_swatch(WEAPONS["basic"]) == tuple(style.head)[:3]
     print("[PASS] test_weapon_chip_swatch_uses_projectile_art_when_present passed (swatch == projectile_art colour)")
 
 

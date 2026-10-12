@@ -58,19 +58,14 @@ def _reduce_motion() -> bool:
 def current_skin_name(progress=None) -> str:
     """Name of the selected skin, from `progress` or from progress.json when none is given.
 
-    Falls back to DEFAULT_SKIN_NAME while the progress or skins modules are missing, and never
-    raises, so a bad save file cannot stop a run from starting.
+    progress.load() never raises: a missing or corrupt save file gives the default record, so the
+    selected skin is the default and a bad save cannot stop a run from starting.
     """
-    try:
-        import skins
-        import progress as progress_store
-    except ImportError:
-        return DEFAULT_SKIN_NAME
-    try:
-        data = progress if progress is not None else progress_store.load_progress()
-        return str(skins.selected(data).name) or DEFAULT_SKIN_NAME
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return DEFAULT_SKIN_NAME
+    import progress as progress_store  # wave-1 store
+    import skins
+
+    data = progress if progress is not None else progress_store.load()
+    return str(skins.selected(data).name) or DEFAULT_SKIN_NAME
 
 
 def achievement_name(achievement_id) -> str:

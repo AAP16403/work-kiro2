@@ -300,8 +300,11 @@ class ProjectileVisual:
     ``objs`` keeps that order, so the body disc is always ``objs[-3]``.
     """
 
-    def __init__(self, batch, group, proj):
+    def __init__(self, batch, group, proj, bullet_tint=None):
         self.style = style_for_projectile(proj)
+        if bullet_tint is not None and str(getattr(proj, "owner", "player")) == "player":
+            # A skin recolours the player's shot heads; trails keep the weapon colour.
+            self.style = replace(self.style, head=tuple(bullet_tint))
         st = self.style
         build, self._place = _TRAILS[st.trail]
         self._trail = build(batch, group, st)

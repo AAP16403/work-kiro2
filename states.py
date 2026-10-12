@@ -20,7 +20,7 @@ from utils import (
 )
 from physics import resolve_circle_obstacles
 from level import spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death, get_difficulty_mods
-from enemy import update_enemy
+from enemy import Enemy, update_enemy
 from boss_rage import celebrate_boss_death, FANFARE_MIN_GAP
 from parallel import maybe_update_enemies
 from powerup import apply_powerup
@@ -383,6 +383,18 @@ class PlayingState(State):
             if dist(game.player.pos, e.pos) <= v_r:
                 game._damage_player(20)
 
+        # Elite splitter affix: two children with half its max HP, on opposite sides. Children have no affix,
+        # so a child never splits again.
+        if getattr(e, "elite_affix", None) == "splitter":
+            child_hp = max(1, int(e.max_hp) // 2)
+            child_cd = max(0.5, float(getattr(e, "attack_cd", 1.0)))
+            for side in (-1.0, 1.0):
+                child = Enemy(pos=Vec2(e.pos.x + side * 26.0, e.pos.y), hp=child_hp, speed=e.speed,
+                              behavior=e.behavior, max_hp=child_hp)
+                child.attack_cd = child_cd
+                child.ai["attack_mult"] = float(e.ai.get("attack_mult", 1.0))
+                s.enemies.append(child)
+
         spawn_loot_on_enemy_death(s, behavior_name, e.pos, current_weapon=getattr(game.player, "current_weapon", None))
         if getattr(game, 'score', None):
             game.score.on_enemy_kill(behavior_name, multiplier=(float(config.ELITE_SCORE_MULT) if is_elite else 1.0))
@@ -689,6 +701,20 @@ class PlayingState(State):
                     if self._segment_hits_circle(psd2, e.pos, p_prev, p.pos, hit_r2):
                         hit_entities.add(id(e))
                         is_crit = getattr(p, "is_crit", False)
+                        if getattr(e, "elite_affix", None) == "reflector" and s.time >= float(e.ai.get("reflect_ready_at", 0.0)):
+                            # Reflector affix: the first player shot in each cooldown window is sent back at the player
+                            # instead of hurting the reflector. A flash marks the reflection.
+                            e.ai["reflect_ready_at"] = s.time + float(config.ELITE_REFLECT_COOLDOWN_S)
+                            to_player = game.player.pos - e.pos
+                            aim_len = to_player.length() or 1.0
+                            s.projectiles.append(Projectile(
+                                Vec2(e.pos.x, e.pos.y), to_player / aim_len * float(config.ELITE_REFLECT_SPEED),
+                                int(p.damage), ttl=2.0, owner="enemy", projectile_type="bullet",
+                            ))
+                            if game.particle_system:
+                                game.particle_system.add_shockwave(e.pos, (255, 220, 120), max_radius=34.0, ttl=0.25)
+                            self._remove_projectile(game, s, p, detonating_enemy=e)
+                            break
                         PlayingState._damage_enemy(game, s, e, p.damage, is_crit=is_crit)
                         hit_shake += projectile_hit_impulse(p.damage, is_crit)
 

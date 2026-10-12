@@ -103,6 +103,8 @@ CRIT_SPARK_COLOR = (255, 225, 75)
 ELITE_SPAWN_BASE_WAVE = 3
 ELITE_SPAWN_CHANCE = 0.14
 ELITE_HP_MULT = 2.2
+ELITE_REFLECT_COOLDOWN_S = 3.0   # Reflector affix: one player shot is sent back at the player per this many seconds
+ELITE_REFLECT_SPEED = 260.0      # speed of a reflected shot, world units per second
 ELITE_SCORE_MULT = 2.5
 ELITE_AURA_COLOR = (255, 215, 60)
 
@@ -177,5 +179,7 @@ EVENT_NEBULA_SHIELD = 24            # shield an enemy gains on entering the clou
 # spawned worker costs seconds of start-up on Windows (warmed on the first playing frame).
 PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a process pool
 PARALLEL_STEER_MIN_ENEMIES = 32     # live enemy count at which the batch path is used
+# Named threshold for the multicore wiring tests and bench: the batch path runs at or above this live enemy count.
+PARALLEL_MIN_ENEMIES = PARALLEL_STEER_MIN_ENEMIES
 PARALLEL_STEER_WORKERS = 3          # process-pool size when enabled
 PARALLEL_LOADER_WORKERS = 4         # threads for I/O-bound asset reads

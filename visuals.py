@@ -84,6 +84,7 @@ class Visuals:
         self._drone_handle: RenderHandle | None = None
         self._player_art: PlayerArt | None = None  # set when config.USE_PLAYER_ART built the character
         self.player_palette = DEFAULT_PALETTE      # skins replace this dict to recolour the character
+        self.player_bullet_tint = None             # a non-default skin's bullet colour; None keeps weapon colours
         self._scene_stars: list[tuple[shapes.Circle, float, float, float]] = []
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
@@ -894,7 +895,7 @@ class Visuals:
             return
         # Every shape is created in the unified projectile group, so projectiles never join
         # the depth groups and never pay a batch migration after creation.
-        self._proj_handles[id(proj)] = ProjectileVisual(self.batch, self._projectile_group, proj)
+        self._proj_handles[id(proj)] = ProjectileVisual(self.batch, self._projectile_group, proj, bullet_tint=self.player_bullet_tint)
 
     def sync_projectile(self, proj, shake: Vec2):
         """Update projectile visual position and animation."""

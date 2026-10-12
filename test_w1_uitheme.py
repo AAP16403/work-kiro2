@@ -188,7 +188,8 @@ def test_shimmer_text_applies_per_letter_colour():
 
 def test_title_buttons_keep_text_and_actions():
     menu = _new_menu()
-    expected = [("Start Game", "start_game"), ("Guide", "guide"), ("Settings", "settings"), ("Quit", "quit")]
+    # Wave 2 adds Daily Run and Hangar to the title, so the stack has six buttons in this order.
+    expected = [("Start Game", "start_game"), ("Daily Run", "daily"), ("Guide", "guide"), ("Settings", "settings"), ("Hangar", "hangar"), ("Quit", "quit")]
     assert [b.text for b in menu.buttons] == [t for t, _ in expected], "button labels must not change"
     for btn, (_, action) in zip(menu.buttons, expected):
         cx = btn.x + btn.width / 2.0
@@ -197,7 +198,7 @@ def test_title_buttons_keep_text_and_actions():
         assert got == action, f"{btn.text} returned {got!r}, expected {action!r}"
     assert menu.on_mouse_press(1.0, 1.0, pyglet.window.mouse.LEFT) is None, "a miss returns None"
     assert menu.on_mouse_press(menu.buttons[0].x, menu.buttons[0].y, pyglet.window.mouse.RIGHT) is None, "only LMB acts"
-    print("[PASS] test_title_buttons_keep_text_and_actions passed (4 labels and actions unchanged, misses ignored)")
+    print("[PASS] test_title_buttons_keep_text_and_actions passed (6 labels and actions in order, misses ignored)")
 
 
 def test_reduced_motion_freezes_title_animation():

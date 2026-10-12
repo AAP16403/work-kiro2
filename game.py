@@ -12,6 +12,9 @@ pyglet.options["shadow_window"] = False
 
 import config
 import daily
+import mutators
+import parallel
+from player_art import DEFAULT_PALETTE
 from config import SCREEN_W, SCREEN_H, FPS, MAP_CIRCLE, ENEMY_COLORS
 
 from map import Room
@@ -52,6 +55,7 @@ from advanced_fx import AdvancedFX
 from score import ScoreTracker
 from achievements import RunStats
 import progress as meta_progress
+import skins
 from hud import HUD, current_skin_name
 from states import (
     MenuState,
@@ -72,6 +76,12 @@ from states import (
 # ============================
 # Main Game Class
 # ============================
+def _mutator_mods_of(game) -> mutators.Mods:
+    """The daily-mutator multipliers of a game's current run. Identity outside a daily run or before a run starts."""
+    state = getattr(game, "state", None)
+    return state.mutator_mods if state is not None else mutators.Mods()
+
+
 class Game(pyglet.window.Window):
     """Main game window and logic."""
 
@@ -148,6 +158,8 @@ class Game(pyglet.window.Window):
         # mutator ids that run is built with. A daily run has exactly one mutator, chosen by its date.
         self.daily_date: str | None = None
         self.run_mutator_ids: tuple[str, ...] = ()
+        # Achievements earned by the last finished run. The next run's HUD shows them as toasts.
+        self._pending_achievement_ids: list[str] = []
         # progress.json location for the daily record; None means the store's default. Tests point it at a temp file.
         self.progress_path: str | None = None
         self.balance = BalanceLogic(fps=float(FPS))
@@ -246,6 +258,7 @@ class Game(pyglet.window.Window):
         self.state.init_rng(run_seed)
         if run_seed is not None:
             random.seed(run_seed)
+        self.state.mutator_mods = mutators.combined(self.run_mutator_ids)
 
         # Base per-wave head count lives in logic.py's difficulty table (the wave ramp is applied in level.spawn_wave).
         self.state.max_enemies = int(get_difficulty_mods(difficulty).get("max_enemies", 12))
@@ -283,7 +296,8 @@ class Game(pyglet.window.Window):
 
         self.visuals = Visuals(self.batch, self.groups)
         self.visuals.make_player()
-        
+        self._apply_run_skin()
+
         self.particle_system = ParticleSystem(self.batch)
         self.popups = DamagePopups()
         self._hitstop = 0.0
@@ -292,6 +306,9 @@ class Game(pyglet.window.Window):
         self.run_stats = RunStats()
         self.hud = HUD(self.width, self.height)
         self.hud.set_skin_name(current_skin_name())
+        if self._pending_achievement_ids:
+            self.hud.push_achievement_toasts(self._pending_achievement_ids)
+            self._pending_achievement_ids = []
 
     def _start_daily_run(self, today=None):
         """Start the daily run for the local date (or for ``today`` when a test passes one).
@@ -304,21 +321,38 @@ class Game(pyglet.window.Window):
         self.run_mutator_ids = (daily.daily_mutator(date_iso),)
         self._init_game()
 
+    def _apply_run_skin(self) -> None:
+        """Dress this run's player in the skin chosen in the Hangar, read once per run.
+
+        The default skin keeps wave 1's exact look: player_art.DEFAULT_PALETTE and weapon-coloured shots.
+        Any other skin recolours the character and the player's shot heads.
+        """
+        skin = skins.selected(meta_progress.load())
+        if skin.id == skins.DEFAULT_SKIN_ID:
+            self.visuals.player_palette = dict(DEFAULT_PALETTE)
+            self.visuals.player_bullet_tint = None
+        else:
+            self.visuals.player_palette = dict(skin.palette)
+            self.visuals.player_bullet_tint = tuple(skin.palette["bullet"])
+
     def _effective_player_damage(self) -> int:
         if not self.player:
             return 0
         # Half-up rounding (not round(), which is banker's rounding at .5) so the 1.28 Overdrive multiplier lands predictably.
-        return max(1, math.floor(float(self.player.damage) * float(getattr(self, "_temp_damage_mult", 1.0)) + 0.5))
+        return max(1, math.floor(
+            float(self.player.damage) * float(getattr(self, "_temp_damage_mult", 1.0)) * _mutator_mods_of(self).player_damage + 0.5))
 
     def _effective_player_speed(self) -> float:
         if not self.player:
             return 0.0
-        return float(self.player.speed) * float(getattr(self, "_temp_speed_mult", 1.0))
+        return float(self.player.speed) * float(getattr(self, "_temp_speed_mult", 1.0)) * _mutator_mods_of(self).player_speed
 
     def _effective_player_fire_rate(self) -> float:
         if not self.player:
             return 0.28
-        return max(0.08, float(self.player.fire_rate) * float(getattr(self, "_temp_fire_rate_mult", 1.0)))
+        # fire_rate is the interval between shots, so a faster mutator divides it.
+        interval = float(self.player.fire_rate) * float(getattr(self, "_temp_fire_rate_mult", 1.0))
+        return max(0.08, interval / _mutator_mods_of(self).player_fire_rate)
 
     def _effective_crit_chance(self) -> float:
         if not self.player:
@@ -783,6 +817,7 @@ class Game(pyglet.window.Window):
             best_combo=float(score_obj.best_combo) if score_obj else None,
         )
         self.last_run_summary = meta_progress.end_run(run)
+        self._pending_achievement_ids.extend(self.last_run_summary.get("new_achievements", []))
         return self.last_run_summary
 
     def on_mouse_motion(self, x, y, dx, dy):
@@ -807,6 +842,7 @@ class Game(pyglet.window.Window):
     def on_close(self):
         """Handle window close event."""
         self._finish_meta_run()  # a run still in progress is saved rather than lost
+        parallel.close_batcher()  # the steering pool's worker processes stop with the window
         self._schedule_app_close()
         return True
 

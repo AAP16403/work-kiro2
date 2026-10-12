@@ -80,6 +80,10 @@ POWERUP_COLORS = {
     "weapon": (230, 230, 255),
     "ultra": (255, 240, 180),
     "boost": (255, 145, 45),
+    "ricochet": (110, 245, 210),
+    "homing": (255, 105, 185),
+    "time_slow": (200, 200, 255),
+    "magnet": (255, 190, 60),
 }
 
 # Boost / Overdrive mechanic (LSHIFT key)
@@ -90,6 +94,17 @@ BOOST_RECHARGE_RATE = 22.0
 BOOST_DAMAGE_REDUCTION = 0.35
 BOOST_RAM_DAMAGE = 28
 BOOST_COLOR = (255, 145, 45)
+BOOST_OVERDRIVE_SECONDS = 6.0  # Overdrive powerup: infinite boost and shield top-up duration
+
+# Timed powerups: ricochet, homing, time slow and magnet. The Guide reads these values.
+RICOCHET_SECONDS = 8.0       # Player bullets bounce off the arena edge for this long
+RICOCHET_BOUNCES = 1         # Bounces per bullet
+HOMING_SECONDS = 6.0         # Player bullets steer toward the nearest live enemy for this long
+HOMING_RANGE = 260.0         # px: homing search radius around each bullet
+TIME_SLOW_SECONDS = 4.0      # Enemies and enemy projectiles run slowed for this long
+TIME_SLOW_FACTOR = 0.5       # Their speed multiplier while slowed; the player keeps full speed
+MAGNET_SECONDS = 10.0        # Pickup magnet stays boosted for this long
+MAGNET_RADIUS_MULT = 3.0     # Pickup magnet radius multiplier while boosted
 
 # Critical hits
 CRIT_CHANCE_BASE = 0.10
@@ -102,6 +117,18 @@ ELITE_SPAWN_CHANCE = 0.14
 ELITE_HP_MULT = 2.2
 ELITE_SCORE_MULT = 2.5
 ELITE_AURA_COLOR = (255, 215, 60)
+ELITE_SWIFT_SPEED_MULT = 1.30        # Swift affix: enemy speed multiplier
+ELITE_VOLATILE_BLAST_RADIUS = 130.0  # Volatile affix: death blast radius in px
+ELITE_VOLATILE_BLAST_DAMAGE = 45     # Volatile affix: damage to enemies inside the blast
+ELITE_SPLIT_COUNT = 2                # Splitter affix: copies left behind on death
+ELITE_SPLIT_HP_FRAC = 0.5            # Splitter affix: each copy's max HP as a fraction of the elite's max HP
+ELITE_REFLECT_COOLDOWN = 3.0         # Reflector affix: seconds between reflected shots
+
+# Boss waves. Boss rage starts once per boss, at or below BOSS_RAGE_HP_FRAC of its max HP.
+BOSS_WAVE_EVERY = 5                  # A boss arrives every Nth wave
+BOSS_RAGE_HP_FRAC = 0.35
+BOSS_RAGE_COOLDOWN_MULT = 0.75       # Attack cooldowns are multiplied by this during rage (25 percent shorter)
+BOSS_RAGE_EXTRA_PROJECTILES = 1      # Extra projectiles or pulses per volley during rage
 
 # Particle & Rendering budget (prevents frame drops under heavy load)
 PARTICLE_SOFT_CAP = 450

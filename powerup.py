@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from config import PLAYER_HP, SHIELD_MAX
+from config import BOOST_OVERDRIVE_SECONDS, PLAYER_HP, SHIELD_MAX
 from utils import Vec2
 from weapons import WEAPONS, is_weapon_upgrade
 
@@ -53,5 +53,5 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
     elif p.kind == "boost":
         max_energy = float(getattr(player, "boost_max_energy", 100.0))
         player.boost_energy = max_energy
-        player.infinite_boost_until = max(getattr(player, "infinite_boost_until", 0.0), now + 6.0)
+        player.infinite_boost_until = max(getattr(player, "infinite_boost_until", 0.0), now + BOOST_OVERDRIVE_SECONDS)
         player.shield = min(SHIELD_MAX, int(getattr(player, "shield", 0)) + 20)

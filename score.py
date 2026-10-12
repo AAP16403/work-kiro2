@@ -4,6 +4,8 @@ import json
 import os
 import time as _time
 
+import config
+
 # ---------------------------------------------------------------------------
 # Point values per enemy type (base, before combo multiplier)
 # ---------------------------------------------------------------------------
@@ -75,7 +77,7 @@ class ScoreTracker:
 
     def on_wave_clear(self, wave: int) -> int:
         """Award wave-clear bonus.  Returns bonus points."""
-        is_boss = wave % 5 == 0
+        is_boss = wave % config.BOSS_WAVE_EVERY == 0
         bonus = WAVE_CLEAR_BASE + wave * WAVE_CLEAR_PER_WAVE
         if is_boss:
             bonus += BOSS_WAVE_BONUS

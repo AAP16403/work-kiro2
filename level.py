@@ -63,8 +63,8 @@ def spawn_wave(state: GameState, center: Vec2):
     """Spawn a new wave of enemies with varied difficulty."""
     state.wave_active = True
 
-    # Boss wave every 5 waves.
-    if state.wave % 5 == 0:
+    # Boss wave every BOSS_WAVE_EVERY waves.
+    if state.wave % config.BOSS_WAVE_EVERY == 0:
         behavior_name = get_boss_for_wave(state.wave)
         hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
         pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type, rng=state.rng)
@@ -101,7 +101,7 @@ def spawn_wave(state: GameState, center: Vec2):
                     affix = state.rng.choice(["volatile", "swift", "shielded"])
                     hp = int(round(hp * float(getattr(config, "ELITE_HP_MULT", 2.2))))
                     if affix == "swift":
-                        speed *= 1.30
+                        speed *= float(config.ELITE_SWIFT_SPEED_MULT)
                     elif affix == "shielded":
                         shield_val = int(round(hp * 0.40))
 

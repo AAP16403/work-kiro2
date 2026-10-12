@@ -326,8 +326,8 @@ class PlayingState(State):
 
         # Elite volatile affix death explosion
         if getattr(e, "elite_affix", None) == "volatile":
-            v_r = 130.0
-            v_dmg = 45
+            v_r = float(config.ELITE_VOLATILE_BLAST_RADIUS)
+            v_dmg = int(config.ELITE_VOLATILE_BLAST_DAMAGE)
             if game.particle_system:
                 game.particle_system.add_death_explosion(e.pos, (255, 100, 30), "bomber")
             add_shake(s, 14.0)
@@ -707,7 +707,7 @@ class PlayingState(State):
             s.wave += 1
             game._advance_temp_rewards()
             game.audio.play("wave_clear", volume=0.8)
-            if cleared_wave % 5 != 0:
+            if cleared_wave % config.BOSS_WAVE_EVERY != 0:
                 game.hud.show_banner(f"WAVE {cleared_wave:02d} CLEARED", "Next wave incoming", color=(120, 240, 170), duration=2.0)
             new_segment = (s.wave - 1) // 5
             if config.ENABLE_OBSTACLES and new_segment != getattr(s, "layout_segment", 0):
@@ -718,7 +718,7 @@ class PlayingState(State):
                 game.player.current_weapon = upgrade
             maybe_spawn_powerup(s, Vec2(0.0, 0.0))
 
-            if cleared_wave % 5 == 0:
+            if cleared_wave % config.BOSS_WAVE_EVERY == 0:
                 game._roll_boss_rewards()
                 game.fsm.set_state(GameStateName.BOSS_REWARD)
             if getattr(game, 'score', None):

@@ -1,26 +1,30 @@
 ﻿# PyInstaller spec for the pyglet game.
 # Build: .\.venv\Scripts\python.exe -m PyInstaller .\kiro2_game.spec
 
-import glob
+import os
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules
+
+# asset_manifest.py sits next to this spec and imports only the standard library.
+sys.path.insert(0, os.path.abspath(SPECPATH))
+import asset_manifest  # noqa: E402
 
 block_cipher = None
 
 hiddenimports = []
 hiddenimports += collect_submodules("pyglet")
 
+# Bundle every file in assets/fonts and assets/audio. verify_bundle() stops the build when the
+# code opens an asset that is missing from the tree or is not in this list.
+datas = asset_manifest.bundle_datas(SPECPATH)
+asset_manifest.verify_bundle(datas, SPECPATH)
+
 a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
-    datas=[
-        ("assets/fonts/Orbitron-Variable.ttf", "assets/fonts"),
-        ("assets/fonts/Rajdhani-Regular.ttf", "assets/fonts"),
-        ("assets/fonts/Rajdhani-SemiBold.ttf", "assets/fonts"),
-        ("assets/fonts/OFL-Orbitron.txt", "assets/fonts"),
-        ("assets/fonts/OFL-Rajdhani.txt", "assets/fonts"),
-    ] + [(path, "assets/audio") for path in sorted(glob.glob("assets/audio/*.wav"))],
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

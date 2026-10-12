@@ -4,8 +4,8 @@ Public API:
 
     SKINS                          tuple of Skin, in menu order (the default comes first)
     DEFAULT_SKIN_ID                "classic", always unlocked
-    PALETTE_KEYS                   ("body", "accent", "eye", "glow", "trail", "bullet"), the keys
-                                   of player_art.DEFAULT_PALETTE; every skin palette has exactly these
+    PALETTE_KEYS                   ("body", "accent", "eye", "glow", "trail", "bullet", "cheek"), the
+                                   keys of player_art.DEFAULT_PALETTE; every skin palette has exactly these
     get(skin_id) -> Skin | None
     unlock_rule_met(skin, progress) -> bool
         True when the skin's rule holds for this progress dict right now.
@@ -34,7 +34,7 @@ import achievements
 
 
 DEFAULT_SKIN_ID = "classic"
-PALETTE_KEYS = ("body", "accent", "eye", "glow", "trail", "bullet")
+PALETTE_KEYS = ("body", "accent", "eye", "glow", "trail", "bullet", "cheek")
 
 
 @dataclass(frozen=True)
@@ -66,6 +66,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (132, 224, 255), "accent": (10, 200, 255), "eye": (30, 60, 90),
             "glow": (60, 140, 220), "trail": (100, 220, 255), "bullet": (150, 235, 255),
+            "cheek": (255, 140, 175),
         },
         UnlockRule("default"),
     ),
@@ -74,6 +75,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (255, 170, 110), "accent": (255, 110, 60), "eye": (255, 245, 220),
             "glow": (255, 120, 50), "trail": (255, 160, 80), "bullet": (255, 190, 110),
+            "cheek": (255, 150, 120),
         },
         UnlockRule("score", 5000),
     ),
@@ -82,6 +84,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (210, 240, 255), "accent": (150, 220, 255), "eye": (40, 80, 140),
             "glow": (170, 230, 255), "trail": (200, 240, 255), "bullet": (220, 250, 255),
+            "cheek": (255, 190, 215),
         },
         UnlockRule("wave", 10),
     ),
@@ -90,6 +93,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (150, 240, 160), "accent": (80, 200, 120), "eye": (30, 70, 40),
             "glow": (120, 255, 150), "trail": (140, 255, 170), "bullet": (190, 255, 200),
+            "cheek": (255, 170, 190),
         },
         UnlockRule("kills", 250),
     ),
@@ -98,6 +102,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (255, 235, 150), "accent": (255, 200, 60), "eye": (90, 50, 10),
             "glow": (255, 220, 90), "trail": (255, 230, 120), "bullet": (255, 245, 180),
+            "cheek": (255, 170, 110),
         },
         UnlockRule("bosses", 2),
     ),
@@ -106,6 +111,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (120, 140, 200), "accent": (255, 235, 80), "eye": (255, 255, 255),
             "glow": (90, 170, 255), "trail": (150, 210, 255), "bullet": (255, 250, 140),
+            "cheek": (255, 150, 200),
         },
         UnlockRule("bosses", 5),
     ),
@@ -114,6 +120,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (110, 70, 160), "accent": (190, 120, 255), "eye": (255, 240, 255),
             "glow": (170, 90, 255), "trail": (200, 140, 255), "bullet": (230, 190, 255),
+            "cheek": (255, 140, 210),
         },
         UnlockRule("achievement", "combo_6x"),
     ),
@@ -122,6 +129,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (255, 120, 220), "accent": (120, 255, 240), "eye": (25, 20, 40),
             "glow": (255, 80, 200), "trail": (120, 255, 240), "bullet": (255, 160, 240),
+            "cheek": (255, 200, 240),
         },
         UnlockRule("achievement", "elite_slayer"),
     ),
@@ -130,6 +138,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (235, 70, 80), "accent": (120, 20, 30), "eye": (255, 230, 230),
             "glow": (255, 60, 70), "trail": (255, 110, 110), "bullet": (255, 150, 150),
+            "cheek": (255, 150, 160),
         },
         UnlockRule("score", 25000),
     ),
@@ -138,6 +147,7 @@ SKINS: tuple[Skin, ...] = (
         {
             "body": (235, 240, 250), "accent": (170, 180, 200), "eye": (60, 70, 90),
             "glow": (200, 210, 235), "trail": (220, 225, 240), "bullet": (250, 250, 255),
+            "cheek": (250, 180, 200),
         },
         UnlockRule("achievement", "no_damage_wave"),
     ),

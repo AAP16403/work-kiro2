@@ -4,6 +4,7 @@ import math
 import random
 
 from pyglet import shapes
+from pyglet.graphics import Group
 
 import config
 from config import FLOOR_MAIN, FLOOR_EDGE, FLOOR_GRID
@@ -33,8 +34,10 @@ class Room:
         self._intensity_overlay = None
 
         # Gradient backdrop via stacked translucent rectangles.
-        self._bg_a = shapes.Rectangle(0, 0, width, height, color=config.BG_TOP, batch=batch)
-        self._bg_b = shapes.Rectangle(0, 0, width, height, color=config.BG_BOTTOM, batch=batch)
+        # The backdrop gets its own draw-order group so the starfield can sit above it and below the floor.
+        bg_group = Group(order=int(config.ROOM_BG_LAYER_ORDER))
+        self._bg_a = shapes.Rectangle(0, 0, width, height, color=config.BG_TOP, batch=batch, group=bg_group)
+        self._bg_b = shapes.Rectangle(0, 0, width, height, color=config.BG_BOTTOM, batch=batch, group=bg_group)
         self._bg_b.opacity = 120
 
         self._ambient: list[tuple[shapes.Circle, float, float, float]] = []
@@ -531,10 +534,13 @@ class Room:
                 base = 110 if getattr(ln, "thickness", 1) >= 1 else 34
                 ln.opacity = int(base * (0.72 + 0.28 * pulse))
 
-        # Boundary glow.
-        for ln, phase in self._boundary:
+        # Boundary glow. With ENABLE_RIM_PULSE, combat intensity adds a pulse that travels around the rim.
+        rim = self._combat_intensity if config.ENABLE_RIM_PULSE else 0.0
+        rim_step = math.tau * 2.0 / max(1, len(self._boundary))
+        for i, (ln, phase) in enumerate(self._boundary):
             if hasattr(ln, "opacity"):
-                ln.opacity = int(110 + 55 * (0.5 + 0.5 * math.sin(self._t * 1.2 + phase)))
+                wave = 0.5 + 0.5 * math.sin(self._t * 3.0 - i * rim_step)
+                ln.opacity = min(255, int(110 + 55 * (0.5 + 0.5 * math.sin(self._t * 1.2 + phase)) + 70.0 * rim * wave))
 
         # Circuit pulses.
         for ln, base, phase in self._pulse_lines:

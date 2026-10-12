@@ -9,12 +9,31 @@ import pyglet
 from pyglet import shapes
 from pyglet.graphics import Group
 
+import config
+import utils
 from config import ENEMY_COLORS, SCREEN_H
 from enemy import brute_charge_lane
+from glow import DashAfterimage, GlowPool, projectile_glow
+from starfield import Starfield
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
 DEPTH_BUCKET = 16
+
+
+# Indexes of the eye shapes inside each enemy handle (see Visuals.ensure_enemy). The eye glows read them.
+_EYE_SLOTS = {
+    "boss_laser": (5, 6),  # eye, iris
+    "bomber": (), "engineer": (), "egg_sac": (), "spitter": (), "swarm": (),
+    "tank": (4,), "ranged": (4,), "charger": (4,), "flyer": (5,), "chaser": (6, 7),
+}
+_GENERIC_EYE_SLOTS = (3, 4)  # the default body: eye1, eye2
+
+
+def _eye_slots(behavior: str) -> tuple:
+    if behavior.startswith("boss_"):
+        return _EYE_SLOTS.get(behavior, ())
+    return _EYE_SLOTS.get(behavior, _GENERIC_EYE_SLOTS)
 
 
 class GroupCache:
@@ -78,6 +97,10 @@ class Visuals:
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
         self._init_scene_fx()
+        # Graphics polish (glow.py, starfield.py). Pool and texture stay cheap when their switches are off.
+        self._starfield = Starfield(batch, order=config.STARFIELD_LAYER_ORDER) if config.ENABLE_PARALLAX_STARS else None
+        self._glow_pool = GlowPool(batch, cap=config.GLOW_POOL_CAP, order=config.GLOW_LAYER_ORDER)
+        self._afterimage = DashAfterimage()
 
     def _init_scene_fx(self) -> None:
         self._scene_glows = [
@@ -167,6 +190,72 @@ class Visuals:
         bot.opacity = v_op
         left.opacity = int(v_op * 0.8)
         right.opacity = int(v_op * 0.8)
+
+    def sync_fx(self, state, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None) -> None:
+        """Per-frame graphics polish, called after the other sync_* calls and before the batch draws:
+        the parallax starfield (placed by the player's position and the window size) and the glows."""
+        if self._starfield is not None:
+            camera = player.pos if player is not None else None
+            self._starfield.sync(t, float(utils.VIEW_W), float(utils.VIEW_H), camera=camera)
+        self.sync_glow(state, player, shake, t=t, aim_dir=aim_dir)
+
+    def sync_glow(self, state, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None) -> None:
+        """Emit this frame's additive glows: projectile heads, pickups, enemy eyes, the player thruster
+        and the dash afterimage. Call it after the other sync_* calls so the glows read final positions.
+        ENABLE_GLOW and ENABLE_DASH_AFTERIMAGE switch the two groups off separately."""
+        pool = self._glow_pool
+        pool.begin_frame()
+        if config.ENABLE_GLOW:
+            for p in getattr(state, "projectiles", []):
+                if id(p) not in self._proj_handles:
+                    continue
+                color, radius, opacity = projectile_glow(p)
+                sx, sy = to_iso(p.pos, shake)
+                pool.emit(("p", id(p)), sx, sy, radius, color, opacity)
+
+            for pu in getattr(state, "powerups", []):
+                h = self._power_handles.get(id(pu))
+                if h is None:
+                    continue
+                halo = h.objs[0]  # outer ring, already in the pickup's colour
+                sx, sy = to_iso(pu.pos, shake)
+                pulse = 0.75 + 0.25 * math.sin(t * 4.0 + pu.pos.x * 0.03)
+                pool.emit(("pu", id(pu)), sx, sy, 26.0, halo.color, int(120 * pulse))
+
+            # Thruster and dash come before the eyes: when the pool is full, the eye glows are the ones dropped.
+            if player is not None:
+                sx, sy = to_iso(player.pos, shake)
+                bob = math.sin(t * 6.0) * 1.5
+                aim = aim_dir if (aim_dir is not None and aim_dir.length() > 1e-6) else Vec2(1.0, 0.0)
+                boosting = bool(getattr(player, "is_boosting", False))
+                pulse = 0.5 + 0.5 * math.sin(t * (30.0 if boosting else 15.0))
+                color = (255, 180, 70) if boosting else (100, 220, 255)
+                radius = (13.0 if boosting else 9.0) + 3.0 * pulse
+                # Same spot sync_player draws the engine glow.
+                pool.emit("thruster", sx - aim.x * 10.0, sy + bob - aim.y * 10.0, radius, color, int(120 + 100 * pulse))
+
+        if config.ENABLE_DASH_AFTERIMAGE and player is not None:
+            boosting = bool(getattr(player, "is_boosting", False))
+            color = (255, 170, 70) if boosting else (150, 235, 255)
+            self._afterimage.record(t, player.pos, player.dash_direction, bool(getattr(player, "is_dashing", False)), color)
+            self._afterimage.emit(pool, t, shake)
+
+        if config.ENABLE_GLOW:
+            for e in getattr(state, "enemies", []):
+                h = self._enemy_handles.get(id(e))
+                if h is None:
+                    continue
+                behavior = enemy_behavior_name(e)
+                slots = _eye_slots(behavior)
+                if not slots:
+                    continue
+                body = h.objs[4 if behavior.startswith("boss_") else 1]
+                radius = 9.0 if behavior == "boss_laser" else 6.0
+                for idx in slots:
+                    if idx < len(h.objs):
+                        eye = h.objs[idx]
+                        pool.emit(("eye", id(e), idx), eye.x, eye.y, radius, body.color, 140)
+        pool.end_frame()
 
     def make_player(self):
         """Create player visual."""

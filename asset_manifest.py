@@ -7,10 +7,11 @@ files by reading the sources with ``ast``, so nothing is imported and pyglet is 
 loaded, and checks them against what ``kiro2_game.spec`` bundles.
 
 Sound names come from the literal arguments of ``.play(...)`` calls, including both
-branches of a conditional expression and the default of ``NAME_SFX.get(key, default)``,
-plus every string value of a module-level dict whose name ends in ``_SFX``. A ``play``
-argument that does not resolve to literal names is an error, because the check could
-not tell which file it opens.
+branches of a conditional expression, the default of ``NAME_SFX.get(key, default)``, and
+a module-level ``NAME = "literal"`` constant. Every string value of a module-level dict
+whose name ends in ``_SFX`` counts too. A ``play`` argument that does not resolve to
+literal names is an error, because the check could not tell which file it opens, unless
+its file is listed in DYNAMIC_SOUND_TABLES.
 
 Usage:
   python asset_manifest.py           print the coverage summary; exit 1 on any problem
@@ -40,6 +41,11 @@ _MUSIC_CONSTANT = "_MUSIC_FILES"
 # Folders that are not part of the game build.
 _SKIP_DIRS = {"tools", "vercel_site", "build", "dist", "assets", "__pycache__"}
 
+# A file whose play() takes a parameter, not a literal: its name argument only ever holds a key of the
+# named module-level table, so the keys are the sounds it can open (each key still needs its WAV).
+# audio_cues.cue(audio, name) plays names from CUE_SPECS; its keys are checked by the coverage test.
+DYNAMIC_SOUND_TABLES = {"audio_cues.py": "CUE_SPECS"}
+
 
 def _to_path(root: str, rel: str) -> str:
     return os.path.join(root, *rel.split("/"))
@@ -64,13 +70,40 @@ def module_constant(path: str, name: str):
     raise ValueError(f"{path}: no module-level literal named {name}")
 
 
-def _sound_names(node: ast.AST):
-    """Literal sound names ``node`` can evaluate to, or None when it cannot be resolved."""
+def _module_strings(tree: ast.Module) -> dict:
+    """The module's own ``NAME = "literal"`` assignments, so ``play(NAME)`` resolves to its sound."""
+    out = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    out[target.id] = node.value.value
+    return out
+
+
+def _table_keys(tree: ast.Module, table: str):
+    """String keys of the module-level dict literal ``table``, or None when the module has no such table."""
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, ast.Name) and t.id == table for t in targets):
+                keys = {k.value for k in node.value.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+                return keys or None
+    return None
+
+
+def _sound_names(node: ast.AST, consts: dict | None = None):
+    """Literal sound names ``node`` can evaluate to, or None when it cannot be resolved.
+
+    ``consts`` holds the module's own string constants (see _module_strings).
+    """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return {node.value}
+    if isinstance(node, ast.Name) and consts and node.id in consts:
+        return {consts[node.id]}
     if isinstance(node, ast.IfExp):
-        body = _sound_names(node.body)
-        orelse = _sound_names(node.orelse)
+        body = _sound_names(node.body, consts)
+        orelse = _sound_names(node.orelse, consts)
         if body is None or orelse is None:
             return None
         return body | orelse
@@ -84,7 +117,7 @@ def _sound_names(node: ast.AST):
         and not node.keywords
     ):
         # NAME_SFX.get(key, default): the table values are collected from the dict itself.
-        return _sound_names(node.args[1])
+        return _sound_names(node.args[1], consts)
     return None
 
 
@@ -115,8 +148,10 @@ def scan_sound_names(root: str = PROJECT_ROOT):
     names: set[str] = set()
     unresolved: list[str] = []
 
-    def add(expr: ast.AST, rel: str, lineno: int) -> None:
-        found = _sound_names(expr)
+    def add(expr: ast.AST, rel: str, lineno: int, tree: ast.Module, consts: dict) -> None:
+        found = _sound_names(expr, consts)
+        if found is None and isinstance(expr, ast.Name) and rel in DYNAMIC_SOUND_TABLES:
+            found = _table_keys(tree, DYNAMIC_SOUND_TABLES[rel])
         if found is None:
             unresolved.append(f"{rel}:{lineno}")
         else:
@@ -124,16 +159,18 @@ def scan_sound_names(root: str = PROJECT_ROOT):
 
     for path in _code_files(root):
         rel = os.path.relpath(path, root).replace(os.sep, "/")
-        for node in ast.walk(_read_module(path)):
+        tree = _read_module(path)
+        consts = _module_strings(tree)
+        for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "play":
                 arg = _play_argument(node)
                 if arg is not None:  # pyglet player.play() takes no sound name
-                    add(arg, rel, node.lineno)
+                    add(arg, rel, node.lineno, tree, consts)
             elif isinstance(node, (ast.Assign, ast.AnnAssign)) and isinstance(node.value, ast.Dict):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 if any(isinstance(t, ast.Name) and t.id.endswith("_SFX") for t in targets):
                     for value in node.value.values:
-                        add(value, rel, node.lineno)
+                        add(value, rel, node.lineno, tree, consts)
     return names, unresolved
 
 

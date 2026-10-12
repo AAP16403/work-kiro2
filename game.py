@@ -308,7 +308,13 @@ class Game(pyglet.window.Window):
         """
         date_iso = daily.today_iso(today)
         self.daily_date = date_iso
-        self.run_mutator_ids = (daily.daily_mutator(date_iso),)
+        try:
+            picked = daily.daily_mutator(date_iso)
+        except ImportError:
+            # mutators.py is not in this build (the wave-1 mutators item is not merged). The date's run still
+            # starts, with no mutator, instead of raising from the title screen.
+            picked = None
+        self.run_mutator_ids = (picked,) if picked is not None else ()
         self._init_game()
 
     def _effective_player_damage(self) -> int:

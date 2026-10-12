@@ -112,9 +112,10 @@ PROJECTILE_LIMIT = 500
 
 # Transitions the game makes, read from states.py. A transition not listed here is a violation.
 ALLOWED_TRANSITIONS = {
-    "MenuState": ("PlayingState", "GuideState", "SettingsState"),
+    "MenuState": ("PlayingState", "GuideState", "SettingsState", "HangarState"),
     "SettingsState": ("MenuState",),
     "GuideState": ("MenuState",),
+    "HangarState": ("MenuState",),
     "PlayingState": ("PausedState", "BossRewardState", "GameOverState"),
     "PausedState": ("PlayingState", "MenuState"),
     "BossRewardState": ("PlayingState",),

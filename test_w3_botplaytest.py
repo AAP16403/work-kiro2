@@ -145,7 +145,8 @@ def test_transition_table_matches_states_source():
         with open(os.path.join(ROOT, name), "r", encoding="utf-8") as fh:
             targets.update(re.findall(r"set_state\(GameStateName\.([A-Z_]+)\)", fh.read()))
     names = {"MENU": "MenuState", "SETTINGS": "SettingsState", "GUIDE": "GuideState", "PLAYING": "PlayingState",
-             "PAUSED": "PausedState", "BOSS_REWARD": "BossRewardState", "GAME_OVER": "GameOverState"}
+             "PAUSED": "PausedState", "BOSS_REWARD": "BossRewardState", "GAME_OVER": "GameOverState",
+             "HANGAR": "HangarState"}
     destinations = {d for dests in playtest.ALLOWED_TRANSITIONS.values() for d in dests}
     missing = sorted(names[t] for t in targets if names[t] not in destinations)
     assert not missing, f"game switches to states the table forbids: {missing}"

@@ -294,17 +294,29 @@ _TRAILS = {
 }
 
 
+# Plain player weapons. Under a skin their heads take the skin's bullet colour; heavier weapons keep their identity colour.
+PLAIN_SHOT_LABELS = ("Basic Gun", "Spread Shot", "Rapid Fire")
+
+
+def skin_shot_style(style: ProjectileStyle, shot_palette) -> ProjectileStyle:
+    """A player shot's look under a skin: plain heads take the bullet colour, and every trail takes the trail colour."""
+    head = tuple(shot_palette["bullet"]) if style.label in PLAIN_SHOT_LABELS else style.head
+    return replace(style, head=head, trail_color=tuple(shot_palette["trail"]))
+
+
 class ProjectileVisual:
     """Pooled shapes for one projectile: trail pieces first, then the body, core and flare.
 
-    ``objs`` keeps that order, so the body disc is always ``objs[-3]``.
+    ``objs`` keeps that order, so the body disc is always ``objs[-3]``. ``shot_palette`` is the run's
+    skin palette (skin_apply.RunSkin.shot_palette), or None for the weapon colours. It only changes
+    player shots that are not crits; enemy shots and crits keep their look.
     """
 
-    def __init__(self, batch, group, proj, bullet_tint=None):
+    def __init__(self, batch, group, proj, shot_palette=None):
         self.style = style_for_projectile(proj)
-        if bullet_tint is not None and str(getattr(proj, "owner", "player")) == "player":
-            # A skin recolours the player's shot heads; trails keep the weapon colour.
-            self.style = replace(self.style, head=tuple(bullet_tint))
+        player_shot = str(getattr(proj, "owner", "player")) == "player" and not getattr(proj, "is_crit", False)
+        if shot_palette is not None and player_shot:
+            self.style = skin_shot_style(self.style, shot_palette)
         st = self.style
         build, self._place = _TRAILS[st.trail]
         self._trail = build(batch, group, st)

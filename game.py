@@ -14,7 +14,6 @@ import config
 import daily
 import mutators
 import parallel
-from player_art import DEFAULT_PALETTE
 from config import SCREEN_W, SCREEN_H, FPS, MAP_CIRCLE, ENEMY_COLORS
 
 from map import Room
@@ -23,6 +22,7 @@ from level import GameState as GameStateData, get_difficulty_mods, spawn_loot_on
 from utils import set_view_size, compute_room_radius, Vec2, clamp_to_map, enemy_behavior_name, iso_to_world, dist, point_segment_distance
 
 from visuals import Visuals, GroupCache
+from skin_apply import default_run_skin, read_run_skin
 from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
@@ -55,7 +55,6 @@ from advanced_fx import AdvancedFX
 from score import ScoreTracker
 from achievements import RunStats
 import progress as meta_progress
-import skins
 from hud import HUD, current_skin_name
 from states import (
     MenuState,
@@ -146,7 +145,8 @@ class Game(pyglet.window.Window):
         self.player = None
         self.visuals = None
         self.particle_system = None
-        
+        self.run_skin = default_run_skin()  # replaced with the selected skin at each run start
+
         self.keys = pyglet.window.key.KeyStateHandler()
         self.push_handlers(self.keys)
 
@@ -294,9 +294,11 @@ class Game(pyglet.window.Window):
         self._dash_cd_mult = 1.0
         self._dash_cd_difficulty = float(get_difficulty_mods(difficulty).get("dash_cd", 1.0))
 
+        # The skin selected in progress is read once per run start and drives the ship, shots and trails.
+        self.run_skin = read_run_skin()
         self.visuals = Visuals(self.batch, self.groups)
+        self.visuals.apply_skin(self.run_skin)
         self.visuals.make_player()
-        self._apply_run_skin()
 
         self.particle_system = ParticleSystem(self.batch)
         self.popups = DamagePopups()
@@ -320,20 +322,6 @@ class Game(pyglet.window.Window):
         self.daily_date = date_iso
         self.run_mutator_ids = (daily.daily_mutator(date_iso),)
         self._init_game()
-
-    def _apply_run_skin(self) -> None:
-        """Dress this run's player in the skin chosen in the Hangar, read once per run.
-
-        The default skin keeps wave 1's exact look: player_art.DEFAULT_PALETTE and weapon-coloured shots.
-        Any other skin recolours the character and the player's shot heads.
-        """
-        skin = skins.selected(meta_progress.load())
-        if skin.id == skins.DEFAULT_SKIN_ID:
-            self.visuals.player_palette = dict(DEFAULT_PALETTE)
-            self.visuals.player_bullet_tint = None
-        else:
-            self.visuals.player_palette = dict(skin.palette)
-            self.visuals.player_bullet_tint = tuple(skin.palette["bullet"])
 
     def _effective_player_damage(self) -> int:
         if not self.player:
@@ -613,7 +601,7 @@ class Game(pyglet.window.Window):
         )
         if did_dash:
             self.audio.play("dash", volume=0.7, pitch_jitter=0.05)
-            self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction)
+            self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction, color=self.run_skin.dash_color)
             if getattr(self, "advanced_fx", None):
                 self.advanced_fx.trigger_dash(0.7)
 

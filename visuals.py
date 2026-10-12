@@ -16,6 +16,7 @@ from enemy import brute_charge_lane
 from event_visuals import ArenaEventFx
 from player_art import DEFAULT_PALETTE, PlayerArt
 from projectile_art import ProjectileVisual
+from skin_apply import LEGACY_PALETTE, aura_outer, complete_palette
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
@@ -83,8 +84,10 @@ class Visuals:
         self._drone_art: DroneArt | None = None
         self._drone_handle: RenderHandle | None = None
         self._player_art: PlayerArt | None = None  # set when config.USE_PLAYER_ART built the character
-        self.player_palette = DEFAULT_PALETTE      # skins replace this dict to recolour the character
-        self.player_bullet_tint = None             # a non-default skin's bullet colour; None keeps weapon colours
+        # Skin state, set by apply_skin(). The defaults are the default skin's look.
+        self.player_palette = dict(DEFAULT_PALETTE)            # PlayerArt colours
+        self.ship_palette = complete_palette(LEGACY_PALETTE)   # legacy ship colours
+        self.shot_palette: dict | None = None                  # player shot colours; None keeps the weapon colours
         self._scene_stars: list[tuple[shapes.Circle, float, float, float]] = []
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
@@ -179,6 +182,21 @@ class Visuals:
         left.opacity = int(v_op * 0.8)
         right.opacity = int(v_op * 0.8)
 
+    def apply_skin(self, run_skin) -> None:
+        """Dress the character and the player's shots in the run's skin (skin_apply.RunSkin).
+
+        Call before make_player(): the legacy ship reads ship_palette when it is built. The default
+        skin gives wave 1's look exactly.
+        """
+        self.player_palette = dict(run_skin.palette)
+        self.ship_palette = dict(run_skin.ship_palette)
+        self.shot_palette = run_skin.shot_palette
+
+    @property
+    def player_bullet_tint(self):
+        """The skin's plain-shot colour, or None for the weapon colours. A read-only view of shot_palette."""
+        return None if self.shot_palette is None else self.shot_palette["bullet"]
+
     def make_player(self):
         """Create player visual: PlayerArt when config.USE_PLAYER_ART is set, else the legacy ship."""
         if config.USE_PLAYER_ART:
@@ -186,17 +204,18 @@ class Visuals:
             self._player_handle = RenderHandle(*self._player_art.shapes)
             return
         self._player_art = None
+        pal = self.ship_palette
         sh = shapes.Ellipse(0, 0, 30, 12, color=(0, 0, 0), batch=self.batch)
         sh.opacity = 130
 
-        glow = shapes.Circle(0, 0, 22, color=(60, 140, 220), batch=self.batch)
+        glow = shapes.Circle(0, 0, 22, color=pal["glow"], batch=self.batch)
         glow.opacity = 65
-        glow2 = shapes.Circle(0, 0, 28, color=(80, 120, 220), batch=self.batch)
+        glow2 = shapes.Circle(0, 0, 28, color=aura_outer(pal), batch=self.batch)
         glow2.opacity = 28
 
         wing_color = (15, 22, 36)
-        hull_color = (132, 224, 255)
-        cockpit_color = (10, 200, 255)
+        hull_color = pal["body"]
+        cockpit_color = pal["accent"]
 
         wing = shapes.Polygon(
             (8, 0), (-12, 18), (-16, 18), (-10, 6), (-18, 8), (-18, -8), (-10, -6), (-16, -18), (-12, -18),
@@ -214,15 +233,15 @@ class Visuals:
         engine_glow.opacity = 200
 
         # Thrusters
-        thruster_l = shapes.Line(0, 0, 0, 0, thickness=4, color=(130, 210, 255), batch=self.batch)
-        thruster_r = shapes.Line(0, 0, 0, 0, thickness=4, color=(130, 210, 255), batch=self.batch)
+        thruster_l = shapes.Line(0, 0, 0, 0, thickness=4, color=pal["trail"], batch=self.batch)
+        thruster_r = shapes.Line(0, 0, 0, 0, thickness=4, color=pal["trail"], batch=self.batch)
         thruster_l.opacity = 0
         thruster_r.opacity = 0
 
         # Gun barrel
         gun = shapes.Line(0, 0, 0, 0, thickness=3, color=(230, 230, 240), batch=self.batch)
         gun.opacity = 210
-        gun_core = shapes.Line(0, 0, 0, 0, thickness=1, color=(255, 255, 255), batch=self.batch)
+        gun_core = shapes.Line(0, 0, 0, 0, thickness=1, color=pal["eye"], batch=self.batch)
         gun_core.opacity = 220
 
         shield_ring = shapes.Arc(0, 0, 19, segments=48, thickness=4, color=(120, 220, 255), batch=self.batch)
@@ -283,7 +302,7 @@ class Visuals:
         elif getattr(player, "invincibility_timer", 0) > 0:
             hull = (255, 236, 160)
         else:
-            hull = (132, 224, 255)
+            hull = self.ship_palette["body"]
         body.color = hull
         
         for part in (wing, body, cockpit):
@@ -318,7 +337,7 @@ class Visuals:
             thruster_l.x2, thruster_l.y2 = tx1 + back.x * jet_len, ty1 + back.y * (jet_len * 0.6)
             thruster_r.x, thruster_r.y = tx2, ty2
             thruster_r.x2, thruster_r.y2 = tx2 + back.x * (jet_len * 0.85), ty2 + back.y * (jet_len * 0.5)
-            jet_color = (255, 170, 70) if is_boosting else (130, 210, 255)
+            jet_color = (255, 170, 70) if is_boosting else self.ship_palette["trail"]
             thruster_l.color = jet_color
             thruster_r.color = jet_color
             thruster_l.opacity = int(140 + 110 * pulse)
@@ -331,8 +350,8 @@ class Visuals:
             thruster_l.x2, thruster_l.y2 = tx1 + back.x * jet_len, ty1 + back.y * (jet_len * 0.6)
             thruster_r.x, thruster_r.y = tx2, ty2
             thruster_r.x2, thruster_r.y2 = tx2 + back.x * jet_len, ty2 + back.y * (jet_len * 0.5)
-            thruster_l.color = (130, 210, 255)
-            thruster_r.color = (130, 210, 255)
+            thruster_l.color = self.ship_palette["trail"]
+            thruster_r.color = self.ship_palette["trail"]
             thruster_l.opacity = int(60 + 40 * idle_pulse)
             thruster_r.opacity = int(50 + 35 * idle_pulse)
 
@@ -895,7 +914,7 @@ class Visuals:
             return
         # Every shape is created in the unified projectile group, so projectiles never join
         # the depth groups and never pay a batch migration after creation.
-        self._proj_handles[id(proj)] = ProjectileVisual(self.batch, self._projectile_group, proj, bullet_tint=self.player_bullet_tint)
+        self._proj_handles[id(proj)] = ProjectileVisual(self.batch, self._projectile_group, proj, shot_palette=self.shot_palette)
 
     def sync_projectile(self, proj, shake: Vec2):
         """Update projectile visual position and animation."""

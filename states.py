@@ -26,6 +26,7 @@ from projectile import spawn_projectiles, Projectile
 from drone import drone_bullets
 from fsm import State
 from hazards import LaserBeam
+from events import begin_wave_event, update_arena_event, end_wave_event, event_banner_suffix, event_status_text
 from player import perform_dash, recharge_dash, format_dash_hud, update_boost, format_boost_hud
 from rpg import format_temp_hud, format_perm_hud
 
@@ -414,13 +415,14 @@ class PlayingState(State):
 
         if not s.wave_active and (s.time - s.last_wave_clear) >= game.balance.wave_cooldown:
             spawn_wave(s, Vec2(0.0, 0.0))
+            begin_wave_event(s, game)
             boss_now = next((e for e in s.enemies if enemy_behavior_name(e).startswith("boss_")), None)
             if boss_now is not None:
                 boss_title = enemy_behavior_name(boss_now)[5:].replace("_", " ").upper()
                 game.audio.play("boss_warn", volume=0.9)
                 game.hud.show_banner("BOSS INCOMING", boss_title, color=(255, 120, 120), duration=2.6)
             else:
-                game.hud.show_banner(f"WAVE {int(s.wave):02d}", f"{str(s.difficulty).upper()}  -  {len(s.enemies)} hostiles", duration=2.0)
+                game.hud.show_banner(f"WAVE {int(s.wave):02d}", f"{str(s.difficulty).upper()}  -  {len(s.enemies)} hostiles{event_banner_suffix(s)}", duration=2.0)
 
         # Weapon-style hits this frame. They sum here and reach the shake once, after the
         # hit loops (see the flush before the decay), so many hits in one frame stay bounded.
@@ -469,6 +471,8 @@ class PlayingState(State):
             if th.t >= th.warn + th.ttl:
                 s.thunders.remove(th)
                 game.visuals.drop_thunder(th)
+
+        update_arena_event(s, game, dt)
 
         old_pos = Vec2(game.player.pos.x, game.player.pos.y)
         if game.player.is_dashing:
@@ -748,6 +752,7 @@ class PlayingState(State):
         if s.wave_active and not s.enemies:
             cleared_wave = int(s.wave)
             s.wave_active = False
+            end_wave_event(s, game)
             s.last_wave_clear = s.time
             s.wave += 1
             game._advance_temp_rewards()
@@ -855,6 +860,9 @@ class PlayingState(State):
             game.visuals.ensure_thunder(th)
             game.visuals.sync_thunder(th, shake)
 
+        if getattr(game.state, "arena_event", None) is not None:
+            game.visuals.sync_arena_event(game.state.arena_event, shake)
+
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:
@@ -903,6 +911,7 @@ class PlayingState(State):
             (4, dash_txt),
             (5, boost_txt),
             (6, perm_txt),
+            (3, event_status_text(s)),
             # Auto-fire is a mid-fight state the player needs to read, so it outlasts the dash, boost and
             # permanent-reward text. Only boss, ultra, laser, vortex and temp rewards outrank it.
             (3, auto_txt),

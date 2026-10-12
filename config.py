@@ -148,3 +148,23 @@ ENEMY_COLORS = {
     "boss_abyss_gaze": (185, 220, 255),
     "boss_womb_core": (255, 105, 135),
 }
+
+# Arena events (events.py). Set pieces on non-boss waves. Each one is telegraphed before it deals damage.
+EVENT_MIN_WAVE = 4                  # no events before this wave
+EVENT_WAVE_CHANCE = 1.0 / 3.0       # chance that an eligible (non-boss, wave >= EVENT_MIN_WAVE) wave gets one event
+EVENT_METEOR_IMPACTS = 3            # impact zones per Meteor Shower
+EVENT_METEOR_WARN = 1.5             # a zone is marked this long before it hits
+EVENT_METEOR_STAGGER = 0.7          # gap between zone marks, so the impacts ripple across the arena
+EVENT_METEOR_RADIUS = 38.0          # impact radius (same units as Trap.radius)
+EVENT_METEOR_DAMAGE = 16
+EVENT_METEOR_LIVE = 0.25            # a zone stays live for this long after it hits
+EVENT_FLARE_WARN = 2.0              # the sector shows this long before the beam starts to move
+EVENT_FLARE_SWEEP = 2.6             # seconds for the beam to cross the sector
+EVENT_FLARE_SECTOR_DEG = 110.0      # width of the sector the beam sweeps
+EVENT_FLARE_THICKNESS = 14.0
+EVENT_FLARE_DAMAGE = 18
+EVENT_FLARE_TICK = 0.5              # minimum gap between beam hits on the player
+EVENT_NEBULA_WARN = 1.0             # the cloud shows this long before it becomes active
+EVENT_NEBULA_TTL = 8.0              # seconds the cloud is active; enemies inside gain shield
+EVENT_NEBULA_RADIUS = 110.0
+EVENT_NEBULA_SHIELD = 24            # shield an enemy gains on entering the cloud; the leftover is removed on exit or at the end

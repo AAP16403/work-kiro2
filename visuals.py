@@ -12,6 +12,7 @@ from pyglet.graphics import Group
 from config import ENEMY_COLORS, SCREEN_H
 from drone_art import DroneArt
 from enemy import brute_charge_lane
+from event_visuals import ArenaEventFx
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
@@ -74,6 +75,7 @@ class Visuals:
         self._trap_handles: dict[int, RenderHandle] = {}
         self._laser_handles: dict[int, RenderHandle] = {}
         self._thunder_handles: dict[int, RenderHandle] = {}
+        self._arena_fx: ArenaEventFx | None = None  # created on the first arena event (event_visuals.py)
         self._player_handle: RenderHandle | None = None
         self._drone_art: DroneArt | None = None
         self._drone_handle: RenderHandle | None = None
@@ -1129,14 +1131,17 @@ class Visuals:
         if id(tr) in self._trap_handles:
             return
         kind = getattr(tr, "kind", "")
-        if kind in ("slam", "slam_warn", "womb_warn"):
+        if kind in ("slam", "slam_warn", "womb_warn", "meteor"):
             # Ring-style hazard. Womb warnings reuse it in a violet tint, so they never read as slam red.
+            # Meteor zones (arena events) use amber, so they never read as slam red either.
             if kind == "womb_warn":
                 tint, core_tint = (150, 110, 255), (235, 215, 255)
+            elif kind == "meteor":
+                tint, core_tint = (255, 150, 60), (255, 240, 200)
             else:
                 tint, core_tint = (255, 80, 80), (255, 220, 200)
             base = shapes.Circle(0, 0, tr.radius, color=tint, batch=self.batch)
-            base.opacity = 40 if kind in ("slam_warn", "womb_warn") else 65
+            base.opacity = 40 if kind in ("slam_warn", "womb_warn", "meteor") else 65
             ring = shapes.Arc(0, 0, tr.radius * 1.05, segments=48, thickness=5, color=(255, 255, 255), batch=self.batch)
             ring.opacity = 170
             core = shapes.Circle(0, 0, max(10, tr.radius * 0.2), color=core_tint, batch=self.batch)
@@ -1154,7 +1159,7 @@ class Visuals:
     def sync_trap(self, tr, shake: Vec2):
         h = self._trap_handles[id(tr)]
         kind = getattr(tr, "kind", "")
-        if kind in ("slam", "slam_warn", "womb_warn"):
+        if kind in ("slam", "slam_warn", "womb_warn", "meteor"):
             base, ring, core = h.objs
             sx, sy = to_iso(tr.pos, shake)
             base.x, base.y = sx, sy
@@ -1164,6 +1169,11 @@ class Visuals:
             ring.opacity = int(110 + 110 * pulse)
             if kind in ("slam_warn", "womb_warn"):
                 base.opacity = int(40 + 60 * pulse)
+            elif kind == "meteor":
+                # A marked zone is faint with a dim ring. A live zone is solid with a bright ring, so the moment it hits reads.
+                live = tr.t >= tr.armed_delay
+                base.opacity = 190 if live else int(36 + 40 * pulse)
+                ring.opacity = int(210 + 45 * pulse) if live else int(80 + 50 * pulse)
             self._set_depth(h, sy, shake)
             return
 
@@ -1262,3 +1272,12 @@ class Visuals:
         h = self._thunder_handles.pop(id(th), None)
         if h:
             h.delete()
+
+    def sync_arena_event(self, ev, shake: Vec2) -> None:
+        if self._arena_fx is None:
+            self._arena_fx = ArenaEventFx(self.batch, self.groups)
+        self._arena_fx.sync(ev, shake)
+
+    def drop_arena_event(self, ev) -> None:
+        if self._arena_fx is not None:
+            self._arena_fx.drop(ev)

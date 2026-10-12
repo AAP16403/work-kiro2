@@ -26,6 +26,7 @@ from projectile import spawn_projectiles, Projectile
 from fsm import State
 from hazards import LaserBeam
 from player import perform_dash, recharge_dash, format_dash_hud, update_boost, format_boost_hud
+from mutators import combined_score_multiplier, mutator_names, shape_enemy_volley
 from rpg import format_temp_hud, format_perm_hud
 
 
@@ -444,7 +445,9 @@ class PlayingState(State):
             if game.player.dash_timer <= 0:
                 game.player.is_dashing = False
         else:
-            if idir.length() > 0:
+            moving = idir.length() > 0
+            desired_vel = Vec2(0.0, 0.0)
+            if moving:
                 nd = idir.normalized()
                 player_speed = game._effective_player_speed()
                 if is_boosting:
@@ -452,7 +455,9 @@ class PlayingState(State):
                     game.particle_system.add_boost_flame(game.player.pos, nd)
                     if getattr(game, "advanced_fx", None):
                         game.advanced_fx.trigger_boost(0.18)
-                game.player.pos = game.player.pos + nd * player_speed * dt
+                desired_vel = nd * player_speed
+            game._move_player(desired_vel, dt)
+            if moving:
                 game.particle_system.add_step_dust(game.player.pos, nd)
 
         # Recharge dash charges
@@ -461,6 +466,7 @@ class PlayingState(State):
             float(getattr(game, "_dash_cd_difficulty", 1.0)),
             float(getattr(game, "_dash_cd_mult", 1.0)),
         )
+        game._tick_shield_regen(dt)
         game.player.pos = clamp_to_map(game.player.pos, config.ROOM_RADIUS * 0.9, s.map_type)
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
             game.player.pos = resolve_circle_obstacles(game.player.pos, player_radius, s.obstacles)
@@ -523,7 +529,10 @@ class PlayingState(State):
         for e in list(s.enemies):
             if e not in s.enemies or e.hp <= 0 or getattr(e, "_is_dead", False):
                 continue
+            shots_before = len(s.projectiles)
             update_enemy(e, game.player.pos, s, dt, game, player_vel=player_vel)
+            if len(s.projectiles) > shots_before:
+                shape_enemy_volley(s.projectiles, shots_before, getattr(s, "rules", None))  # Bullet Hell; a no-op in stock runs
             behavior_name = enemy_behavior_name(e)
             e._behavior_name = behavior_name
             e._radius = game.balance.enemy_radius(behavior_name)
@@ -960,6 +969,8 @@ class GameOverState(State):
             points_to_next=getattr(score_obj, "last_points_to_next", None),
             is_new_high=is_new_high,
         )
+        run_mutators = tuple(getattr(game, "run_mutators", ()))
+        game.game_over_menu.set_mutators(mutator_names(run_mutators), combined_score_multiplier(run_mutators))
         # One instance serves every run, so the reveal clock and the input lock restart on each entry.
         self._t0 = float(game._render_time)
         self._armed_at = self._t0 + float(config.GAME_OVER_REVEAL_S)

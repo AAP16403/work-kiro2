@@ -188,12 +188,12 @@ class EnemySpawnLogic:
         steps = max(0, int(wave) - int(self.wave_cap_ramp_start)) // max(1, int(self.wave_cap_ramp_every))
         return int(base_cap) + min(int(self.wave_cap_ramp_max), steps)
 
-    def _base_count(self, wave: int, difficulty: str, cap: int) -> int:
+    def _base_count(self, wave: int, difficulty: str, cap: int, size_mult: float = 1.0) -> int:
         wave_i = max(1, int(wave))
         cap_i = max(1, int(cap))
         base = 4 + int(wave_i * 1.4)
         spawn_mult = float(self._tuning.difficulty_mods(difficulty).get("spawn", 1.0))
-        scaled = int(base * spawn_mult)
+        scaled = int(base * spawn_mult * float(size_mult))
         return max(1, min(cap_i, max(1, scaled)))
 
     def _active_classes(self, wave: int) -> list[EnemyClass]:
@@ -209,8 +209,9 @@ class EnemySpawnLogic:
         weights = [max(0.05, self.member_weights.get(n, 1.0)) for n in names]
         return random.choices(names, weights=weights, k=1)[0]
 
-    def plan_wave(self, wave: int, difficulty: str, cap: int) -> EnemySpawnPlan:
-        total = self._base_count(wave, difficulty, cap)
+    def plan_wave(self, wave: int, difficulty: str, cap: int, size_mult: float = 1.0) -> EnemySpawnPlan:
+        # size_mult scales the head count before the cap, so the wave cap still bounds the result.
+        total = self._base_count(wave, difficulty, cap, size_mult)
         active = self._active_classes(wave)
         if not active:
             active = [EnemyClass("fallback", ("chaser",), unlock_wave=1, weight=1.0)]

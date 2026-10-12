@@ -51,6 +51,8 @@ class Player:
     crit_chance_bonus: float = 0.0
     crit_mult_bonus: float = 0.0
     damage_flash_timer: float = 0.0
+    # Current steering velocity. Stock movement snaps to input; Drift eases it (see mutators.steer_velocity).
+    move_vel: Vec2 = field(default_factory=lambda: Vec2(0.0, 0.0))
 
 
 # ---------------------------------------------------------------------------

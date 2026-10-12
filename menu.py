@@ -10,6 +10,8 @@ from pyglet import shapes
 import config
 from config import MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
 from fonts import register_ui_fonts
+from mutator_chips import MutatorChipRow
+from mutators import format_score_mult
 
 register_ui_fonts()
 
@@ -251,9 +253,14 @@ class MenuSlider:
 
 
 class Menu:
-    """Main menu screen."""
-    
-    def __init__(self, width: int, height: int):
+    """Main menu screen.
+
+    ``mutator_ids`` is the saved run-mutator selection shown as chips under the buttons.
+    ``on_mutator_toggle(mutator_id)`` is called when a chip is clicked; the owner saves the change
+    and pushes the new selection back with ``set_mutator_selection``.
+    """
+
+    def __init__(self, width: int, height: int, mutator_ids=(), on_mutator_toggle=None):
         self.screen_width = width
         self.screen_height = height
         self.batch = pyglet.graphics.Batch()
@@ -334,7 +341,24 @@ class Menu:
 
         for btn in self.buttons:
             btn.ensure(self.batch)
+
+        self.mutator_row = MutatorChipRow(
+            self.batch,
+            selected=mutator_ids,
+            on_toggle=self._on_mutator_chip,
+            font_name=UI_FONT_META,
+            style_label=_sync_label_style_if_ready,
+        )
+        self._on_mutator_toggle = on_mutator_toggle
         self.resize(width, height)
+
+    def set_mutator_selection(self, mutator_ids) -> None:
+        """Show the saved run-mutator selection on the chips."""
+        self.mutator_row.set_selected(mutator_ids)
+
+    def _on_mutator_chip(self, mutator_id: str) -> None:
+        if self._on_mutator_toggle is not None:
+            self._on_mutator_toggle(mutator_id)
 
     def update(self, dt: float):
         self._t += dt
@@ -408,6 +432,7 @@ class Menu:
         self._panel_shine.y = panel_y + panel_h - max(8, int(22 * scale))
         self._panel_shine.width = panel_w - 8
         self._panel_shine.height = max(6, int(16 * scale))
+        self.mutator_row.layout(cx, panel_y - int(8 * scale), scale)
 
         self.title.x = cx
         _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(22, int(38 * scale)))
@@ -431,12 +456,17 @@ class Menu:
         for button in self.buttons:
             button.is_hovered = button.contains_point(x, y)
             button.sync()
-    
+        self.mutator_row.on_mouse_motion(x, y)
+
     def on_mouse_press(self, x: float, y: float, button: int) -> str | None:
         """Handle mouse clicks. Returns action string or None."""
         if button != pyglet.window.mouse.LEFT:
             return None
-        
+
+        # Mutator chips toggle a run option; they never return an action.
+        if self.mutator_row.on_mouse_press(x, y):
+            return None
+
         for btn in self.buttons:
             if btn.contains_point(x, y):
                 btn.callback()
@@ -1661,6 +1691,7 @@ _GO_STAGE_SPAN = {
     "stats": (0.68, 0.90),
     "buttons": (0.78, 0.96),
     "hint": (0.86, 1.00),
+    "mutators": (0.86, 1.00),
 }
 _GO_COUNT_SPAN = (0.50, 1.00)  # the final score counts up over the second half of the reveal
 _GO_RISE_PX = 14               # labels rise this far (before UI scale) into their resting place
@@ -1784,6 +1815,19 @@ class GameOverMenu:
             batch=self.batch,
         )
 
+        # Run mutators and the score multiplier they give, under the control hint.
+        self.mutator_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=13,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(188, 210, 232, 220),
+            batch=self.batch,
+        )
+
         self._scale = 1.0
         self._score_value = 0
         self._shown_score: int | None = None
@@ -1798,6 +1842,7 @@ class GameOverMenu:
             "new_high": [(self.new_high_label, 255)],
             "stats": [(label, _GO_STAT_RGBA[3]) for label in self.stats_labels],
             "hint": [(self.hint_label, 220)],
+            "mutators": [(self.mutator_label, 220)],
         }
         self._reveal_t = float(getattr(config, "GAME_OVER_REVEAL_S", 1.0))
         self._reveal_total = self._reveal_t
@@ -1835,6 +1880,7 @@ class GameOverMenu:
             "new_high": height - int(255 * scale),
             "stats": height - int(290 * scale),
             "hint": ys[1] - int(28 * scale),
+            "mutators": ys[1] - int(54 * scale),
         }
 
         self.title.x = cx
@@ -1860,6 +1906,9 @@ class GameOverMenu:
 
         self.hint_label.x = cx
         _sync_label_style_if_ready(self.hint_label, UI_FONT_META, max(10, int(13 * scale)))
+
+        self.mutator_label.x = cx
+        _sync_label_style_if_ready(self.mutator_label, UI_FONT_META, max(10, int(13 * scale)))
 
         # Re-apply the current reveal so every label and button lands on the new layout.
         self.set_reveal(self._reveal_t, self._reveal_total)
@@ -1908,6 +1957,11 @@ class GameOverMenu:
         gold = int(rank) == 1 and bool(is_new_high)
         rgb = _GO_RANK_GOLD if gold else _GO_STAT_RGBA[:3]
         rank_label.color = (*rgb, rank_label.opacity)
+
+    def set_mutators(self, names, score_mult: float):
+        """Show the run's mutators and the combined score multiplier they give."""
+        listed = ", ".join(str(n) for n in names) if names else "none"
+        self.mutator_label.text = f"Mutators: {listed}   |   score {format_score_mult(score_mult)}"
 
     def set_reveal(self, t: float, total: float | None = None):
         """Drive the staged reveal. t is seconds since the run ended; from total on, everything is shown."""

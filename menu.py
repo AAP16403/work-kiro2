@@ -8,6 +8,7 @@ import random
 import pyglet
 from pyglet import shapes
 import config
+import motion
 from config import MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
 from fonts import register_ui_fonts
 
@@ -337,6 +338,7 @@ class Menu:
         self.resize(width, height)
 
     def update(self, dt: float):
+        dt = motion.anim_dt(dt)  # animation only: reduced motion stops the orbs, the bob and the wave
         self._t += dt
         w = self.screen_width
         h = self.screen_height
@@ -354,13 +356,13 @@ class Menu:
             orb.opacity = int(14 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.7 + phase)))
 
         # Subtle, continuous menu motion to keep the screen feeling alive.
-        self.title.y = int(self._title_base_y + math.sin(self._t * 1.2) * 6.0)
+        self.title.y = int(self._title_base_y + math.sin(self._t * 1.2) * 6.0 * motion.factor())
         self._panel_shine.opacity = int(10 + 16 * (0.5 + 0.5 * math.sin(self._t * 1.45)))
         for i, btn in enumerate(self.buttons):
             if i >= len(self._button_base_positions):
                 continue
             base_x, base_y = self._button_base_positions[i]
-            wave = math.sin(self._t * 2.15 + i * 0.58)
+            wave = math.sin(self._t * 2.15 + i * 0.58) * motion.factor()
             btn.x = base_x + int(wave * 4.0)
             btn.y = base_y + int(wave * 2.0)
             btn.sync()
@@ -472,6 +474,9 @@ class SettingsMenu:
         sfx_volume: float = 0.8,
         reduced_shake: bool = False,
         shake_level: str | None = None,
+        reduced_motion: bool = False,
+        colorblind_palette: bool = False,
+        high_contrast_hud: bool = False,
     ):
         self.screen_width = width
         self.screen_height = height
@@ -522,6 +527,12 @@ class SettingsMenu:
         if shake_level not in config.SHAKE_LEVELS:
             shake_level = "reduced" if reduced_shake else "full"
         self.shake_level = str(shake_level)
+        # Accessibility options (Settings > Accessibility). The game persists them through access_prefs.
+        self.reduced_motion = bool(reduced_motion)
+        self.colorblind_palette = bool(colorblind_palette)
+        self.high_contrast_hud = bool(high_contrast_hud)
+        self._focus = None  # control with keyboard focus; None until an arrow key is pressed
+        self._grab = None  # slider that Left/Right adjust after ENTER; ENTER or ESC releases it
         self.window_size_idx = 0
         self.window_sizes, self.window_size_names = self._build_window_size_options(display_size)
         current_size = (int(width), int(height))
@@ -682,6 +693,23 @@ class SettingsMenu:
         self.shake_button = MenuButton(0, 0, 210, 50, "", self._cycle_shake_level, color=(82, 122, 180), hover_color=(112, 156, 220))
         self._refresh_shake_button_text()
 
+        # Accessibility toggles. Each one reports only its own key, so the owner never has to re-read the window size.
+        self.access_label = pyglet.text.Label(
+            "Accessibility",
+            font_name=UI_FONT_BODY,
+            font_size=16,
+            x=0,
+            y=0,
+            anchor_x="left",
+            anchor_y="center",
+            color=(255, 255, 255, 255),
+            batch=self.batch,
+        )
+        self.motion_button = MenuButton(0, 0, 150, 42, "", self._toggle_reduced_motion, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self.contrast_button = MenuButton(0, 0, 150, 42, "", self._toggle_high_contrast, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self.colorblind_button = MenuButton(0, 0, 150, 42, "", self._toggle_colorblind, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self._refresh_access_button_texts()
+
         self.map_label = pyglet.text.Label(
             "Arena Shape",
             font_name=UI_FONT_BODY,
@@ -722,10 +750,15 @@ class SettingsMenu:
         self._selected_map_highlight.opacity = 60
 
 
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button] + self._access_buttons():
             btn.ensure(self.batch)
         for slider in self._all_sliders():
             slider.ensure(self.batch)
+
+        # Keyboard focus ring: four thin edges, hidden until focus exists. Created last so it draws on top.
+        self._focus_ring = [shapes.Rectangle(0, 0, 1, 1, color=(255, 214, 96), batch=self.batch) for _ in range(4)]
+        for edge in self._focus_ring:
+            edge.opacity = 0
 
         self.resize(width, height)
 
@@ -806,6 +839,7 @@ class SettingsMenu:
         return f"{r:.2f}:1"
 
     def update(self, dt: float):
+        dt = motion.anim_dt(dt)  # animation only: reduced motion stops the orb drift and the pulse
         self._t += dt
         w = self.screen_width
         h = self.screen_height
@@ -965,6 +999,27 @@ class SettingsMenu:
             btn.y = curr_y - btn_h - r * (btn_h + 10)
             btn.sync()
             
+        # --- Section 4: Accessibility (Right Column, under the window sizes) ---
+        # One heading and one row of three toggles. With five window-size rows (4K or no display info)
+        # the row still ends above the footer's Back button at 980x620.
+        grid_bottom = curr_y - btn_h - (rows - 1) * (btn_h + 10)
+        access_y = grid_bottom - int(18 * scale)
+        _sync_label_style_if_ready(self.access_label, UI_FONT_BODY, max(12, int(15 * scale)))
+        self.access_label.x = col2_x
+        self.access_label.y = access_y
+        access_h = int(btn_h * 0.86)  # a little shorter than the display buttons, so the row keeps clear of Back
+        access_row_y = access_y - int(16 * scale) - access_h
+        access_gap = 10
+        access_w = (col_width - access_gap * 2) // 3
+        access_font = max(11, int(13 * scale))
+        for i, btn in enumerate(self._access_buttons()):
+            btn.width = access_w
+            btn.height = access_h
+            btn.font_size = access_font
+            btn.x = col2_x + i * (access_w + access_gap)
+            btn.y = access_row_y
+            btn.sync()
+
         # --- Footer ---
         self.back_button.width = int(180 * scale)
         self.back_button.height = int(50 * scale)
@@ -1101,7 +1156,7 @@ class SettingsMenu:
 
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button] + self._access_buttons():
             btn.is_hovered = btn.contains_point(x, y)
             btn.sync()
 
@@ -1126,7 +1181,11 @@ class SettingsMenu:
         if self.shake_button.contains_point(x, y):
             self.shake_button.callback()
             return None
-        
+        for btn in self._access_buttons():
+            if btn.contains_point(x, y):
+                btn.callback()
+                return None
+
         for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons:
             if btn.contains_point(x, y):
                 btn.callback()
@@ -1152,6 +1211,163 @@ class SettingsMenu:
             # would also push the menu's last-chosen window size and could undo a manual resize.
             self.on_save({"arena_margin": self.arena_margin})
 
+    # ----- Accessibility toggles -----------------------------------------
+
+    def _access_buttons(self) -> list:
+        return [self.motion_button, self.contrast_button, self.colorblind_button]
+
+    def _refresh_access_button_texts(self) -> None:
+        # Short value-first labels: three toggles share one 126 px row at 980x620.
+        self.motion_button.text = f"Motion: {'Reduced' if self.reduced_motion else 'Full'}"
+        self.contrast_button.text = f"Contrast: {'High' if self.high_contrast_hud else 'Normal'}"
+        self.colorblind_button.text = f"Colorblind: {'On' if self.colorblind_palette else 'Off'}"
+        for btn in self._access_buttons():
+            btn.sync()
+
+    def _toggle_reduced_motion(self):
+        self.reduced_motion = not self.reduced_motion
+        self._refresh_access_button_texts()
+        self.on_save({"reduced_motion": self.reduced_motion})
+
+    def _toggle_high_contrast(self):
+        self.high_contrast_hud = not self.high_contrast_hud
+        self._refresh_access_button_texts()
+        self.on_save({"high_contrast_hud": self.high_contrast_hud})
+
+    def _toggle_colorblind(self):
+        self.colorblind_palette = not self.colorblind_palette
+        self._refresh_access_button_texts()
+        self.on_save({"colorblind_palette": self.colorblind_palette})
+
+    def set_accessibility(self, values: dict) -> None:
+        """Mirror Accessibility values the game has applied. Keys that are not named keep their value."""
+        if "reduced_motion" in values:
+            self.reduced_motion = bool(values["reduced_motion"])
+        if "colorblind_palette" in values:
+            self.colorblind_palette = bool(values["colorblind_palette"])
+        if "high_contrast_hud" in values:
+            self.high_contrast_hud = bool(values["high_contrast_hud"])
+        self._refresh_access_button_texts()
+
+    # ----- Keyboard navigation -------------------------------------------
+    # Arrow keys move a focus ring between controls and ENTER activates the focused one. A focused
+    # slider is "grabbed" by ENTER: Left and Right then change its value, and ENTER or ESC lets go.
+    # Mouse handling is unchanged. The ring only appears once a key has been pressed.
+
+    def _focus_items(self) -> list:
+        """Controls that keyboard focus can reach, in reading order (top-left first)."""
+        return (
+            list(self.difficulty_buttons) + list(self.map_buttons) + [self.fx_button, self.arena_slider]
+            + [self.music_slider, self.sfx_slider] + list(self.size_buttons)
+            + [self.shake_button] + self._access_buttons() + [self.back_button]
+        )
+
+    @staticmethod
+    def _focus_box(item) -> tuple[float, float, float, float]:
+        """(x, y, width, height) of a focusable control. A slider's box also covers the label above its track."""
+        if isinstance(item, MenuSlider):
+            return (item.x - 6.0, item.y - 10.0, item.width + 12.0, 48.0)
+        return (float(item.x), float(item.y), float(item.width), float(item.height))
+
+    @classmethod
+    def _focus_center(cls, item) -> tuple[float, float]:
+        x, y, w, h = cls._focus_box(item)
+        return (x + w / 2.0, y + h / 2.0)
+
+    def _move_focus(self, dx: int, dy: int) -> None:
+        """Move focus to the nearest control in direction (dx, dy). dy +1 is up on screen. No control there: focus stays."""
+        items = self._focus_items()
+        if not items:
+            return
+        if self._focus is None:
+            self._focus = items[0]
+            return
+        cx, cy = self._focus_center(self._focus)
+        best = None
+        best_cost = 0.0
+        for item in items:
+            if item is self._focus:
+                continue
+            ix, iy = self._focus_center(item)
+            along = (ix - cx) * dx + (iy - cy) * dy
+            if along <= 0.5:
+                continue
+            across = abs((ix - cx) * dy) + abs((iy - cy) * dx)
+            cost = along + 2.0 * across
+            if best is None or cost < best_cost:
+                best, best_cost = item, cost
+        if best is not None:
+            self._focus = best
+
+    def _nudge_grab(self, direction: int) -> None:
+        slider = self._grab
+        step = 1.0 if slider is self.arena_slider else 5.0
+        slider.current_val = max(float(slider.min_val), min(float(slider.max_val), float(slider.current_val) + direction * step))
+        slider.callback(slider.current_val)
+        slider.sync()
+
+    def _release_grab(self) -> None:
+        slider = self._grab
+        if slider is None:
+            return
+        self._grab = None
+        if slider is self.arena_slider:
+            # Same as a mouse release: the owner hears the arena size once, when the adjustment ends.
+            self.on_save({"arena_margin": self.arena_margin})
+
+    def _activate_focus(self):
+        """ENTER on the focused control. Returns "back" when Back is chosen, like the mouse path."""
+        item = self._focus
+        if item is None:
+            return None
+        if isinstance(item, MenuSlider):
+            self._grab = None if self._grab is item else item
+            return None
+        if item is self.back_button:
+            self.on_save(self.get_settings())
+            return "back"
+        item.callback()
+        return None
+
+    def is_adjusting(self) -> bool:
+        """True while a slider is grabbed, so ESC should only let go of it and not leave the screen."""
+        return self._grab is not None
+
+    def on_key_press(self, symbol, modifiers=0):
+        """Keyboard navigation: arrows move focus, ENTER activates. Returns "back" when the screen should close."""
+        key = pyglet.window.key
+        if symbol in (key.LEFT, key.RIGHT, key.UP, key.DOWN):
+            if self._grab is not None and symbol in (key.LEFT, key.RIGHT):
+                self._nudge_grab(-1 if symbol == key.LEFT else 1)
+                return None
+            self._release_grab()
+            dx, dy = {key.LEFT: (-1, 0), key.RIGHT: (1, 0), key.UP: (0, 1), key.DOWN: (0, -1)}[symbol]
+            self._move_focus(dx, dy)
+            return None
+        if symbol in (key.ENTER, key.NUM_ENTER):
+            return self._activate_focus()
+        if symbol == key.ESCAPE:
+            self._release_grab()
+        return None
+
+    def _sync_focus_ring(self) -> None:
+        item = self._focus
+        if item is None:
+            for edge in self._focus_ring:
+                edge.opacity = 0
+            return
+        x, y, w, h = self._focus_box(item)
+        pad, t = 4.0, 2.0
+        left_x, bottom_y = x - pad, y - pad
+        width, height = w + pad * 2.0, h + pad * 2.0
+        top_edge, bottom_edge, left_edge, right_edge = self._focus_ring
+        top_edge.x, top_edge.y, top_edge.width, top_edge.height = left_x, bottom_y + height - t, width, t
+        bottom_edge.x, bottom_edge.y, bottom_edge.width, bottom_edge.height = left_x, bottom_y, width, t
+        left_edge.x, left_edge.y, left_edge.width, left_edge.height = left_x, bottom_y, t, height
+        right_edge.x, right_edge.y, right_edge.width, right_edge.height = left_x + width - t, bottom_y, t, height
+        for edge in self._focus_ring:
+            edge.opacity = 255
+
     def get_settings(self) -> dict:
         """Get current settings."""
         fullscreen = self.window_sizes[self.window_size_idx] is None
@@ -1165,6 +1381,9 @@ class SettingsMenu:
             "reduced_shake": bool(self.reduced_shake),
             "music_volume": float(self.music_volume),
             "sfx_volume": float(self.sfx_volume),
+            "reduced_motion": bool(self.reduced_motion),
+            "colorblind_palette": bool(self.colorblind_palette),
+            "high_contrast_hud": bool(self.high_contrast_hud),
         }
 
     def draw(self):
@@ -1198,7 +1417,9 @@ class SettingsMenu:
 
         self._refresh_fx_button_text()
         self._refresh_shake_button_text()
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
+        self._refresh_access_button_texts()
+        self._sync_focus_ring()
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button] + self._access_buttons():
             btn.sync()
         for slider in self._all_sliders():
             slider.sync()
@@ -1365,6 +1586,7 @@ class GuideMenu:
         return (140, 200, 255)
 
     def update(self, dt: float):
+        dt = motion.anim_dt(dt)  # animation only: reduced motion freezes the scanline and the shine
         self._t += dt
         self._panel_shine.opacity = int(8 + 14 * (0.5 + 0.5 * math.sin(self._t * 1.4)))
         self._scanline.y = int(36 + (self.screen_height - 72) * (0.5 + 0.5 * math.sin(self._t * 0.37)))

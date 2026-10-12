@@ -10,6 +10,7 @@ from array import array
 import logging
 
 import config
+import motion
 import pyglet
 
 try:
@@ -157,9 +158,13 @@ class AdvancedFX:
         self._ultra_flash = max(self._ultra_flash, max(0.0, min(1.0, float(strength))))
 
     def trigger_dash(self, strength: float = 1.0) -> None:
+        if motion.factor() <= 0.0:  # reduced motion: no screen pulse
+            return
         self._dash_pulse = max(self._dash_pulse, max(0.0, min(1.0, float(strength))))
 
     def trigger_boost(self, strength: float = 1.0) -> None:
+        if motion.factor() <= 0.0:  # reduced motion: no screen pulse
+            return
         self._boost_pulse = max(self._boost_pulse, max(0.0, min(1.0, float(strength))))
 
     def render(self, time_s: float, combat_intensity: float, hp_ratio: float = 1.0, boss_active: bool = False) -> None:
@@ -192,7 +197,7 @@ class AdvancedFX:
         self._ctx.enable(moderngl.BLEND)
         self._ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
         self._ctx.viewport = (0, 0, self.width, self.height)
-        self._prog["u_time"].value = float(time_s)
+        self._prog["u_time"].value = float(time_s) * motion.factor()  # reduced motion freezes the scanline and core shimmer
         self._prog["u_intensity"].value = u_intensity
         self._prog["u_hit_flash"].value = self._hit_flash
         self._prog["u_ultra_flash"].value = self._ultra_flash

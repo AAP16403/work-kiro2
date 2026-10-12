@@ -6,6 +6,7 @@ import random
 from pyglet import shapes
 
 import config
+import motion
 from config import FLOOR_MAIN, FLOOR_EDGE, FLOOR_GRID
 from utils import Vec2, to_iso
 
@@ -484,7 +485,9 @@ class Room:
         self._combat_intensity_target = max(0.0, min(1.0, float(target)))
 
     def update(self, dt: float):
-        self._t += dt
+        # Animation clock: frozen by reduced motion, which stops the pulses and the orb drift below.
+        adt = motion.anim_dt(dt)
+        self._t += adt
 
         # Smoothly lerp combat intensity toward target.
         ci = self._combat_intensity
@@ -508,8 +511,8 @@ class Room:
 
         # Ambient background orbs position update
         for orb, vx, vy, phase in self._ambient:
-            orb.x += vx * dt
-            orb.y += vy * dt
+            orb.x += vx * adt
+            orb.y += vy * adt
             if orb.x < -60:
                 orb.x = self._w + 60
             elif orb.x > self._w + 60:

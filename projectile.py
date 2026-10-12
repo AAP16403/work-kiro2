@@ -24,6 +24,9 @@ class Projectile:
     pierce: int = 0
     is_crit: bool = False
     cluster_on_death: bool = False
+    # Name of the weapon that fired this shot ("Basic Gun", ...). Visual lookup only: projectile_art
+    # uses it to pick the look, physics and hit detection never read it.
+    weapon_name: str = ""
 
     def update(self, dt: float) -> bool:
         """Update projectile position and TTL. Returns False if expired."""
@@ -147,4 +150,7 @@ def spawn_projectiles(
             is_crit=is_crit,
         ))
 
+    weapon_label = str(getattr(weapon, "name", ""))
+    for p in projectiles:
+        p.weapon_name = weapon_label
     return projectiles

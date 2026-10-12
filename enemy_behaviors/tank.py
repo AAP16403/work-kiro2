@@ -1,5 +1,5 @@
 """Tank behavior for enemies."""
-from enemy_behaviors.base import Behavior
+from enemy_behaviors.base import Behavior, sustained_cd_scale
 from utils import Vec2
 from projectile import Projectile
 import math
@@ -52,10 +52,11 @@ class Tank(Behavior):
             aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.6)
             vel = aim * proj_speed
             state.projectiles.append(Projectile(enemy.pos, vel, 12, ttl=2.8, owner="enemy"))
+            cd_scale = sustained_cd_scale(enemy)
             if enemy.ai["push_t"] > 0.0:
-                enemy.attack_cd = 1.35 + random.uniform(0.0, 0.2)
+                enemy.attack_cd = (1.35 + random.uniform(0.0, 0.2)) / cd_scale
             else:
-                enemy.attack_cd = 1.9 + random.uniform(0.0, 0.3)
+                enemy.attack_cd = (1.9 + random.uniform(0.0, 0.3)) / cd_scale
 
     def _separation(self, enemy, others, radius: float = 44.0, weight: float = 1.1) -> Vec2:
         """Repel from nearby enemies to reduce stacking."""

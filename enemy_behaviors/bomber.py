@@ -2,7 +2,7 @@
 
 import random
 
-from enemy_behaviors.base import Behavior
+from enemy_behaviors.base import Behavior, sustained_cd_scale
 from projectile import Projectile
 from utils import Vec2
 
@@ -58,7 +58,7 @@ class Bomber(Behavior):
                     projectile_type="bomb",
                 )
             )
-            enemy.attack_cd = 2.0 + random.uniform(0.2, 0.7)
+            enemy.attack_cd = (2.0 + random.uniform(0.2, 0.7)) / sustained_cd_scale(enemy)
 
     def _separation(self, enemy, others, radius: float, weight: float = 1.0) -> Vec2:
         """Repel from nearby enemies to reduce stacking."""

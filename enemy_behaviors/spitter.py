@@ -1,5 +1,5 @@
 """Spitter behavior for enemies."""
-from enemy_behaviors.base import Behavior
+from enemy_behaviors.base import Behavior, sustained_cd_scale
 from utils import Vec2, perp
 from projectile import Projectile
 import math
@@ -46,16 +46,17 @@ class Spitter(Behavior):
         enemy.attack_cd -= dt
         if enemy.attack_cd <= 0.0 and d < 320:
             aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed=210.0, mult=0.85)
+            cd_scale = sustained_cd_scale(enemy)
             if enemy.ai["volley_mode"] == 0:
                 angles = [-22, 0, 22]
                 speed = 210.0
                 damage = 6
-                enemy.attack_cd = 1.4 + random.uniform(0.0, 0.3)
+                enemy.attack_cd = (1.4 + random.uniform(0.0, 0.3)) / cd_scale
             else:
                 angles = [-40, -14, 14, 40]
                 speed = 195.0
                 damage = 5
-                enemy.attack_cd = 1.75 + random.uniform(0.0, 0.35)
+                enemy.attack_cd = (1.75 + random.uniform(0.0, 0.35)) / cd_scale
                 enemy.ai["strafe_sign"] *= -1.0
             for angle_offset in angles:
                 angle_rad = math.radians(angle_offset)

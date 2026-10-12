@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import pyglet
 from pyglet import shapes
 
+from config import ULTRA_MAX_CHARGES_HARD_CAP
 from menu import (
     _ui_scale,
     UI_FONT_HEAD,
@@ -42,7 +43,7 @@ PERM_REWARD_POOL: list[dict] = [
     {"key": "perm_hp", "title": "Hull Plating", "desc": "+6 max HP this run"},
     {"key": "perm_fire", "title": "Trigger Tuning", "desc": "Slightly faster shots this run"},
     {"key": "perm_shield", "title": "Shield Layer", "desc": "+18 shield now"},
-    {"key": "perm_ultra", "title": "Ultra Charge", "desc": "+1 Ultra charge now"},
+    {"key": "perm_ultra", "title": "Ultra Charge", "desc": "+1 Ultra charge now and +1 max (up to 4)"},
     {"key": "perm_dash", "title": "Quick Dash", "desc": "Dash cooldown reduced this run"},
     {"key": "perm_double_dash", "title": "Double Dash", "desc": "+1 dash charge this run"},
     {"key": "perm_boost_cap", "title": "Boost Battery", "desc": "+30 Max Boost energy this run"},
@@ -72,6 +73,11 @@ PERM_REWARD_NAMES: dict[str, str] = {
     "perm_boost_cap": "Boost+",
     "perm_crit": "Crit+",
 }
+
+# Floors and caps shared by apply_perm_reward and the no-op filter in roll_boss_rewards.
+_SHIELD_CAP = 120
+_DASH_CD_FLOOR = 0.6
+_FIRE_RATE_FLOOR = 0.12
 
 # ---------------------------------------------------------------------------
 # Reward computation helpers
@@ -157,7 +163,8 @@ def apply_perm_reward(
 ) -> tuple[float, bool]:
     """Apply a permanent reward to the player.
 
-    Returns ``(updated_dash_cd_mult, applied)``."""
+    ``ultra_max_charges`` is only a fallback base capacity for players that do not
+    track their own ``ultra_max_charges``. Returns ``(updated_dash_cd_mult, applied)``."""
     k = str(key or "").strip().lower()
     applied = True
     if k == "perm_damage":
@@ -168,13 +175,15 @@ def apply_perm_reward(
         player.max_hp = int(getattr(player, "max_hp", player.hp)) + 6
         player.hp = min(int(player.max_hp), int(player.hp) + 6)
     elif k == "perm_fire":
-        player.fire_rate = max(0.12, float(player.fire_rate) - 0.006)
+        player.fire_rate = max(_FIRE_RATE_FLOOR, float(player.fire_rate) - 0.006)
     elif k == "perm_shield":
-        player.shield = min(120, int(getattr(player, "shield", 0)) + 18)
+        player.shield = min(_SHIELD_CAP, int(getattr(player, "shield", 0)) + 18)
     elif k == "perm_ultra":
-        player.ultra_charges = min(ultra_max_charges, int(player.ultra_charges) + 1)
+        cap_now = int(getattr(player, "ultra_max_charges", ultra_max_charges))
+        player.ultra_max_charges = min(ULTRA_MAX_CHARGES_HARD_CAP, cap_now + 1)
+        player.ultra_charges = min(int(player.ultra_max_charges), int(player.ultra_charges) + 1)
     elif k == "perm_dash":
-        dash_cd_mult = max(0.6, float(dash_cd_mult) * 0.90)
+        dash_cd_mult = max(_DASH_CD_FLOOR, float(dash_cd_mult) * 0.90)
     elif k == "perm_double_dash":
         player.dash_max_charges = min(2, int(getattr(player, "dash_max_charges", 1)) + 1)
         player.dash_charges = int(player.dash_max_charges)
@@ -193,12 +202,34 @@ def apply_perm_reward(
     return dash_cd_mult, applied
 
 
+def _perm_is_noop(key: str, player: "Player | None", dash_cd_mult: float) -> bool:
+    """True when applying this permanent reward would change nothing right now."""
+    if key == "perm_dash":
+        return float(dash_cd_mult) <= _DASH_CD_FLOOR
+    if player is None:
+        return False
+    if key == "perm_shield":
+        return int(getattr(player, "shield", 0)) >= _SHIELD_CAP
+    if key == "perm_ultra":
+        return int(getattr(player, "ultra_max_charges", 2)) >= ULTRA_MAX_CHARGES_HARD_CAP
+    if key == "perm_double_dash":
+        return int(getattr(player, "dash_max_charges", 1)) >= 2
+    if key == "perm_fire":
+        return float(getattr(player, "fire_rate", 1.0)) <= _FIRE_RATE_FLOOR
+    return False
+
+
 def roll_boss_rewards(
     active_temp_rewards: list[dict],
     last_temp_key: str,
     last_perm_key: str,
+    player: "Player | None" = None,
+    dash_cd_mult: float = 1.0,
 ) -> tuple[list[dict], list[dict]]:
-    """Pick 3 temp and 3 perm reward candidates. Returns (temp_opts, perm_opts)."""
+    """Pick up to 3 temp and 3 perm reward candidates. Returns (temp_opts, perm_opts).
+
+    Perm candidates that would be no-ops for this player are dropped. When fewer than
+    3 remain, fewer cards are returned rather than re-adding the filtered pool."""
     active_temp = {str(x.get("key", "")) for x in active_temp_rewards}
     temp_candidates = [
         x for x in TEMP_REWARD_POOL
@@ -207,9 +238,10 @@ def roll_boss_rewards(
     if len(temp_candidates) < 3:
         temp_candidates = [x for x in TEMP_REWARD_POOL if x["key"] not in active_temp] or list(TEMP_REWARD_POOL)
 
-    perm_candidates = [x for x in PERM_REWARD_POOL if x["key"] != last_perm_key]
-    if len(perm_candidates) < 3:
-        perm_candidates = list(PERM_REWARD_POOL)
+    perm_candidates = [
+        x for x in PERM_REWARD_POOL
+        if x["key"] != last_perm_key and not _perm_is_noop(x["key"], player, dash_cd_mult)
+    ]
 
     temp_opts = random.sample(temp_candidates, k=min(3, len(temp_candidates)))
     perm_opts = random.sample(perm_candidates, k=min(3, len(perm_candidates)))

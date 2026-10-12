@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from config import PLAYER_HP, ULTRA_MAX_CHARGES
+from config import PLAYER_HP
 from utils import Vec2
 from weapons import WEAPONS
 
@@ -43,7 +43,8 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
         if key in WEAPONS:
             player.current_weapon = WEAPONS[key]
     elif p.kind == "ultra":
-        player.ultra_charges = min(ULTRA_MAX_CHARGES, int(getattr(player, "ultra_charges", 0)) + 1)
+        cap = int(getattr(player, "ultra_max_charges", 2))
+        player.ultra_charges = min(cap, int(getattr(player, "ultra_charges", 0)) + 1)
     elif p.kind == "boost":
         max_energy = float(getattr(player, "boost_max_energy", 100.0))
         player.boost_energy = max_energy

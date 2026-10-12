@@ -1,5 +1,5 @@
 """Engineer behavior for enemies."""
-from enemy_behaviors.base import Behavior
+from enemy_behaviors.base import Behavior, sustained_cd_scale
 from utils import Vec2, perp
 from hazards import Trap
 import random
@@ -47,7 +47,7 @@ class Engineer(Behavior):
             if p.length() > config.ROOM_RADIUS * 0.86:
                 p = p.normalized() * (config.ROOM_RADIUS * 0.86)
             _append_trap_capped(state, Trap(pos=p, radius=28.0, damage=16, ttl=10.0))
-            enemy.attack_cd = 2.9 + random.uniform(0.0, 0.6)
+            enemy.attack_cd = (2.9 + random.uniform(0.0, 0.6)) / sustained_cd_scale(enemy)
 
     def _separation(self, enemy, others, radius: float = 44.0, weight: float = 1.1) -> Vec2:
         """Repel from nearby enemies to reduce stacking."""

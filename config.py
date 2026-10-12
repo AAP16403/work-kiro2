@@ -36,7 +36,8 @@ MAX_ENEMIES = 12  # Maximum concurrent enemies in a wave
 MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter
 
 # Ultra ability (special powerup -> right click)
-ULTRA_MAX_CHARGES = 2
+ULTRA_MAX_CHARGES = 2  # Starting charge capacity; permanent Ultra rewards raise it per run
+ULTRA_MAX_CHARGES_HARD_CAP = 4  # Upper bound for run-scaled Ultra charge capacity
 ULTRA_COOLDOWN = 10.0
 ULTRA_DAMAGE_BASE = 55
 ULTRA_DAMAGE_MULT = 2.7

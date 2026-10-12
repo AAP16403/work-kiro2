@@ -158,3 +158,8 @@ def end_run(run, path=None) -> dict:
         "new_achievements": new_achievements,
         "new_skins": new_skins,
     }
+
+
+# Contract spellings for load and save, so callers written against the cross-wave contract also work.
+load_progress = load
+save_progress = save

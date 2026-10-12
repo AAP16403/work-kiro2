@@ -8,6 +8,7 @@ from enemy import Enemy
 from hazards import Trap, LaserBeam, ThunderLine
 from layout import Obstacle
 from logic import EnemySpawnLogic, EnemyTuningLogic
+from mutators import Mods
 from projectile import Projectile
 from powerup import PowerUp
 from utils import Vec2, random_spawn_map_edge
@@ -41,6 +42,8 @@ class GameState:
     max_enemies: int = 12  # Base per-wave head count from the difficulty table; spawn_wave adds the wave ramp (wave_cap)
     enemy_combo_value: int = 0
     enemy_combo_text: str = ""
+    # Mutator multipliers for this run (mutators.py). Identity unless the title screen selected mutators.
+    mutator_mods: Mods = field(default_factory=Mods)
 
     def init_rng(self, seed: int | None = None) -> None:
         """Initialize or reseed the deterministic RNG used for reproducible runs."""
@@ -59,6 +62,17 @@ def get_difficulty_mods(difficulty: str) -> dict:
     return _TUNING_LOGIC.difficulty_mods(difficulty)
 
 
+def _apply_mutator_stats(state: GameState, hp, speed: float):
+    """Scale a new enemy's HP and speed by the run's mutator multipliers.
+
+    With no mutators (identity Mods) the values come back untouched, so a default run is unchanged.
+    """
+    mods = state.mutator_mods
+    if mods == Mods():
+        return hp, speed
+    return int(round(hp * mods.enemy_hp)), speed * mods.enemy_speed
+
+
 def spawn_wave(state: GameState, center: Vec2):
     """Spawn a new wave of enemies with varied difficulty."""
     state.wave_active = True
@@ -67,11 +81,13 @@ def spawn_wave(state: GameState, center: Vec2):
     if state.wave % 5 == 0:
         behavior_name = get_boss_for_wave(state.wave)
         hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
+        hp, speed = _apply_mutator_stats(state, hp, speed)
         pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type, rng=state.rng)
         e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name, max_hp=hp)
         lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
         atk_cd_scale = max(0.6, min(1.6, float(attack_mult)))
-        e.attack_cd = state.rng.uniform(lo, hi) / atk_cd_scale
+        # enemy_fire_rate above 1 attacks more often, so the cooldown shortens.
+        e.attack_cd = state.rng.uniform(lo, hi) / (atk_cd_scale * state.mutator_mods.enemy_fire_rate)
         e.ai["attack_mult"] = float(attack_mult)
         state.enemies.append(e)
         state.enemy_combo_value = _SPAWN_LOGIC.boss_combo_value(behavior_name)
@@ -105,13 +121,14 @@ def spawn_wave(state: GameState, center: Vec2):
                     elif affix == "shielded":
                         shield_val = int(round(hp * 0.40))
 
+            hp, speed = _apply_mutator_stats(state, hp, speed)
             e = Enemy(
                 pos=pos, hp=hp, speed=speed, behavior=behavior_name,
                 max_hp=hp, is_elite=is_elite, elite_affix=affix, shield=shield_val,
             )
             lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
             atk_cd_scale = max(0.6, min(1.6, float(attack_mult)))
-            e.attack_cd = state.rng.uniform(lo, hi) / atk_cd_scale
+            e.attack_cd = state.rng.uniform(lo, hi) / (atk_cd_scale * state.mutator_mods.enemy_fire_rate)
             e.ai["attack_mult"] = float(attack_mult)
             state.enemies.append(e)
 

@@ -10,6 +10,7 @@ from pyglet import shapes
 import config
 from config import MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
 from fonts import register_ui_fonts
+import mutators
 import title_fx
 import ui_theme
 from ui_theme import FONT_HEAD as UI_FONT_HEAD, FONT_BODY as UI_FONT_BODY, FONT_META as UI_FONT_META
@@ -302,6 +303,15 @@ class Menu:
         self.buttons.append(MenuButton(0, 0, 160, 50, "Settings", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Quit", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)))
 
+        # Mutator chips sit under the button stack. They are kept out of self.buttons so the four
+        # action buttons and their order stay as the game flow expects. Each click saves the selection.
+        self._mutator_selected: set[str] = set(mutators.load_selected_ids())
+        self._mutator_chips: list[tuple[str, MenuButton]] = [
+            (mid, MenuButton(0, 0, 120, 28, mutators.MUTATORS[mid].name, lambda: None,
+                             color=(52, 62, 84), hover_color=(78, 92, 122), font_size=11))
+            for mid in mutators.MUTATOR_ORDER
+        ]
+
         self.title = pyglet.text.Label(
             "P L O U T O",
             font_name=ui_theme.font_name("display"),
@@ -332,8 +342,22 @@ class Menu:
         )
 
         self._hint_parts: list = []
+        self._mutator_label = pyglet.text.Label(
+            "MUTATORS",
+            font_name=ui_theme.font_name("caption"),
+            font_size=ui_theme.font_size("caption", 1.0),
+            x=0,
+            y=0,
+            anchor_x="right",
+            anchor_y="center",
+            color=(*ui_theme.MUTED, 255),
+            batch=self.batch,
+        )
         for btn in self.buttons:
             btn.ensure(self.batch)
+        for _, chip in self._mutator_chips:
+            chip.ensure(self.batch)
+        self._sync_mutator_chips()
         self.resize(width, height)
 
     def update(self, dt: float):
@@ -420,6 +444,7 @@ class Menu:
         self.subtitle.y = height - int(122 * scale)
         self.subtitle.width = max(320, width - 64)
         self._layout_hints(cx, scale)
+        self._layout_mutators(cx, scale, panel_y)
 
         self._bg_a.width = width
         self._bg_a.height = height
@@ -459,11 +484,58 @@ class Menu:
             ))
             x += key_w + key_gap + action_w + item_gap
 
+    def _layout_mutators(self, cx: int, scale: float, panel_y: int) -> None:
+        """Place the mutator chip row midway between the button panel and the key-hint row."""
+        chip_w = int(124 * scale)
+        chip_h = int(28 * scale)
+        gap = int(10 * scale)
+        font = max(9, int(11 * scale))
+        count = len(self._mutator_chips)
+        total = count * chip_w + (count - 1) * gap
+        left = cx - total / 2.0
+        hint_top = int(26 * scale) + ui_theme.chip_height(scale)
+        row_cy = (panel_y + hint_top) / 2.0
+        for i, (_, chip) in enumerate(self._mutator_chips):
+            chip.width = chip_w
+            chip.height = chip_h
+            chip.font_size = font
+            chip.x = int(left + i * (chip_w + gap))
+            chip.y = int(row_cy - chip_h / 2.0)
+            chip.sync()
+        self._mutator_label.x = int(left - gap)
+        self._mutator_label.y = int(row_cy)
+        _sync_label_style_if_ready(self._mutator_label, ui_theme.font_name("caption"), ui_theme.font_size("caption", scale))
+
+    def _sync_mutator_chips(self) -> None:
+        """Show each chip as on or off from the current selection."""
+        for mid, chip in self._mutator_chips:
+            on = mid in self._mutator_selected
+            chip.color = (62, 128, 205) if on else (52, 62, 84)
+            chip.hover_color = (100, 160, 245) if on else (78, 92, 122)
+            chip.sync()
+
+    def _toggle_mutator(self, mid: str) -> None:
+        if mid in self._mutator_selected:
+            self._mutator_selected.discard(mid)
+        else:
+            self._mutator_selected.add(mid)
+        # The selection is kept in memory for this session (runs read it from here); the save only makes it
+        # survive a restart, so a failed write costs that and nothing else.
+        mutators.save_selected_ids(self.selected_mutator_ids())
+        self._sync_mutator_chips()
+
+    def selected_mutator_ids(self) -> tuple:
+        """The chosen mutator ids in display order."""
+        return mutators.normalise_ids(self._mutator_selected)
+
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
         for button in self.buttons:
             button.is_hovered = button.contains_point(x, y)
             button.sync()
+        for _, chip in self._mutator_chips:
+            chip.is_hovered = chip.contains_point(x, y)
+            chip.sync()
 
     def on_mouse_press(self, x: float, y: float, button: int) -> str | None:
         """Handle mouse clicks. Returns action string or None."""
@@ -481,6 +553,10 @@ class Menu:
                     return "settings"
                 elif btn.text == "Quit":
                     return "quit"
+        for mid, chip in self._mutator_chips:
+            if chip.contains_point(x, y):
+                self._toggle_mutator(mid)
+                return None
         return None
 
     def draw(self):
@@ -1479,6 +1555,10 @@ class GuideMenu:
         row_top = top_y - int(26 * scale)
         row_h = int(88 * scale)
         row_gap = int(10 * scale)
+        # Rows per page are whatever fits between the first row and the nav strip (Prev/Next and the
+        # footer), so no row is placed below the window or under the controls. The rest move to later pages.
+        nav_top = panel_y + int(74 * scale)
+        self.rows_per_page = max(1, min(len(self._rows), (row_top - nav_top + row_gap) // (row_h + row_gap)))
         row_x = panel_x + int(24 * scale)
         row_w = panel_w - int(48 * scale)
         # Threat/Counter is one line: its font shrinks (see _fit_desc) rather than running past the row edge.
@@ -1709,6 +1789,7 @@ _GO_STAGE_SPAN = {
     "high": (0.56, 0.80),
     "new_high": (0.62, 0.84),
     "stats": (0.68, 0.90),
+    "mutators": (0.72, 0.92),
     "buttons": (0.78, 0.96),
     "hint": (0.86, 1.00),
 }
@@ -1834,6 +1915,19 @@ class GameOverMenu:
             batch=self.batch,
         )
 
+        # The mutators this run was played with, with their combined multiplier (set_mutators).
+        self.mutator_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=13,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=_GO_STAT_RGBA,
+            batch=self.batch,
+        )
+
         self._scale = 1.0
         self._score_value = 0
         self._shown_score: int | None = None
@@ -1847,6 +1941,7 @@ class GameOverMenu:
             "high": [(self.high_score_label, 220)],
             "new_high": [(self.new_high_label, 255)],
             "stats": [(label, _GO_STAT_RGBA[3]) for label in self.stats_labels],
+            "mutators": [(self.mutator_label, _GO_STAT_RGBA[3])],
             "hint": [(self.hint_label, 220)],
         }
         self._reveal_t = float(getattr(config, "GAME_OVER_REVEAL_S", 1.0))
@@ -1870,7 +1965,8 @@ class GameOverMenu:
             btn.font_size = font
 
         gap = int(18 * scale)
-        btn_start_y = cy - int(70 * scale)
+        # The buttons sit lower than they used to, to leave a line for the mutator summary above them.
+        btn_start_y = cy - int(86 * scale)
         ys = [btn_start_y, btn_start_y - (button_h + gap)]
         self._button_base_y = ys
         for btn in self.buttons:
@@ -1884,6 +1980,7 @@ class GameOverMenu:
             "high": height - int(225 * scale),
             "new_high": height - int(255 * scale),
             "stats": height - int(290 * scale),
+            "mutators": height - int(312 * scale),
             "hint": ys[1] - int(28 * scale),
         }
 
@@ -1908,6 +2005,9 @@ class GameOverMenu:
             label.x = cx + int((i - 1.5) * col_w)
             _sync_label_style_if_ready(label, UI_FONT_META, stat_font)
 
+        self.mutator_label.x = cx
+        _sync_label_style_if_ready(self.mutator_label, UI_FONT_META, max(10, int(13 * scale)))
+
         self.hint_label.x = cx
         _sync_label_style_if_ready(self.hint_label, UI_FONT_META, max(10, int(13 * scale)))
 
@@ -1915,6 +2015,10 @@ class GameOverMenu:
         self.set_reveal(self._reveal_t, self._reveal_total)
         for btn in self.buttons:
             btn.sync()
+
+    def set_mutators(self, ids):
+        """Show the mutators this run was played with and their combined multiplier."""
+        self.mutator_label.text = mutators.summary_line(ids)
 
     def set_wave(self, wave: int):
         """Legacy compat."""

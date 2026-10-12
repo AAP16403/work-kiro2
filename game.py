@@ -53,6 +53,7 @@ from advanced_fx import AdvancedFX
 from score import ScoreTracker
 from achievements import RunStats
 import progress as meta_progress
+import mutators
 from hud import HUD
 from states import (
     MenuState,
@@ -72,6 +73,15 @@ from states import (
 # ============================
 # Main Game Class
 # ============================
+def _mutator_mods_of(game) -> mutators.Mods:
+    """The mutator multipliers of a game's current run. Identity when no run has started.
+
+    Module-level so the stat hooks also work on the lightweight stand-ins the balance tests pass in.
+    """
+    mods = getattr(getattr(game, "state", None), "mutator_mods", None)
+    return mods if isinstance(mods, mutators.Mods) else mutators.Mods()
+
+
 class Game(pyglet.window.Window):
     """Main game window and logic."""
 
@@ -122,6 +132,8 @@ class Game(pyglet.window.Window):
             music_volume=music_vol,
             sfx_volume=sfx_vol,
         )
+        # Mutator ids the current run was started with; set by _init_game, read by the Game Over screen.
+        self.run_mutator_ids: tuple = ()
         self.guide_menu = GuideMenu(self.width, self.height)
         self.pause_menu = PauseMenu(self.width, self.height)
         self.rpg_menu = BossRewardMenu(self.width, self.height, self._apply_temp_reward, self._apply_perm_reward)
@@ -234,6 +246,10 @@ class Game(pyglet.window.Window):
         self.state = GameStateData(difficulty=difficulty, map_type=self.settings.get("map_type", MAP_CIRCLE))
         # Deterministic RNG for this run (seed stored on state for reproducibility).
         self.state.init_rng()
+        # Mutators: the title-screen selection (what the chips show), applied once here for the whole run.
+        menu = getattr(self, "main_menu", None)
+        self.run_mutator_ids = menu.selected_mutator_ids() if menu is not None else mutators.load_selected_ids()
+        self.state.mutator_mods = mutators.combined(self.run_mutator_ids)
 
         # Base per-wave head count lives in logic.py's difficulty table (the wave ramp is applied in level.spawn_wave).
         self.state.max_enemies = int(get_difficulty_mods(difficulty).get("max_enemies", 12))
@@ -287,17 +303,20 @@ class Game(pyglet.window.Window):
         if not self.player:
             return 0
         # Half-up rounding (not round(), which is banker's rounding at .5) so the 1.28 Overdrive multiplier lands predictably.
-        return max(1, math.floor(float(self.player.damage) * float(getattr(self, "_temp_damage_mult", 1.0)) + 0.5))
+        raw = float(self.player.damage) * float(getattr(self, "_temp_damage_mult", 1.0)) * _mutator_mods_of(self).player_damage
+        return max(1, math.floor(raw + 0.5))
 
     def _effective_player_speed(self) -> float:
         if not self.player:
             return 0.0
-        return float(self.player.speed) * float(getattr(self, "_temp_speed_mult", 1.0))
+        return float(self.player.speed) * float(getattr(self, "_temp_speed_mult", 1.0)) * _mutator_mods_of(self).player_speed
 
     def _effective_player_fire_rate(self) -> float:
         if not self.player:
             return 0.28
-        return max(0.08, float(self.player.fire_rate) * float(getattr(self, "_temp_fire_rate_mult", 1.0)))
+        # fire_rate is the cooldown between shots, so a faster mutator divides it.
+        interval = float(self.player.fire_rate) * float(getattr(self, "_temp_fire_rate_mult", 1.0))
+        return max(0.08, interval / _mutator_mods_of(self).player_fire_rate)
 
     def _effective_crit_chance(self) -> float:
         if not self.player:

@@ -23,6 +23,23 @@ from utils import to_iso, Vec2, enemy_behavior_name
 # Reduce group churn by bucketing depth values.
 DEPTH_BUCKET = 16
 
+# pyglet rebuilds a circle's or arc's vertices on every radius assignment, so a per-frame pulse that
+# rewrites an unchanged radius is pure cost. Radii are quantised to this step (half a pixel, below what
+# these rings resolve), and a shape is only written when its quantised radius changes.
+RADIUS_STEP = 0.5
+
+
+def _set_radius(shape, value: float) -> None:
+    """Write a shape's radius only when its quantised value changes. Never writes zero for a positive value."""
+    value = float(value)
+    quantised = round(value / RADIUS_STEP) * RADIUS_STEP
+    if quantised <= 0.0 < value:
+        quantised = RADIUS_STEP
+    if getattr(shape, "_written_radius", None) == quantised:
+        return
+    shape._written_radius = quantised
+    shape.radius = quantised
+
 
 # Indexes of the eye shapes inside each enemy handle (see Visuals.ensure_enemy). The eye glows read them.
 _EYE_SLOTS = {
@@ -169,7 +186,7 @@ class Visuals:
         for i, ring in enumerate(self._scene_rings):
             ring.x = center_x
             ring.y = center_y
-            ring.radius = (180 + i * 42) + 6.0 * math.sin(t * (0.8 + i * 0.3))
+            _set_radius(ring, (180 + i * 42) + 6.0 * math.sin(t * (0.8 + i * 0.3)))
             ring.opacity = int(16 + 10 * i + (8 + 10 * ci) * (0.5 + 0.5 * math.sin(t * (1.1 + i * 0.15))))
 
         for star, vx, vy, phase in self._scene_stars:
@@ -423,7 +440,7 @@ class Visuals:
         if is_boosting:
             bpulse = 0.65 + 0.35 * math.sin(t * 22.0)
             boost_ring.x, boost_ring.y = cx, cy
-            boost_ring.radius = 26 + 3.0 * bpulse
+            _set_radius(boost_ring, 26 + 3.0 * bpulse)
             boost_ring.opacity = int(140 + 80 * bpulse)
         else:
             boost_ring.opacity = 0
@@ -433,8 +450,8 @@ class Visuals:
             pulse = 0.65 + 0.35 * math.sin(t * 6.5)
             shield_ring.x, shield_ring.y = cx, cy
             shield_ring2.x, shield_ring2.y = cx, cy
-            shield_ring.radius = 18 + 2.0 * pulse
-            shield_ring2.radius = 24 + 3.0 * pulse
+            _set_radius(shield_ring, 18 + 2.0 * pulse)
+            _set_radius(shield_ring2, 24 + 3.0 * pulse)
             shield_ring.opacity = int(90 + min(SHIELD_MAX, player.shield) * 1.0 * pulse)
             shield_ring2.opacity = int(60 + min(SHIELD_MAX, player.shield) * 0.5 * pulse)
         else:
@@ -445,7 +462,7 @@ class Visuals:
         if getattr(player, "laser_until", 0.0) > t:
             pulse = 0.6 + 0.4 * math.sin(t * 10.0)
             laser_ring.x, laser_ring.y = cx, cy
-            laser_ring.radius = 22 + 3.0 * pulse
+            _set_radius(laser_ring, 22 + 3.0 * pulse)
             laser_ring.opacity = int(160 * pulse)
         else:
             laser_ring.opacity = 0
@@ -712,7 +729,7 @@ class Visuals:
             elif behavior == "boss_trapmaster":
                 sh, glow, ring, crown, body, gear = h.objs
                 gear.x, gear.y = sx, sy + bob
-                gear.radius = 26 + 1.5 * math.sin(enemy.t * 3.2)
+                _set_radius(gear, 26 + 1.5 * math.sin(enemy.t * 3.2))
             elif behavior == "boss_swarmqueen":
                 sh, glow, ring, crown, body, orb1, orb2, orb3 = h.objs
                 r = 20
@@ -740,7 +757,7 @@ class Visuals:
             ring.x, ring.y = sx, sy + bob
             crown.x, crown.y = sx, sy + bob
             body.x, body.y = sx, sy + bob
-            crown.radius = 24 + 2.0 * (0.5 + 0.5 * math.sin(enemy.t * 4.0))
+            _set_radius(crown, 24 + 2.0 * (0.5 + 0.5 * math.sin(enemy.t * 4.0)))
 
             self._set_depth(h, sy, shake)
             return
@@ -754,11 +771,11 @@ class Visuals:
             exploding = bool(getattr(enemy, "ai", {}).get("bomber_exploding", False))
             if exploding:
                 pulse = 0.5 + 0.5 * math.sin(enemy.t * 30)
-                core.radius = 8 + 4 * pulse
+                _set_radius(core, 8 + 4 * pulse)
                 core.opacity = 255
                 fuse_speed = 18.0
             else:
-                core.radius = 8
+                _set_radius(core, 8)
                 core.opacity = 200
                 fuse_speed = 4.0
             # Fuse spark orbits the body
@@ -779,7 +796,7 @@ class Visuals:
             tool2.x, tool2.y, tool2.x2, tool2.y2 = sx + 10, sy + 6 + bob, sx + 16, sy + 12 + bob
             # Rotating gear arc
             gear.x, gear.y = sx - 12, sy + 2 + bob
-            gear.radius = 17 + 1.5 * math.sin(enemy.t * 5.0)
+            _set_radius(gear, 17 + 1.5 * math.sin(enemy.t * 5.0))
             gear.opacity = 40 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 3.0)))
             self._set_depth(h, sy, shake)
             return
@@ -795,16 +812,16 @@ class Visuals:
                  pulse = 0.8 + 0.3 * math.sin(enemy.t * 18.0)
             
             body.x, body.y = sx, sy + bob
-            body.radius = max(0.1, 15 * pulse)
+            _set_radius(body, max(0.1, 15 * pulse))
             
             vein1.x, vein1.y = sx, sy + bob
-            vein1.radius = max(0.1, 14 * pulse)
+            _set_radius(vein1, max(0.1, 14 * pulse))
             
             vein2.x, vein2.y = sx, sy + bob
-            vein2.radius = max(0.1, 10 * pulse)
+            _set_radius(vein2, max(0.1, 10 * pulse))
 
             core.x, core.y = sx, sy + bob
-            core.radius = max(0.1, 6 * pulse + 2 * math.sin(enemy.t * 12.0))
+            _set_radius(core, max(0.1, 6 * pulse + 2 * math.sin(enemy.t * 12.0)))
             
             self._set_depth(h, sy, shake)
             return
@@ -818,7 +835,7 @@ class Visuals:
             eye.x, eye.y = sx + 6, sy + 2 + bob * 0.4
             # Rotating shield ring
             shield_ring.x, shield_ring.y = sx, sy + bob * 0.4
-            shield_ring.radius = 22 + 1.0 * math.sin(enemy.t * 2.0)
+            _set_radius(shield_ring, 22 + 1.0 * math.sin(enemy.t * 2.0))
             shield_ring.opacity = 50 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 1.5)))
             self._set_depth(h, sy, shake)
             return
@@ -900,7 +917,7 @@ class Visuals:
             mouth.x3, mouth.y3 = sx + 18, sy - 4 + bob
             # Pulsing acid glow
             acid_glow.x, acid_glow.y = sx, sy + bob
-            acid_glow.radius = 14 + 3 * math.sin(enemy.t * 4.0)
+            _set_radius(acid_glow, 14 + 3 * math.sin(enemy.t * 4.0))
             acid_glow.opacity = 18 + int(14 * (0.5 + 0.5 * math.sin(enemy.t * 5.0)))
             self._set_depth(h, sy, shake)
             return
@@ -930,7 +947,7 @@ class Visuals:
             body.x, body.y = sx, sy + bob
             # Pulsing aura ring
             aura.x, aura.y = sx, sy + bob
-            aura.radius = 16 + 4 * math.sin(enemy.t * 3.5)
+            _set_radius(aura, 16 + 4 * math.sin(enemy.t * 3.5))
             aura.opacity = 30 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 2.5)))
             # Rotating spikes
             t_rot = enemy.t * 1.8
@@ -1133,7 +1150,7 @@ class Visuals:
         base.x, base.y = sx, sy + 2
         top.x, top.y = sx, sy + 12
         ring.x, ring.y = sx, sy + 2
-        ring.radius = r * (1.02 + 0.03 * math.sin(sy * 0.02))
+        _set_radius(ring, r * (1.02 + 0.03 * math.sin(sy * 0.02)))
         self._set_depth(h, sy, shake)
 
     def drop_obstacle(self, ob):

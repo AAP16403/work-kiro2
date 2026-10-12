@@ -1002,6 +1002,7 @@ class GameOverState(State):
             points_to_next=getattr(score_obj, "last_points_to_next", None),
             is_new_high=is_new_high,
         )
+        game.game_over_menu.set_mutators(getattr(game, "run_mutator_ids", ()))
         # One instance serves every run, so the reveal clock and the input lock restart on each entry.
         self._t0 = float(game._render_time)
         self._armed_at = self._t0 + float(config.GAME_OVER_REVEAL_S)

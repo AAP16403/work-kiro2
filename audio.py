@@ -8,12 +8,13 @@ Volume settings persist in user_settings.json (project root, or next to the
 executable in a frozen build) under the keys "music_volume" and "sfx_volume".
 """
 
-import json
 import math
 import os
 import random
 import sys
 import time
+
+from savefile import load_settings, update_settings
 
 
 def _resource_path(*parts: str) -> str:
@@ -354,11 +355,9 @@ def load_audio_settings() -> tuple[float, float]:
     """Return (music, sfx) volumes from user_settings.json. Never raises."""
     music, sfx = _DEFAULT_MUSIC_VOLUME, _DEFAULT_SFX_VOLUME
     try:
-        with open(_SETTINGS_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            music = _coerce_volume(data.get("music_volume"), music)
-            sfx = _coerce_volume(data.get("sfx_volume"), sfx)
+        data = load_settings(_SETTINGS_PATH)
+        music = _coerce_volume(data.get("music_volume"), music)
+        sfx = _coerce_volume(data.get("sfx_volume"), sfx)
     except Exception:
         pass
     return music, sfx
@@ -366,24 +365,10 @@ def load_audio_settings() -> tuple[float, float]:
 
 def save_audio_settings(music: float, sfx: float) -> None:
     """Write music/sfx volumes to user_settings.json, keeping other keys. Never raises."""
-    path = _SETTINGS_PATH
-    tmp = path + ".tmp"
     try:
-        data = {}
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                existing = json.load(fh)
-            if isinstance(existing, dict):
-                data = existing
-        except Exception:
-            data = {}
-        data["music_volume"] = _coerce_volume(music, _DEFAULT_MUSIC_VOLUME)
-        data["sfx_volume"] = _coerce_volume(sfx, _DEFAULT_SFX_VOLUME)
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-        os.replace(tmp, path)
+        update_settings(_SETTINGS_PATH, {
+            "music_volume": _coerce_volume(music, _DEFAULT_MUSIC_VOLUME),
+            "sfx_volume": _coerce_volume(sfx, _DEFAULT_SFX_VOLUME),
+        })
     except Exception:
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
+        pass

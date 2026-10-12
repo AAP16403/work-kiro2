@@ -3,17 +3,16 @@
 Stored in user_settings.json beside the audio volumes (same file, same folder as audio.py).
 Writes read the file first and keep every other key, so audio saves never drop this setting and
 vice versa. Every read and write is guarded: a broken settings file must never reach the game loop.
+Reads and writes go through savefile (versioned, atomic, corrupt files quarantined).
 
 The canonical key is SHAKE_LEVEL_KEY ("shake_level"). The older boolean REDUCED_SHAKE_KEY is still
 read when the level key is missing (true maps to Reduced, false to Full), and every save writes it
 back as a derived flag (level is not Full) so older readers keep working.
 """
 
-import json
-import os
-
 import audio as _audio
 import config
+from savefile import load_settings, update_settings
 
 SHAKE_LEVEL_KEY = "shake_level"
 REDUCED_SHAKE_KEY = "reduced_shake"
@@ -44,15 +43,13 @@ def shake_level_is_reduced(level) -> bool:
 def load_shake_level(default: str = "full") -> str:
     """Return the saved shake level, or ``default`` when absent or unreadable. Never raises."""
     try:
-        with open(_audio._SETTINGS_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            level = data.get(SHAKE_LEVEL_KEY)
-            if isinstance(level, str) and level in config.SHAKE_LEVELS:
-                return level
-            legacy = data.get(REDUCED_SHAKE_KEY)
-            if isinstance(legacy, bool):
-                return "reduced" if legacy else "full"
+        data = load_settings(_audio._SETTINGS_PATH)
+        level = data.get(SHAKE_LEVEL_KEY)
+        if isinstance(level, str) and level in config.SHAKE_LEVELS:
+            return level
+        legacy = data.get(REDUCED_SHAKE_KEY)
+        if isinstance(legacy, bool):
+            return "reduced" if legacy else "full"
     except Exception:
         pass
     return normalize_shake_level(default)
@@ -61,27 +58,13 @@ def load_shake_level(default: str = "full") -> str:
 def save_shake_level(level) -> None:
     """Write the shake level and its derived reduced flag to user_settings.json. Never raises."""
     lvl = normalize_shake_level(level)
-    path = _audio._SETTINGS_PATH
-    tmp = path + ".tmp"
     try:
-        data = {}
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                existing = json.load(fh)
-            if isinstance(existing, dict):
-                data = existing
-        except Exception:
-            data = {}
-        data[SHAKE_LEVEL_KEY] = lvl
-        data[REDUCED_SHAKE_KEY] = shake_level_is_reduced(lvl)
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-        os.replace(tmp, path)
+        update_settings(_audio._SETTINGS_PATH, {
+            SHAKE_LEVEL_KEY: lvl,
+            REDUCED_SHAKE_KEY: shake_level_is_reduced(lvl),
+        })
     except Exception:
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
+        pass
 
 
 def load_reduced_shake(default: bool = False) -> bool:

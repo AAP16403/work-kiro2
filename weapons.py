@@ -9,6 +9,7 @@ from config import (
     FIRE_RATE_RATIO_MIN,
     FIRE_RATE_RATIO_MAX,
     FIRE_RATE_CURVE,
+    WEAPON_WAVE_UPGRADE_CHANCE,
 )
 import random
 import math
@@ -33,12 +34,16 @@ class Weapon:
     pierce: int = 0
     crit_chance: float = 0.10
     crit_mult: float = 2.0
+    # Upgrade order, ascending expected single-target DPS at PLAYER_DAMAGE:
+    # (damage + 5) * projectile_count * (1 + crit_chance * (crit_mult - 1)) / fire_rate. See is_weapon_upgrade.
+    rank: int = 0
 
 
 # Weapon definitions
 WEAPONS = {
     "basic": Weapon(
         name="Basic Gun",
+        rank=1,
         damage=10,
         fire_rate=0.28,
         projectile_count=1,
@@ -52,6 +57,7 @@ WEAPONS = {
     ),
     "spread": Weapon(
         name="Spread Shot",
+        rank=5,
         damage=8,
         fire_rate=0.35,
         projectile_count=3,
@@ -65,6 +71,7 @@ WEAPONS = {
     ),
     "rapid": Weapon(
         name="Rapid Fire",
+        rank=3,
         damage=6,
         fire_rate=0.12,
         projectile_count=1,
@@ -78,6 +85,7 @@ WEAPONS = {
     ),
     "heavy": Weapon(
         name="Heavy Cannon",
+        rank=2,
         damage=20,
         fire_rate=0.40,
         projectile_count=1,
@@ -91,6 +99,7 @@ WEAPONS = {
     ),
     "plasma": Weapon(
         name="Plasma Rifle",
+        rank=6,
         damage=12,
         fire_rate=0.26,
         projectile_count=2,
@@ -106,6 +115,7 @@ WEAPONS = {
     ),
     "railgun": Weapon(
         name="Hyper Railgun",
+        rank=4,
         damage=40,
         fire_rate=0.50,
         projectile_count=1,
@@ -122,6 +132,7 @@ WEAPONS = {
     ),
     "flak": Weapon(
         name="Flak Battery",
+        rank=7,
         damage=11,
         fire_rate=0.35,
         projectile_count=5,
@@ -148,21 +159,74 @@ def get_weapon_pool_for_wave(wave: int) -> list[str]:
     return ["spread", "plasma", "heavy", "railgun", "flak"]
 
 
-def get_weapon_key_for_wave(wave: int) -> str:
-    """Pick a random weapon key appropriate for the wave."""
+def _pool_weights_for_wave(w: int) -> list[float]:
+    """Selection weights, aligned with get_weapon_pool_for_wave(w)."""
+    if w <= 2:
+        return [1.0]
+    if w <= 4:
+        # Keep basic common early; introduce rapid/spread gradually.
+        return [0.50, 0.25, 0.25]
+    if w <= 6:
+        return [0.30, 0.25, 0.25, 0.20]
+    # High wave variety
+    return [0.22, 0.22, 0.18, 0.18, 0.20]
+
+
+def get_weapon_key_for_wave(wave: int, rng: random.Random | None = None) -> str:
+    """Pick a weapon key appropriate for the wave.
+
+    Pass the run's seeded RNG so the pick is reproducible; the global random module is the fallback.
+    """
     w = int(wave)
     pool = get_weapon_pool_for_wave(w)
-    if w <= 2:
-        weights = [1.0]
-    elif w <= 4:
-        # Keep basic common early; introduce rapid/spread gradually.
-        weights = [0.50, 0.25, 0.25]
-    elif w <= 6:
-        weights = [0.30, 0.25, 0.25, 0.20]
-    else:
-        # High wave variety
-        weights = [0.22, 0.22, 0.18, 0.18, 0.20]
-    return random.choices(pool, weights=weights, k=1)[0]
+    weights = _pool_weights_for_wave(w)
+    chooser = random if rng is None else rng
+    return chooser.choices(pool, weights=weights, k=1)[0]
+
+
+def is_weapon_upgrade(current: Weapon | None, candidate: Weapon | None) -> bool:
+    """True when candidate strictly outranks current (any real weapon beats having none)."""
+    if candidate is None:
+        return False
+    if current is None:
+        return True
+    return int(candidate.rank) > int(current.rank)
+
+
+def get_upgrade_key_for_wave(wave: int, current: Weapon | None, rng: random.Random | None = None) -> str:
+    """Pick a wave-pool weapon that outranks `current`, for boss drops.
+
+    Rolls among the pool weapons above the current rank, weighted like get_weapon_key_for_wave.
+    When nothing in the pool outranks the current weapon, returns the highest-ranked pool weapon;
+    apply_powerup then treats that pickup as a shield top-up rather than a downgrade.
+    """
+    w = int(wave)
+    pool = get_weapon_pool_for_wave(w)
+    weights = _pool_weights_for_wave(w)
+    cur_rank = int(current.rank) if current is not None else 0
+    above = [(key, wt) for key, wt in zip(pool, weights) if int(WEAPONS[key].rank) > cur_rank]
+    if not above:
+        return max(pool, key=lambda k: int(WEAPONS[k].rank))
+    chooser = random if rng is None else rng
+    keys = [key for key, _ in above]
+    return chooser.choices(keys, weights=[wt for _, wt in above], k=1)[0]
+
+
+def roll_wave_clear_upgrade(
+    current: Weapon | None,
+    wave: int,
+    rng: random.Random | None = None,
+    chance: float = WEAPON_WAVE_UPGRADE_CHANCE,
+) -> Weapon | None:
+    """Wave-clear weapon roll: with probability `chance` draw a pool weapon and return it only if it outranks `current`.
+
+    Returns None when there is no upgrade, so the current weapon stays. Draws come from `rng` so the run stays reproducible.
+    """
+    chooser = random if rng is None else rng
+    if chooser.random() >= float(chance):
+        return None
+    candidate = WEAPONS[get_weapon_key_for_wave(int(wave), rng=rng)]
+    return candidate if is_weapon_upgrade(current, candidate) else None
 
 
 def get_effective_fire_rate(weapon: Weapon, player_fire_rate: float) -> float:
@@ -178,9 +242,9 @@ def get_effective_fire_rate(weapon: Weapon, player_fire_rate: float) -> float:
     return max(FIRE_RATE_MIN, base * ratio)
 
 
-def get_weapon_for_wave(wave: int) -> Weapon:
+def get_weapon_for_wave(wave: int, rng: random.Random | None = None) -> Weapon:
     """Get a random weapon appropriate for the wave."""
-    return WEAPONS[get_weapon_key_for_wave(int(wave))]
+    return WEAPONS[get_weapon_key_for_wave(int(wave), rng=rng)]
 
 
 def get_weapon_color(weapon_type: str) -> tuple:

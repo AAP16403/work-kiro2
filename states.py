@@ -21,7 +21,7 @@ from physics import resolve_circle_obstacles
 from level import spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death, get_difficulty_mods
 from enemy import update_enemy
 from powerup import apply_powerup
-from weapons import get_weapon_for_wave, get_effective_fire_rate
+from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
 from fsm import State
 from hazards import LaserBeam
@@ -305,7 +305,7 @@ class PlayingState(State):
             if dist(game.player.pos, e.pos) <= v_r:
                 game._damage_player(20)
 
-        spawn_loot_on_enemy_death(s, behavior_name, e.pos)
+        spawn_loot_on_enemy_death(s, behavior_name, e.pos, current_weapon=getattr(game.player, "current_weapon", None))
         if getattr(game, 'score', None):
             game.score.on_enemy_kill(behavior_name, multiplier=(float(config.ELITE_SCORE_MULT) if is_elite else 1.0))
 
@@ -676,7 +676,10 @@ class PlayingState(State):
             new_segment = (s.wave - 1) // 5
             if config.ENABLE_OBSTACLES and new_segment != getattr(s, "layout_segment", 0):
                 game._regen_layout(new_segment)
-            game.player.current_weapon = get_weapon_for_wave(s.wave)
+            # Weapons only ever upgrade at a wave clear: a seeded roll that equips a pool weapon only if it outranks the current one.
+            upgrade = roll_wave_clear_upgrade(getattr(game.player, "current_weapon", None), s.wave, s.rng)
+            if upgrade is not None:
+                game.player.current_weapon = upgrade
             maybe_spawn_powerup(s, Vec2(0.0, 0.0))
 
             if cleared_wave % 5 == 0:

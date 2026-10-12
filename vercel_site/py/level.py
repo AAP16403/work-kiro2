@@ -11,7 +11,7 @@ from logic import EnemySpawnLogic, EnemyTuningLogic
 from projectile import Projectile
 from powerup import PowerUp
 from utils import Vec2, random_spawn_map_edge
-from weapons import get_weapon_key_for_wave
+from weapons import Weapon, get_upgrade_key_for_wave, get_weapon_key_for_wave
 
 
 @dataclass
@@ -38,7 +38,7 @@ class GameState:
     wave_active: bool = False
     last_wave_clear: float = 0.0
     shake: float = 0.0
-    max_enemies: int = 12  # Limit concurrent enemies
+    max_enemies: int = 12  # Base per-wave head count from the difficulty table; spawn_wave adds the wave ramp (wave_cap)
     enemy_combo_value: int = 0
     enemy_combo_text: str = ""
 
@@ -50,8 +50,8 @@ class GameState:
         self.rng = random.Random(self.seed)
 
 
-_SPAWN_LOGIC = EnemySpawnLogic()
 _TUNING_LOGIC = EnemyTuningLogic()
+_SPAWN_LOGIC = EnemySpawnLogic(_TUNING_LOGIC)
 
 
 def get_difficulty_mods(difficulty: str) -> dict:
@@ -78,7 +78,9 @@ def spawn_wave(state: GameState, center: Vec2):
         state.enemy_combo_text = f"BOSS {behavior_name[5:].upper()}"
         return
 
-    plan = _SPAWN_LOGIC.plan_wave(state.wave, state.difficulty, state.max_enemies)
+    # Boss adds keep using the base state.max_enemies; only the regular wave head count ramps up.
+    wave_cap = _SPAWN_LOGIC.wave_cap(state.wave, state.max_enemies)
+    plan = _SPAWN_LOGIC.plan_wave(state.wave, state.difficulty, wave_cap)
     state.enemy_combo_value = int(plan.combo_value)
     state.enemy_combo_text = str(plan.combo_text)
 
@@ -159,12 +161,13 @@ def spawn_powerup_on_kill(state: GameState, center: Vec2):
             state._kills_since_ultra = 0
 
 
-def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2):
+def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2, current_weapon: Weapon | None = None):
     """Spawn loot when an enemy dies (bosses drop better rewards)."""
     b = str(behavior or "")
     if b.startswith("boss_"):
-        # Bosses always drop a weapon and at least one regular powerup.
-        state.powerups.append(PowerUp(center + Vec2(state.rng.uniform(-20, 20), state.rng.uniform(-20, 20)), "weapon", data=get_weapon_key_for_wave(state.wave + 1)))
+        # Bosses always drop a weapon (an upgrade over current_weapon when one exists) and at least one regular powerup.
+        boss_weapon_key = get_upgrade_key_for_wave(state.wave + 1, current_weapon, rng=state.rng)
+        state.powerups.append(PowerUp(center + Vec2(state.rng.uniform(-20, 20), state.rng.uniform(-20, 20)), "weapon", data=boss_weapon_key))
         # One guaranteed sustain/utility drop.
         kind = state.rng.choice(["heal", "shield", "laser"])
         state.powerups.append(PowerUp(center + Vec2(state.rng.uniform(-35, 35), state.rng.uniform(-35, 35)), kind))
@@ -193,7 +196,7 @@ def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2):
 def _append_powerup(state: GameState, pos: Vec2, kind: str) -> None:
     k = str(kind or "")
     if k == "weapon":
-        state.powerups.append(PowerUp(pos, k, data=get_weapon_key_for_wave(state.wave)))
+        state.powerups.append(PowerUp(pos, k, data=get_weapon_key_for_wave(state.wave, rng=state.rng)))
     else:
         state.powerups.append(PowerUp(pos, k))
 

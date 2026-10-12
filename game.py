@@ -220,14 +220,13 @@ class Game(pyglet.window.Window):
         # Deterministic RNG for this run (seed stored on state for reproducibility).
         self.state.init_rng()
 
+        # Base per-wave head count lives in logic.py's difficulty table (the wave ramp is applied in level.spawn_wave).
+        self.state.max_enemies = int(get_difficulty_mods(difficulty).get("max_enemies", 12))
         if difficulty == "easy":
-            self.state.max_enemies = 10
             self._incoming_damage_mult = 0.85
         elif difficulty == "hard":
-            self.state.max_enemies = 14
             self._incoming_damage_mult = 1.15
         else:
-            self.state.max_enemies = 12
             self._incoming_damage_mult = 1.0
         if config.ENABLE_OBSTACLES:
             self.state.layout_seed = self.state.rng.randint(0, 1_000_000_000)
@@ -271,7 +270,8 @@ class Game(pyglet.window.Window):
     def _effective_player_damage(self) -> int:
         if not self.player:
             return 0
-        return max(1, int(round(float(self.player.damage) * float(getattr(self, "_temp_damage_mult", 1.0)))))
+        # Half-up rounding (not round(), which is banker's rounding at .5) so the 1.28 Overdrive multiplier lands predictably.
+        return max(1, math.floor(float(self.player.damage) * float(getattr(self, "_temp_damage_mult", 1.0)) + 0.5))
 
     def _effective_player_speed(self) -> float:
         if not self.player:

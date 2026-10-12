@@ -128,17 +128,19 @@ def test_hangar_has_no_colour_literals(*_):
 
 # ---------------------------------------------------------------- title screen (always run)
 
-def test_title_screen_has_five_buttons_with_hangar(g):
+def test_title_screen_has_six_buttons_with_hangar_and_daily(g):
+    # Wave 2 merge: the Hangar (wave2/hangar) and the Daily Run (wave2/daily) buttons both sit on the title screen.
     menu = g.main_menu
     menu.resize(g.width, g.height)
     texts = [b.text for b in menu.buttons]
-    assert texts == ["Start Game", "Guide", "Settings", "Hangar", "Quit"], f"title buttons were {texts}"
-    expected = {"Start Game": "start_game", "Guide": "guide", "Settings": "settings", "Hangar": "hangar", "Quit": "quit"}
+    assert texts == ["Start Game", "Daily Run", "Guide", "Settings", "Hangar", "Quit"], f"title buttons were {texts}"
+    expected = {"Start Game": "start_game", "Daily Run": "daily", "Guide": "guide", "Settings": "settings",
+                "Hangar": "hangar", "Quit": "quit"}
     for btn in menu.buttons:
         cx, cy = _button_center(btn)
         action = menu.on_mouse_press(cx, cy, LEFT)
         assert action == expected[btn.text], f"{btn.text} returned {action!r}, expected {expected[btn.text]!r}"
-    print("[PASS] test_title_screen_has_five_buttons_with_hangar passed (Hangar added, other four actions unchanged)")
+    print("[PASS] test_title_screen_has_six_buttons_with_hangar_and_daily passed (Hangar and Daily Run added, other actions unchanged)")
 
 
 # ---------------------------------------------------------------- Hangar screen (needs wave 1)
@@ -356,7 +358,7 @@ def run_all():
     g = Game()
     g.set_visible(False)
     try:
-        test_title_screen_has_five_buttons_with_hangar(g)
+        test_title_screen_has_six_buttons_with_hangar_and_daily(g)
         test_title_hangar_button_opens_hangar(g)
         test_locked_skin_is_refused(g)
         test_unlocked_skin_selection_persists(g)

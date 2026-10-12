@@ -308,7 +308,7 @@ def test_title_daily_button_is_clear_of_the_subtitle(g):
             assert min(bottoms) > 0, f"lowest title button falls off the screen at {w}x{h}"
     finally:
         menu.resize(g.width, g.height)
-    print("[PASS] test_title_daily_button_is_clear_of_the_subtitle passed (5 buttons fit under the subtitle at 980x620 and 1920x1080)")
+    print("[PASS] test_title_daily_button_is_clear_of_the_subtitle passed (6 title buttons fit under the subtitle at 980x620 and 1920x1080)")
 
 
 # ---------------------------------------------------------------------------

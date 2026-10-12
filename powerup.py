@@ -46,7 +46,7 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
         if candidate is not None and is_weapon_upgrade(getattr(player, "current_weapon", None), candidate):
             player.current_weapon = candidate
         else:
-            player.shield = min(120, int(getattr(player, "shield", 0)) + 20)
+            player.shield = min(SHIELD_MAX, int(getattr(player, "shield", 0)) + 20)
     elif p.kind == "ultra":
         cap = int(getattr(player, "ultra_max_charges", 2))
         player.ultra_charges = min(cap, int(getattr(player, "ultra_charges", 0)) + 1)

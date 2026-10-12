@@ -1246,7 +1246,7 @@ class GuideMenu:
         {"key": "ultra_use", "name": "Ultra Use", "icon": "U!", "what": "RMB or Q consumes one Ultra charge.", "deal": "Use Ultra during spike phases or add floods.", "lore": "Ultra is burst control, not passive DPS."},
         {"key": "arsenal", "name": "Arsenal & Crits", "icon": "WPN", "what": "Weapons feature Crits (10% base, 2x dmg) and Piercing.", "deal": "Hyper Railgun pierces lines; Flak Battery cluster-bursts.", "lore": "Mil-spec kinetic accelerators retrofitted with variable-yield munitions."},
         {"key": "arena", "name": "Arena Control", "icon": "AR", "what": "Fight near edge lanes, avoid center traps.", "deal": "Rotate clockwise/counter-clockwise with intent.", "lore": "Bad pathing is deadlier than low HP."},
-        {"key": "elites", "name": "Elites", "icon": "EL", "what": "Wave 3+ elites: 2.2x HP, one affix each.", "deal": "Volatile: 45 blast in 130 px, hits you too. Shielded: break shield first.", "lore": "Swift moves 30% faster. Affixes are rogue overclocks on standard frames."},
+        {"key": "elites", "name": "Elites", "icon": "EL", "what": f"Wave 3+ elites: 2.2x HP, one affix each, {float(config.ELITE_SCORE_MULT):g}x score.", "deal": "Volatile: 45 blast in 130 px, hits you too. Shielded: break shield first.", "lore": "Swift moves 30% faster. Affixes are rogue overclocks on standard frames."},
         {"key": "boss_schedule", "name": "Boss Schedule", "icon": "BS", "what": "A boss arrives every 5th wave (5, 10, 15...).", "deal": "Save dash and ultra for it; clearing the wave opens card picks.", "lore": "Boss kills always drop a weapon plus a heal, shield or laser."},
         {"key": "loot", "name": "Loot Priority", "icon": "LT", "what": "Powerups and weapon drops shape run tempo.", "deal": "Early damage/fire-rate usually beats greed picks.", "lore": "Boss waves guarantee high-value drops."},
         {"key": "rpg", "name": "Boss Rewards", "icon": "CRD", "what": "Boss kills open temp + permanent card picks.", "deal": "Pick consistency first, then high-risk scaling.", "lore": "Card flow is your long-run progression core."},
@@ -1338,6 +1338,15 @@ class GuideMenu:
             batch=self.batch,
         )
         self.resize(width, height)
+
+    def _fit_desc(self, label) -> None:
+        """Shrink a row's one-line description (to 8 px at the smallest) until it fits the row width."""
+        size = self._desc_size
+        if int(label.font_size) != size:
+            label.font_size = size
+        while label.content_width > self._desc_max_w and size > 8:
+            size -= 1
+            label.font_size = size
 
     def _entries(self) -> list[dict]:
         if self.tab == "enemies":
@@ -1435,6 +1444,9 @@ class GuideMenu:
         row_gap = int(10 * scale)
         row_x = panel_x + int(24 * scale)
         row_w = panel_w - int(48 * scale)
+        # Threat/Counter is one line: its font shrinks (see _fit_desc) rather than running past the row edge.
+        self._desc_size = max(9, int(12 * scale))
+        self._desc_max_w = max(60, row_w - int(56 * scale) - int(14 * scale))
         for i, (bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, _) in enumerate(self._rows):
             y = row_top - i * (row_h + row_gap) - row_h
             bg.x = row_x
@@ -1554,6 +1566,7 @@ class GuideMenu:
             glyph.text = str(e.get("icon", "?"))
             name.text = str(e.get("name", "Unknown"))
             desc.text = f"Threat: {str(e.get('what', ''))}  |  Counter: {str(e.get('deal', ''))}"
+            self._fit_desc(desc)
             lore.text = f"Lore: {str(e.get('lore', ''))}"
 
         page_info = f"Page {self.page + 1}/{self._total_pages()}  |  Left/Right or buttons to browse"

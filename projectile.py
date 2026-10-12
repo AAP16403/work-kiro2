@@ -27,6 +27,7 @@ class Projectile:
     # Name of the weapon that fired this shot ("Basic Gun", ...). Visual lookup only: projectile_art
     # uses it to pick the look, physics and hit detection never read it.
     weapon_name: str = ""
+    bounces: int = 0  # Ricochet bounces taken off the arena edge; a bullet gets one
 
     def update(self, dt: float) -> bool:
         """Update projectile position and TTL. Returns False if expired."""

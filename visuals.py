@@ -10,9 +10,10 @@ from pyglet import shapes
 from pyglet.graphics import Group
 
 import config
-from config import ENEMY_COLORS, SCREEN_H, SHIELD_MAX
+from config import ENEMY_COLORS, POWERUP_COLORS, SCREEN_H, SHIELD_MAX
 from enemy import brute_charge_lane
 from player_art import DEFAULT_PALETTE, PlayerArt
+from powerup_art import make_pickup_art, place_pickup_art
 from projectile_art import ProjectileVisual
 from utils import to_iso, Vec2, enemy_behavior_name
 
@@ -910,6 +911,10 @@ class Visuals:
             "weapon": ((220, 230, 255), "W", 14),    # Weapon pickup
             "ultra": ((255, 230, 170), "U", 14),     # Ultra ability charge
             "boost": ((255, 145, 45), "B", 14),      # Overdrive Boost
+            "ricochet": (POWERUP_COLORS["ricochet"], "<>", 14),
+            "homing": (POWERUP_COLORS["homing"], "H", 14),
+            "time_slow": (POWERUP_COLORS["time_slow"], "~", 14),
+            "magnet": (POWERUP_COLORS["magnet"], "M", 14),
         }.get(p.kind, ((200, 200, 200), "?", 12))
 
         # Large, glowing center orb
@@ -938,18 +943,22 @@ class Visuals:
             batch=self.batch,
             color=(255, 255, 255, 255),
         )
-        self._power_handles[id(p)] = RenderHandle(ring2, ring1, orb, core, label)
+        art_shapes, art_offsets = make_pickup_art(p.kind, self.batch, color, size)
+        handle = RenderHandle(ring2, ring1, orb, core, label, *art_shapes)
+        handle.art_offsets = art_offsets
+        self._power_handles[id(p)] = handle
 
     def sync_powerup(self, p, shake: Vec2):
         """Update powerup visual position."""
         h = self._power_handles[id(p)]
-        ring2, ring1, orb, core, label = h.objs
+        ring2, ring1, orb, core, label = h.objs[:5]
         sx, sy = to_iso(p.pos, shake)
         ring2.x, ring2.y = sx, sy
         ring1.x, ring1.y = sx, sy
         orb.x, orb.y = sx, sy
         core.x, core.y = sx, sy
         label.x, label.y = sx, sy
+        place_pickup_art(h.objs[5:], h.art_offsets, sx, sy)
         self._set_depth(h, sy, shake)
 
     def drop_powerup(self, p):

@@ -84,7 +84,22 @@ POWERUP_COLORS = {
     "weapon": (230, 230, 255),
     "ultra": (255, 240, 180),
     "boost": (255, 145, 45),
+    "ricochet": (60, 255, 200),
+    "homing": (255, 80, 170),
+    "time_slow": (110, 130, 255),
+    "magnet": (170, 255, 70),
 }
+
+# Timed powerups (see powerup.py). Each one refreshes its expiry; picking it up again does not stack.
+RICOCHET_DURATION = 8.0       # player bullets bounce once off the arena edge
+HOMING_DURATION = 6.0         # player bullets steer toward the nearest live enemy
+HOMING_RANGE = 260.0          # world units, measured from the bullet
+HOMING_TURN_RATE = 2.4        # max steering in radians per second, so the curve stays readable
+TIME_SLOW_DURATION = 4.0      # enemies and enemy projectiles run at TIME_SLOW_SCALE; the player does not
+TIME_SLOW_SCALE = 0.5         # the one scalar for enemy time: enemy dt = frame dt * this
+MAGNET_DURATION = 10.0        # pickups are pulled from a wider radius and faster
+MAGNET_RADIUS_MULT = 3.0      # multiplies the pickup magnet radius
+MAGNET_PULL_MULT = 1.5        # multiplies the pickup pull speed
 
 # Boost / Overdrive mechanic (LSHIFT key)
 BOOST_SPEED_MULT = 1.65

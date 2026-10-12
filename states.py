@@ -792,7 +792,8 @@ class PlayingState(State):
         boss_txt = ""
         if boss:
             boss_name = enemy_behavior_name(boss)
-            boss_txt = f"BOSS {boss_name[5:].replace('_', ' ').title()} HP {boss.hp}"
+            # Name only: the wave chip and the boss bar already show HP.
+            boss_txt = f"BOSS {boss_name[5:].replace('_', ' ').title()}"
             boss_max = max(1, int(getattr(boss, "max_hp", boss.hp) or 1))
             game.hud.set_boss(boss_name[5:].replace("_", " ").title(), int(boss.hp), boss_max)
         else:
@@ -802,16 +803,28 @@ class PlayingState(State):
         dash_txt = format_dash_hud(game.player, game.state.time)
         temp_txt = format_temp_hud(game._active_temp_rewards)
         perm_txt = format_perm_hud(game._run_permanent_rewards)
-        status_parts = [p for p in (boost_txt, dash_txt, laser_txt, vortex_txt, ultra_txt, temp_txt, perm_txt, boss_txt) if p]
-        status_text = "   |   ".join(status_parts) if status_parts else "No active effects"
+        auto_txt = "AUTO ON" if game.auto_shoot else "AUTO OFF"
+        # (priority, text) in importance order. A lower number survives longer when the status
+        # line is too narrow; the HUD drops the highest numbers first.
+        status_segments = [
+            (0, boss_txt),
+            (1, ultra_txt),
+            (2, laser_txt),
+            (2, vortex_txt),
+            (3, temp_txt),
+            (4, dash_txt),
+            (5, boost_txt),
+            (6, perm_txt),
+            (7, auto_txt),
+        ]
 
         game.hud.update_bars(
             game.player,
             game.state,
             score=getattr(game, 'score', None),
-            status_text=status_text,
             has_infinite_boost=game._has_infinite_boost(),
             crit_chance_bonus=game._effective_crit_chance(),
+            status_segments=status_segments,
         )
         game.hud.draw()
 

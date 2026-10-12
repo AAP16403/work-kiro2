@@ -129,7 +129,7 @@ class Game(pyglet.window.Window):
         self.mouse_xy = (self.width / 2, self.height / 2)
         self.mouse_down = False
         self._rmb_down = False
-        self.auto_shoot = False
+        self.auto_shoot = True  # Auto-fire starts ON for every run; LMB toggles it
         self.balance = BalanceLogic(fps=float(FPS))
         self._fixed_dt = self.balance.fixed_dt
         self._frame_dt_cap = self.balance.frame_dt_cap
@@ -211,6 +211,8 @@ class Game(pyglet.window.Window):
     
     def _init_game(self):
         """Initialize game objects."""
+        # Start Game and Try Again both begin with auto-fire on (the Guide and status line say so).
+        self.auto_shoot = True
         self.batch = pyglet.graphics.Batch()
         self.groups = GroupCache()
         self.room = Room(self.batch, self.width, self.height, map_type=self.settings.get("map_type", MAP_CIRCLE))

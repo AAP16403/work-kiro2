@@ -21,6 +21,7 @@ from utils import (
 from physics import resolve_circle_obstacles
 from level import spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death, get_difficulty_mods
 from enemy import update_enemy
+from boss_rage import celebrate_boss_death, FANFARE_MIN_GAP
 from powerup import apply_powerup
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
@@ -352,6 +353,7 @@ class PlayingState(State):
             game._hitstop = max(game._hitstop, 0.12)
             if game.particle_system:
                 game.particle_system.add_boss_death(e.pos, enemy_color)
+            celebrate_boss_death(game)
         else:
             if is_elite or behavior_name in ("tank", "bomber"):
                 game.audio.play("explode", volume=0.8, pitch_jitter=0.05)
@@ -760,7 +762,7 @@ class PlayingState(State):
             s.last_wave_clear = s.time
             s.wave += 1
             game._advance_temp_rewards()
-            game.audio.play("wave_clear", volume=0.8)
+            game.audio.play("wave_clear", volume=0.8, min_gap=FANFARE_MIN_GAP)
             if cleared_wave % 5 != 0:
                 game.hud.show_banner(f"WAVE {cleared_wave:02d} CLEARED", "Next wave incoming", color=(120, 240, 170), duration=2.0)
             new_segment = (s.wave - 1) // 5

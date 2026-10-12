@@ -10,19 +10,16 @@ from pyglet import shapes
 import config
 from config import MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
 from fonts import register_ui_fonts
+import title_fx
+import ui_theme
+from ui_theme import FONT_HEAD as UI_FONT_HEAD, FONT_BODY as UI_FONT_BODY, FONT_META as UI_FONT_META
 
 register_ui_fonts()
 
-UI_FONT_HEAD = "Orbitron"
-UI_FONT_BODY = "Rajdhani"
-UI_FONT_META = "Rajdhani"
-
 
 def _ui_scale(width: int, height: int) -> float:
-    """Responsive UI scale factor based on window size."""
-    base_w, base_h = 980.0, 620.0
-    s = min(max(1.0, float(width)) / base_w, max(1.0, float(height)) / base_h)
-    return max(0.85, min(1.85, s))
+    """Responsive UI scale factor based on window size (see ui_theme.ui_scale)."""
+    return ui_theme.ui_scale(width, height)
 
 
 def _sync_label_style_if_ready(label, font_name: str, font_size: int) -> None:
@@ -251,8 +248,21 @@ class MenuSlider:
 
 
 class Menu:
-    """Main menu screen."""
-    
+    """Title screen: shimmering wordmark, tagline, four buttons and a row of key hints.
+
+    The button order and the action strings returned by on_mouse_press are part of the
+    game flow (states.MenuState) and must not change.
+    """
+
+    HINTS = (
+        ("WASD", "move"),
+        ("SPACE", "dash"),
+        ("SHIFT", "boost"),
+        ("LMB", "auto-fire"),
+        ("RMB", "ultra"),
+        ("ESC", "pause"),
+    )
+
     def __init__(self, width: int, height: int):
         self.screen_width = width
         self.screen_height = height
@@ -262,9 +272,13 @@ class Menu:
         self._button_base_positions: list[tuple[float, float]] = []
         self._orbs: list[tuple[shapes.Circle, float, float, float]] = []
 
-        self._bg_a = shapes.Rectangle(0, 0, width, height, color=(9, 16, 26), batch=self.batch)
-        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
+        # Backdrop group draws first, then the starfield, then the default group with orbs and buttons.
+        backdrop = pyglet.graphics.Group(order=-2)
+        self._bg_a = shapes.Rectangle(0, 0, width, height, color=ui_theme.BACKGROUND, batch=self.batch, group=backdrop)
+        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch, group=backdrop)
         self._bg_b.opacity = 148
+        self._stars = title_fx.Starfield(self.batch, width, height)
+        self._horizon = title_fx.Horizon(self.batch, width, 0.0)
 
         count = max(10, min(22, int((width * height) / 90_000)))
         for _ in range(count):
@@ -279,13 +293,8 @@ class Menu:
             phase = random.uniform(0, math.tau)
             self._orbs.append((orb, vx, vy, phase))
 
-        # Panel backing for buttons.
-        self._panel_border = shapes.Rectangle(0, 0, 1, 1, color=(155, 205, 255), batch=self.batch)
-        self._panel_border.opacity = 48
-        self._panel = shapes.Rectangle(0, 0, 1, 1, color=(10, 20, 34), batch=self.batch)
-        self._panel.opacity = 196
-        self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
-        self._panel_shine.opacity = 16
+        # Backing card for the buttons (edge, body, shine), placed in resize().
+        self._panel = ui_theme.draw_panel(self.batch, 0, 0, 1, 1)
 
         self.buttons: list[MenuButton] = []
         self.buttons.append(MenuButton(0, 0, 160, 50, "Start Game", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)))
@@ -297,20 +306,22 @@ class Menu:
 
         self.title = pyglet.text.Label(
             "P L O U T O",
-            font_name=UI_FONT_HEAD,
-            font_size=32,
+            font_name=ui_theme.font_name("display"),
+            font_size=ui_theme.font_size("display", 1.0),
             x=width // 2,
             y=height - 80,
             anchor_x="center",
             anchor_y="center",
-            color=(224, 236, 255, 255),
+            color=(*ui_theme.ACCENT, 255),
             batch=self.batch,
         )
+        # Per-letter colour sweep; the wordmark keeps its own colour when motion is reduced.
+        self._wordmark = title_fx.ShimmerText(self.title)
 
         self.subtitle = pyglet.text.Label(
             "Stellar Survival Protocol",
-            font_name=UI_FONT_META,
-            font_size=12,
+            font_name=ui_theme.font_name("tagline"),
+            font_size=ui_theme.font_size("tagline", 1.0),
             x=width // 2,
             y=height - 120,
             anchor_x="center",
@@ -318,53 +329,53 @@ class Menu:
             width=max(320, width - 64),
             multiline=True,
             align="center",
-            color=(166, 184, 202, 255),
+            color=(*ui_theme.MUTED, 255),
             batch=self.batch,
         )
 
-        self.footer = pyglet.text.Label(
-            "WASD move  |  LMB auto-fire  |  SPACE dash  |  RMB ultra  |  SHIFT boost  |  ESC pause",
-            font_name=UI_FONT_META,
-            font_size=12,
-            x=width // 2,
-            y=16,
-            anchor_x="center",
-            anchor_y="bottom",
-            color=(150, 165, 185, 220),
-            batch=self.batch,
-        )
-
+        self._hint_parts: list = []
         for btn in self.buttons:
             btn.ensure(self.batch)
         self.resize(width, height)
 
     def update(self, dt: float):
         self._t += dt
+        reduced = ui_theme.reduce_motion()
         w = self.screen_width
         h = self.screen_height
-        for orb, vx, vy, phase in self._orbs:
-            orb.x += vx * dt
-            orb.y += vy * dt
-            if orb.x < -60:
-                orb.x = w + 60
-            elif orb.x > w + 60:
-                orb.x = -60
-            if orb.y < -60:
-                orb.y = h + 60
-            elif orb.y > h + 60:
-                orb.y = -60
-            orb.opacity = int(14 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.7 + phase)))
+        if not reduced:
+            for orb, vx, vy, phase in self._orbs:
+                orb.x += vx * dt
+                orb.y += vy * dt
+                if orb.x < -60:
+                    orb.x = w + 60
+                elif orb.x > w + 60:
+                    orb.x = -60
+                if orb.y < -60:
+                    orb.y = h + 60
+                elif orb.y > h + 60:
+                    orb.y = -60
+                orb.opacity = int(14 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.7 + phase)))
+        self._stars.update(dt, reduced)
+        self._wordmark.update(self._t, reduced)
 
-        # Subtle, continuous menu motion to keep the screen feeling alive.
-        self.title.y = int(self._title_base_y + math.sin(self._t * 1.2) * 6.0)
-        self._panel_shine.opacity = int(10 + 16 * (0.5 + 0.5 * math.sin(self._t * 1.45)))
+        # Subtle, continuous motion keeps the screen feeling alive. Reduced motion holds it still.
+        if reduced:
+            self.title.y = int(self._title_base_y)
+        else:
+            self.title.y = int(self._title_base_y + math.sin(self._t * 1.2) * 6.0)
+            self._panel[2].opacity = int(10 + 16 * (0.5 + 0.5 * math.sin(self._t * 1.45)))
         for i, btn in enumerate(self.buttons):
             if i >= len(self._button_base_positions):
                 continue
             base_x, base_y = self._button_base_positions[i]
-            wave = math.sin(self._t * 2.15 + i * 0.58)
-            btn.x = base_x + int(wave * 4.0)
-            btn.y = base_y + int(wave * 2.0)
+            dx = dy = 0
+            if not reduced:
+                wave = math.sin(self._t * 2.15 + i * 0.58)
+                dx = int(wave * 4.0)
+                dy = int(wave * 2.0)
+            btn.x = base_x + dx
+            btn.y = base_y + dy
             btn.sync()
 
     def resize(self, width: int, height: int):
@@ -418,29 +429,60 @@ class Menu:
         self.title.y = height - int(75 * scale)  # raised for the taller five-button panel; the bob adds up to 6px
         self._title_base_y = self.title.y
         self.subtitle.x = cx
-        _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
-        self.subtitle.y = height - int(130 * scale)
+        _sync_label_style_if_ready(self.subtitle, ui_theme.font_name("tagline"), ui_theme.font_size("tagline", scale))
+        self.subtitle.y = height - int(122 * scale)
         self.subtitle.width = max(320, width - 64)
-        self.footer.x = cx
-        self.footer.y = int(16 * scale)
-        _sync_label_style_if_ready(self.footer, UI_FONT_META, max(11, int(12 * min(scale, 1.25))))
+        self._layout_hints(cx, scale)
 
         self._bg_a.width = width
         self._bg_a.height = height
         self._bg_b.width = width
         self._bg_b.height = height
-    
+        self._stars.resize(width, height)
+        self._horizon.place(width, int(height * 0.16))
+
+    def _layout_hints(self, cx: int, scale: float) -> None:
+        """Rebuild the key-hint row: a keycap chip followed by its action, centred at cx."""
+        for obj in self._hint_parts:
+            obj.delete()
+        self._hint_parts = []
+        key_gap = ui_theme.space("xs", scale)
+        item_gap = ui_theme.space("lg", scale)
+        items = []
+        for key, action in self.HINTS:
+            key_w = ui_theme.chip_width(key, "caption", scale)
+            action_w = ui_theme.text_width(action, "caption", scale)
+            items.append((key, action, key_w, action_w))
+        total = sum(kw + key_gap + aw for _, _, kw, aw in items) + item_gap * (len(items) - 1)
+        x = cx - total / 2.0
+        y = int(26 * scale)
+        mid_y = y + ui_theme.chip_height(scale) / 2.0
+        for key, action, key_w, action_w in items:
+            self._hint_parts.extend(ui_theme.draw_chip(self.batch, x, y, key, role="caption", scale=scale))
+            self._hint_parts.append(pyglet.text.Label(
+                action,
+                font_name=ui_theme.font_name("caption"),
+                font_size=ui_theme.font_size("caption", scale),
+                x=x + key_w + key_gap,
+                y=mid_y,
+                anchor_x="left",
+                anchor_y="center",
+                color=(*ui_theme.MUTED, 255),
+                batch=self.batch,
+            ))
+            x += key_w + key_gap + action_w + item_gap
+
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
         for button in self.buttons:
             button.is_hovered = button.contains_point(x, y)
             button.sync()
-    
+
     def on_mouse_press(self, x: float, y: float, button: int) -> str | None:
         """Handle mouse clicks. Returns action string or None."""
         if button != pyglet.window.mouse.LEFT:
             return None
-        
+
         for btn in self.buttons:
             if btn.contains_point(x, y):
                 btn.callback()
@@ -457,7 +499,7 @@ class Menu:
                 elif btn.text == "Quit":
                     return "quit"
         return None
-    
+
     def draw(self):
         """Draw the menu."""
         self.batch.draw()

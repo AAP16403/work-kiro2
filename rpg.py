@@ -18,6 +18,7 @@ from menu import (
     UI_FONT_META,
     _sync_label_style_if_ready,
 )
+import ui_theme
 
 if TYPE_CHECKING:
     from player import Player
@@ -542,41 +543,41 @@ class BossRewardMenu:
 
         self.eyebrow = pyglet.text.Label(
             "P L O U T O  //  BOSS REWARD",
-            font_name=UI_FONT_META,
-            font_size=11,
+            font_name=ui_theme.font_name("eyebrow"),
+            font_size=ui_theme.font_size("eyebrow", 1.0),
             x=width // 2,
             y=height // 2,
             anchor_x="center",
             anchor_y="center",
-            color=(120, 150, 190, 255),
+            color=(*ui_theme.mix_rgb(ui_theme.BACKGROUND, ui_theme.ACCENT, 0.7), 255),
             batch=self.batch,
         )
         self.title = pyglet.text.Label(
             "BOSS DEFEATED",
-            font_name=UI_FONT_HEAD,
-            font_size=30,
+            font_name=ui_theme.font_name("heading"),
+            font_size=ui_theme.font_size("heading", 1.0),
             x=width // 2,
             y=height // 2,
             anchor_x="center",
             anchor_y="center",
-            color=(230, 240, 255, 255),
+            color=(*ui_theme.TEXT, 255),
             batch=self.batch,
         )
         self.subtitle = pyglet.text.Label(
             "",
-            font_name=UI_FONT_BODY,
-            font_size=15,
+            font_name=ui_theme.font_name("subhead"),
+            font_size=ui_theme.font_size("subhead", 1.0),
             x=width // 2,
             y=height // 2,
             anchor_x="center",
             anchor_y="center",
-            color=(170, 185, 210, 255),
+            color=(*ui_theme.MUTED, 255),
             batch=self.batch,
         )
         self.section = pyglet.text.Label(
             "",
-            font_name=UI_FONT_HEAD,
-            font_size=12,
+            font_name=ui_theme.font_name("section"),
+            font_size=ui_theme.font_size("section", 1.0),
             x=0,
             y=0,
             anchor_x="left",
@@ -586,13 +587,13 @@ class BossRewardMenu:
         )
         self.section_note = pyglet.text.Label(
             "",
-            font_name=UI_FONT_BODY,
-            font_size=13,
+            font_name=ui_theme.font_name("note"),
+            font_size=ui_theme.font_size("note", 1.0),
             x=0,
             y=0,
             anchor_x="right",
             anchor_y="center",
-            color=(150, 166, 194, 255),
+            color=(*ui_theme.MUTED, 255),
             batch=self.batch,
         )
         self.tip = pyglet.text.Label(
@@ -712,11 +713,11 @@ class BossRewardMenu:
         self._card_x = cx - bw // 2
         self._card_top = self._panel_y + panel_h - header_h - max(0.0, (avail - block_h) / 2.0)
 
-        _sync_label_style_if_ready(self.eyebrow, UI_FONT_META, max(9, int(11 * s)))
-        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(18, int(30 * s)))
-        _sync_label_style_if_ready(self.subtitle, UI_FONT_BODY, max(11, int(15 * s)))
-        _sync_label_style_if_ready(self.section, UI_FONT_HEAD, max(9, int(12 * s)))
-        _sync_label_style_if_ready(self.section_note, UI_FONT_BODY, max(10, int(13 * s)))
+        _sync_label_style_if_ready(self.eyebrow, ui_theme.font_name("eyebrow"), ui_theme.font_size("eyebrow", s))
+        _sync_label_style_if_ready(self.title, ui_theme.font_name("heading"), ui_theme.font_size("heading", s))
+        _sync_label_style_if_ready(self.subtitle, ui_theme.font_name("subhead"), ui_theme.font_size("subhead", s))
+        _sync_label_style_if_ready(self.section, ui_theme.font_name("section"), ui_theme.font_size("section", s))
+        _sync_label_style_if_ready(self.section_note, ui_theme.font_name("note"), ui_theme.font_size("note", s))
         _sync_label_style_if_ready(self.tip, UI_FONT_META, max(9, int(12 * s)))
         for card in self._cards:
             card.set_metrics(s, bw)
@@ -757,7 +758,7 @@ class BossRewardMenu:
         self._panel_shine.height = max(6, int(14 * s))
         self._panel_shine.opacity = int(16 * pa)
 
-        _put_label(self.eyebrow, cx, top - 34 * s, pa)
+        _put_label(self.eyebrow, cx, top - 30 * s, pa)
         _put_label(self.title, cx, top - 56 * s, pa)
         _put_label(self.subtitle, cx, top - 88 * s, pa)
         sec_y = top - 116 * s

@@ -584,7 +584,8 @@ class Visuals:
         body_idx = 4 if behavior.startswith("boss_") else 1
         if len(h.objs) > body_idx:
             body_obj = h.objs[body_idx]
-            if hasattr(body_obj, "color") and body_obj.color != render_col:
+            # body.color is RGBA and render_col is RGB, so compare the channels or every body is rewritten each frame.
+            if hasattr(body_obj, "color") and body_obj.color[:3] != render_col:
                 body_obj.color = render_col
 
         if behavior.startswith("boss_"):

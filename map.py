@@ -10,6 +10,12 @@ from config import FLOOR_MAIN, FLOOR_EDGE, FLOOR_GRID
 from utils import Vec2, to_iso
 
 
+def _set_opacity(shape, value: int) -> None:
+    """Write opacity only when it changes. Every opacity write re-uploads the shape's colour buffer."""
+    if shape.opacity != value:
+        shape.opacity = value
+
+
 class Room:
     """Game room/map."""
 
@@ -503,8 +509,9 @@ class Room:
                 r = int(30 + 100 * ci)
                 g = int(35 - 15 * ci)
                 b = int(42 - 20 * ci)
-                io.color = (r, g, b)
-                io.opacity = int(24 * ci)
+                if io.color[:3] != (r, g, b):
+                    io.color = (r, g, b)
+                _set_opacity(io, int(24 * ci))
 
         # Ambient background orbs position update
         for orb, vx, vy, phase in self._ambient:
@@ -529,29 +536,29 @@ class Room:
         for ln in self._grid:
             if hasattr(ln, "opacity"):
                 base = 110 if getattr(ln, "thickness", 1) >= 1 else 34
-                ln.opacity = int(base * (0.72 + 0.28 * pulse))
+                _set_opacity(ln, int(base * (0.72 + 0.28 * pulse)))
 
         # Boundary glow.
         for ln, phase in self._boundary:
             if hasattr(ln, "opacity"):
-                ln.opacity = int(110 + 55 * (0.5 + 0.5 * math.sin(self._t * 1.2 + phase)))
+                _set_opacity(ln, int(110 + 55 * (0.5 + 0.5 * math.sin(self._t * 1.2 + phase))))
 
         # Circuit pulses.
         for ln, base, phase in self._pulse_lines:
             if hasattr(ln, "opacity"):
-                ln.opacity = int(base * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(self._t * 2.4 + phase))))
+                _set_opacity(ln, int(base * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(self._t * 2.4 + phase)))))
         for node, base, phase in self._pulse_nodes:
             if hasattr(node, "opacity"):
-                node.opacity = int(base * (0.6 + 0.4 * (0.5 + 0.5 * math.sin(self._t * 2.9 + phase))))
+                _set_opacity(node, int(base * (0.6 + 0.4 * (0.5 + 0.5 * math.sin(self._t * 2.9 + phase)))))
 
         for orb, _vx, _vy, phase in self._ambient:
-            orb.opacity = int(18 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.6 + phase)))
+            _set_opacity(orb, int(18 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.6 + phase))))
 
         for ln, base, phase in self._scanlines:
-            ln.opacity = int(base * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(self._t * 1.15 + phase))))
+            _set_opacity(ln, int(base * (0.55 + 0.45 * (0.5 + 0.5 * math.sin(self._t * 1.15 + phase)))))
 
         for ln, base, phase in self._bg_grid:
-            ln.opacity = int(base * (0.6 + 0.4 * (0.5 + 0.5 * math.sin(self._t * 0.4 + phase))))
+            _set_opacity(ln, int(base * (0.6 + 0.4 * (0.5 + 0.5 * math.sin(self._t * 0.4 + phase)))))
 
         for vg, phase in self._vignette:
-            vg.opacity = int(28 + 28 * (0.5 + 0.5 * math.sin(self._t * 0.45 + phase)))
+            _set_opacity(vg, int(28 + 28 * (0.5 + 0.5 * math.sin(self._t * 0.45 + phase))))

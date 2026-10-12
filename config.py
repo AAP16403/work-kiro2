@@ -9,6 +9,9 @@ FPS = 60
 ENABLE_OBSTACLES = False
 ENABLE_ADVANCED_FX = True
 ADVANCED_FX_STRENGTH = 0.55
+# pyglet's debug_gl checks every GL call with a glGetError round trip. Off by default: frozen builds
+# already run with it off, and the source run draws about 3x slower with it on. Set True to debug GL.
+PYGLET_DEBUG_GL = False
 
 # Room settings
 ROOM_RADIUS = 400.0

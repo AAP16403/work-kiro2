@@ -9,6 +9,7 @@ FPS = 60
 ENABLE_OBSTACLES = False
 ENABLE_ADVANCED_FX = True
 ADVANCED_FX_STRENGTH = 0.55
+REDUCE_MOTION = False  # True stops ambient UI motion: title shimmer, bobbing, starfield and orb drift
 
 # Room settings
 ROOM_RADIUS = 400.0

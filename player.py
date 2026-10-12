@@ -28,6 +28,7 @@ class Player:
     vortex_until: float = 0.0
     vortex_radius: float = 70.0
     vortex_dps: float = 38.0
+    drone_until: float = 0.0
     ultra_charges: int = 0
     ultra_max_charges: int = ULTRA_MAX_CHARGES
     ultra_cd_until: float = 0.0

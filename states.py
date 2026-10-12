@@ -23,6 +23,7 @@ from enemy import update_enemy
 from powerup import apply_powerup
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
+from drone import drone_bullets
 from fsm import State
 from hazards import LaserBeam
 from player import perform_dash, recharge_dash, format_dash_hud, update_boost, format_boost_hud
@@ -552,6 +553,18 @@ class PlayingState(State):
             game.player.last_shot = s.time
             game.player.next_shot_time = s.time + weapon_cd
 
+        # Drone companion: orbit, aim and fire. Its bullets join the player's list and hit through the loops below.
+        drone_shot = s.drone.update(dt, s.time, game.player.drone_until, game.player.pos, s.enemies)
+        if drone_shot is not None:
+            d_muzzle, d_aim = drone_shot
+            s.projectiles.extend(drone_bullets(
+                d_muzzle, d_aim, s.time, game._effective_player_damage(), s.rng,
+                crit_chance_bonus=game._effective_crit_chance(),
+                crit_mult_bonus=game._effective_crit_mult(),
+            ))
+            game.particle_system.add_muzzle_flash(d_muzzle, d_aim)
+            game.audio.play("shot_basic", volume=0.25, pitch_jitter=0.05, min_gap=0.04)
+
         for e in list(s.enemies):
             if e not in s.enemies or e.hp <= 0 or getattr(e, "_is_dead", False):
                 continue
@@ -711,7 +724,7 @@ class PlayingState(State):
             if dpu2 < float(pickup_r) * float(pickup_r):
                 color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
                 game.particle_system.add_powerup_collection(pu.pos, color)
-                rare = kind in ("ultra", "weapon", "vortex", "laser")
+                rare = kind in ("ultra", "weapon", "vortex", "laser", "drone")
                 game.audio.play("pickup_rare" if rare else "pickup", volume=0.7, pitch_jitter=0.03)
                 if rare:
                     game.particle_system.add_pickup_ring(pu.pos, color)
@@ -816,6 +829,7 @@ class PlayingState(State):
 
         aim_dir = (iso_to_world(game.mouse_xy) - game.player.pos).normalized()
         game.visuals.sync_player(game.player, shake, t=s.time, aim_dir=aim_dir)
+        game.visuals.sync_drone(s.drone, shake, t=s.time)
 
         for e in game.state.enemies:
             game.visuals.ensure_enemy(e)
@@ -852,6 +866,8 @@ class PlayingState(State):
         laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
         vortex_left = max(0.0, game.player.vortex_until - game.state.time)
         vortex_txt = f"Vortex {vortex_left:.0f}s" if vortex_left > 0 else ""
+        drone_left = max(0.0, game.player.drone_until - game.state.time)
+        drone_txt = f"Drone {drone_left:.0f}s" if drone_left > 0 else ""
         ultra_charges = int(getattr(game.player, "ultra_charges", 0))
         ultra_cd = max(0.0, float(getattr(game.player, "ultra_cd_until", 0.0)) - game.state.time)
         ultra_txt = ""
@@ -882,6 +898,7 @@ class PlayingState(State):
             (1, ultra_txt),
             (2, laser_txt),
             (2, vortex_txt),
+            (2, drone_txt),
             (3, temp_txt),
             (4, dash_txt),
             (5, boost_txt),

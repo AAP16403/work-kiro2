@@ -4,6 +4,7 @@ import random
 from dataclasses import dataclass, field
 
 import config
+from drone import DRONE_DROP_SHARE, DroneCompanion
 from enemy import Enemy
 from hazards import Trap, LaserBeam, ThunderLine
 from layout import Obstacle
@@ -35,6 +36,7 @@ class GameState:
     traps: list[Trap] = field(default_factory=list)
     lasers: list[LaserBeam] = field(default_factory=list)
     thunders: list[ThunderLine] = field(default_factory=list)
+    drone: DroneCompanion = field(default_factory=DroneCompanion, repr=False)
     wave_active: bool = False
     last_wave_clear: float = 0.0
     shake: float = 0.0
@@ -211,6 +213,9 @@ def _pick_powerup_kind_for_wave(state: GameState, source: str) -> str:
         kind = "vortex"
     elif state.wave >= 3 and r < 0.20:
         kind = "weapon"
+    elif state.wave >= 3 and r < 0.20 + DRONE_DROP_SHARE:
+        # Rare tier: a thin slice carved out of the base pool, so the other drop rates barely move.
+        kind = "drone"
 
     min_wave = int(getattr(config, "ULTRA_SPAWN_MIN_WAVE", 4))
     if int(state.wave) < min_wave:

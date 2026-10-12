@@ -80,6 +80,7 @@ POWERUP_COLORS = {
     "weapon": (230, 230, 255),
     "ultra": (255, 240, 180),
     "boost": (255, 145, 45),
+    "drone": (90, 255, 225),
 }
 
 # Boost / Overdrive mechanic (LSHIFT key)

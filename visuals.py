@@ -10,6 +10,7 @@ from pyglet import shapes
 from pyglet.graphics import Group
 
 from config import ENEMY_COLORS, SCREEN_H
+from drone_art import DroneArt
 from enemy import brute_charge_lane
 from utils import to_iso, Vec2, enemy_behavior_name
 
@@ -74,6 +75,8 @@ class Visuals:
         self._laser_handles: dict[int, RenderHandle] = {}
         self._thunder_handles: dict[int, RenderHandle] = {}
         self._player_handle: RenderHandle | None = None
+        self._drone_art: DroneArt | None = None
+        self._drone_handle: RenderHandle | None = None
         self._scene_stars: list[tuple[shapes.Circle, float, float, float]] = []
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
@@ -342,6 +345,15 @@ class Visuals:
             laser_ring.opacity = 0
 
         self._set_depth(self._player_handle, cy, shake)
+
+    def sync_drone(self, drone, shake: Vec2, t: float = 0.0) -> None:
+        """Draw the deployed drone companion. Its shapes are created on first use and hidden while no drone is out."""
+        if self._drone_art is None:
+            self._drone_art = DroneArt(self.batch)
+            self._drone_handle = RenderHandle(*self._drone_art.parts)
+        cy = self._drone_art.sync(drone, shake, t)
+        if drone.active:
+            self._set_depth(self._drone_handle, cy, shake)
 
     def ensure_enemy(self, enemy):
         """Ensure enemy visual exists."""
@@ -978,6 +990,7 @@ class Visuals:
             "weapon": ((220, 230, 255), "W", 14),    # Weapon pickup
             "ultra": ((255, 230, 170), "U", 14),     # Ultra ability charge
             "boost": ((255, 145, 45), "B", 14),      # Overdrive Boost
+            "drone": ((90, 255, 225), "D", 14),      # Rare drone companion (teal)
         }.get(p.kind, ((200, 200, 200), "?", 12))
 
         # Large, glowing center orb

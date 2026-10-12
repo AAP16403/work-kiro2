@@ -291,6 +291,7 @@ class Menu:
         self.buttons.append(MenuButton(0, 0, 160, 50, "Start Game", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Guide", lambda: None, color=(120, 95, 220), hover_color=(162, 136, 255)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Settings", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)))
+        self.buttons.append(MenuButton(0, 0, 160, 50, "Hangar", lambda: None, color=(70, 165, 150), hover_color=(80, 220, 160)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Quit", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)))
 
         self.title = pyglet.text.Label(
@@ -373,8 +374,8 @@ class Menu:
         scale = _ui_scale(width, height)
 
         button_w = int(230 * scale)
-        button_h = int(62 * scale)
-        gap = int(18 * scale)
+        button_h = int(54 * scale)  # five stacked buttons: keeps the panel clear of the title at 980x620
+        gap = int(12 * scale)
         font = max(12, int(18 * scale))
         for btn in self.buttons:
             btn.width = button_w
@@ -411,7 +412,7 @@ class Menu:
 
         self.title.x = cx
         _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(22, int(38 * scale)))
-        self.title.y = height - int(85 * scale)
+        self.title.y = height - int(75 * scale)  # raised for the taller five-button panel; the bob adds up to 6px
         self._title_base_y = self.title.y
         self.subtitle.x = cx
         _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
@@ -446,6 +447,8 @@ class Menu:
                     return "guide"
                 elif btn.text == "Settings":
                     return "settings"
+                elif btn.text == "Hangar":
+                    return "hangar"
                 elif btn.text == "Quit":
                     return "quit"
         return None

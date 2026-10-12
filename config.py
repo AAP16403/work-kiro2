@@ -23,6 +23,7 @@ MAP_DIAMOND = "diamond"
 # Player stats
 PLAYER_SPEED = 175.0
 PLAYER_HP = 100
+SHIELD_MAX = 120  # Shield cap shared by pickups, the HUD shield bar and its label
 PLAYER_DAMAGE = 10
 PLAYER_FIRE_RATE = 0.28
 FIRE_RATE_MIN = 0.08

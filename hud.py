@@ -3,6 +3,7 @@
 import pyglet
 from pyglet import shapes
 
+from config import SHIELD_MAX
 from menu import UI_FONT_HEAD, UI_FONT_BODY, UI_FONT_META
 
 
@@ -10,6 +11,8 @@ BANNER_IN_S = 0.25        # ease-out slide/scale-in
 BANNER_OUT_S = 0.45       # fade-out at the end of a banner
 BOSS_LAG_HOLD_S = 0.10    # damage trail waits this long before it starts shrinking
 BOSS_LAG_SHRINK_S = 0.40  # then shrinks toward the real HP (about 0.5 s in total)
+STATUS_SEP = "   |   "    # between status segments
+STATUS_CACHE_MAX = 256    # fitted status strings kept before the cache is reset
 
 
 def _ui_scale(width: int, height: int) -> float:
@@ -52,10 +55,11 @@ class HUD:
         self.height = height
         self._s = 1.0
         self._bar_w = 240
-        self._status_max_chars = 120
         self._scaled_labels = []  # (label, reference font size) pairs resized in layout()
         self._meta_src = ""
         self._meta_max_w = 200.0
+        self._status_max_w = 540.0  # pixel budget for the status line; set in layout()
+        self._status_cache = {}     # (segments, width) -> fitted status text
 
         self.batch = pyglet.graphics.Batch()
 
@@ -337,7 +341,8 @@ class HUD:
         self.status_border.height = status_h
         self.status_label.x = status_x + status_w // 2
         self.status_label.y = status_y + status_h // 2
-        self._status_max_chars = max(24, int((status_w - sz(28)) / (7.2 * self._s)))
+        self._status_max_w = float(max(sz(60), status_w - sz(28)))
+        self._status_cache.clear()  # cached widths depend on the font size and the bar width
 
         # Score panel (top-right)
         score_panel_w = sz(max(160, min(260, int(width * 0.22))))
@@ -576,6 +581,56 @@ class HUD:
     # Per-frame update
     # ------------------------------------------------------------------
 
+    def _fit_status(self, segments) -> str:
+        """Return the status line for (priority, text) segments, fitted to the status bar.
+
+        A lower priority number is more important. The most important segments are kept and
+        shown in list order; when the line is too wide, whole segments are dropped from the
+        least important end and ' +N' tells how many were hidden. A lone segment that is still
+        too wide is trimmed with '...'. Results are cached by (segments, width) because most
+        frames repeat the same text.
+        """
+        items = tuple((int(prio), str(text)) for prio, text in segments if text)
+        if not items:
+            return ""
+        key = (items, self._status_max_w)
+        cached = self._status_cache.get(key)
+        if cached is not None:
+            return cached
+        fitted = self._fit_status_uncached(items, self._status_max_w)
+        if len(self._status_cache) >= STATUS_CACHE_MAX:
+            self._status_cache.clear()
+        self._status_cache[key] = fitted
+        return fitted
+
+    def _fit_status_uncached(self, items, max_w: float) -> str:
+        label = self.status_label
+        ranked = sorted(range(len(items)), key=lambda i: (items[i][0], i))  # most important first
+        kept = list(ranked)
+        dropped = 0
+
+        def compose() -> str:
+            line = STATUS_SEP.join(items[i][1] for i in sorted(kept))
+            return f"{line} +{dropped}" if dropped else line
+
+        text = compose()
+        label.text = text
+        while len(kept) > 1 and label.content_width > max_w:
+            kept.pop()  # the least important segment left
+            dropped += 1
+            text = compose()
+            label.text = text
+        if label.content_width <= max_w:
+            return text
+        # One segment is left and still too wide: trim it and keep the ' +N' suffix readable.
+        suffix = f" +{dropped}" if dropped else ""
+        room = max_w
+        if suffix:
+            label.text = suffix
+            room = max(1.0, max_w - label.content_width)
+        _fit_text(label, items[kept[0]][1], room)
+        return label.text + suffix
+
     def update_bars(
         self,
         player,
@@ -584,8 +639,13 @@ class HUD:
         status_text: str = "",
         has_infinite_boost: bool = False,
         crit_chance_bonus: float = 0.0,
+        status_segments=None,
     ) -> None:
-        """Sync HUD elements with current game state."""
+        """Sync HUD elements with current game state.
+
+        status_segments is a list of (priority, text) pairs for the status line (see
+        _fit_status). Without it, status_text is shown as a single segment.
+        """
         # HP bar
         hp_cap = max(1, int(getattr(player, "max_hp", 100)))
         hp_now = max(0, int(player.hp))
@@ -598,9 +658,9 @@ class HUD:
         )
         _set_text(self.hp_value_label, f"{hp_now}/{hp_cap}")
 
-        # Shield bar
-        shield_cap = 100
-        shield_now = max(0, int(player.shield))
+        # Shield bar (pickups cap at SHIELD_MAX, so the bar and its label never read past it)
+        shield_cap = SHIELD_MAX
+        shield_now = min(shield_cap, max(0, int(player.shield)))
         shield_frac = max(0.0, min(1.0, shield_now / max(1, shield_cap)))
         self.shield_bar.width = self._bar_w * shield_frac
         self.shield_bar.color = (
@@ -648,11 +708,10 @@ class HUD:
             self._meta_src = meta_src
             _fit_text(self.meta_label, meta_src, self._meta_max_w)
 
-        # Status text
-        max_chars = self._status_max_chars
-        if len(status_text) > max_chars:
-            status_text = status_text[: max(3, max_chars - 3)].rstrip() + "..."
-        _set_text(self.status_label, status_text)
+        # Status line: priority-fitted so boss and ultra text survive a crowded bar
+        if status_segments is None:
+            status_segments = [(0, status_text)] if status_text else []
+        _set_text(self.status_label, self._fit_status(status_segments))
 
         # Score
         if score is not None:

@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from config import PLAYER_HP, PLAYER_SPEED, PLAYER_DAMAGE, PLAYER_FIRE_RATE
+from config import PLAYER_HP, PLAYER_SPEED, PLAYER_DAMAGE, PLAYER_FIRE_RATE, ULTRA_MAX_CHARGES
 from utils import Vec2
 
 if TYPE_CHECKING:
@@ -29,6 +29,7 @@ class Player:
     vortex_radius: float = 70.0
     vortex_dps: float = 38.0
     ultra_charges: int = 0
+    ultra_max_charges: int = ULTRA_MAX_CHARGES
     ultra_cd_until: float = 0.0
     ultra_variant_idx: int = 0
     current_weapon: "Weapon" = field(default=None)  # Will be set in Game.__init__

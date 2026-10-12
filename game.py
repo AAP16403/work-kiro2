@@ -325,7 +325,8 @@ class Game(pyglet.window.Window):
         if not self.player:
             return
         temp_opts, perm_opts = rpg_roll_rewards(
-            self._active_temp_rewards, self._last_reward_temp_key, self._last_reward_perm_key
+            self._active_temp_rewards, self._last_reward_temp_key, self._last_reward_perm_key,
+            player=self.player, dash_cd_mult=self._dash_cd_mult,
         )
         self.rpg_menu.begin(temp_opts, perm_opts)
         self.audio.play("reward_open", volume=0.8)
@@ -338,7 +339,7 @@ class Game(pyglet.window.Window):
         self._last_reward_temp_key = k
         self.audio.play("pickup_rare", volume=0.8)
         if k == "temp_ultra_flux":
-            self.player.ultra_charges = min(int(getattr(config, "ULTRA_MAX_CHARGES", 2)), int(self.player.ultra_charges) + 1)
+            self.player.ultra_charges = min(int(self.player.ultra_max_charges), int(self.player.ultra_charges) + 1)
         if self.particle_system:
             self.particle_system.add_powerup_collection(self.player.pos, (255, 235, 170))
         if self.state:
@@ -352,7 +353,6 @@ class Game(pyglet.window.Window):
         self._dash_cd_mult, applied = rpg_apply_perm(
             self.player, self._run_permanent_rewards, k,
             self._dash_cd_mult,
-            ultra_max_charges=int(getattr(config, "ULTRA_MAX_CHARGES", 2)),
         )
         if not applied:
             return

@@ -386,6 +386,8 @@ class BrowserGame:
             self._active_temp_rewards,
             self._last_reward_temp_key,
             self._last_reward_perm_key,
+            player=self.player,
+            dash_cd_mult=self._dash_cd_mult,
         )
         self.reward_step = "temp"
         self.reward_message = "Pick one temporary card"
@@ -398,7 +400,7 @@ class BrowserGame:
         rpg_apply_temp(self._active_temp_rewards, k, duration)
         self._last_reward_temp_key = k
         if k == "temp_ultra_flux":
-            self.player.ultra_charges = min(int(getattr(config, "ULTRA_MAX_CHARGES", 2)), int(self.player.ultra_charges) + 1)
+            self.player.ultra_charges = min(int(self.player.ultra_max_charges), int(self.player.ultra_charges) + 1)
         self._recompute_temp_reward_mods()
         self.flash = max(self.flash, 0.42)
 
@@ -411,7 +413,6 @@ class BrowserGame:
             self._run_permanent_rewards,
             k,
             self._dash_cd_mult,
-            ultra_max_charges=int(getattr(config, "ULTRA_MAX_CHARGES", 2)),
         )
         if applied:
             self._last_reward_perm_key = k

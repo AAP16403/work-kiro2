@@ -1,5 +1,5 @@
 """Ranged behavior for enemies."""
-from enemy_behaviors.base import Behavior
+from enemy_behaviors.base import Behavior, sustained_cd_scale
 from utils import Vec2, perp
 from projectile import Projectile
 import math
@@ -75,7 +75,7 @@ class Ranged(Behavior):
                 aim = _lead_dir(peek_pos, player_pos, player_vel, proj_speed, mult=0.75)
                 vel = aim * proj_speed
                 state.projectiles.append(Projectile(peek_pos, vel, 8 + state.wave // 2, ttl=2.6, owner="enemy"))
-                enemy.attack_cd = 2.0 + random.uniform(0.0, 0.5)
+                enemy.attack_cd = (2.0 + random.uniform(0.0, 0.5)) / sustained_cd_scale(enemy)
 
     def _do_kiting_behavior(self, enemy, player_pos, state, dt, player_vel):
         """Keep a certain distance and fire."""
@@ -125,7 +125,7 @@ class Ranged(Behavior):
                 enemy.ai["burst_left"] -= 1
                 enemy.ai["burst_gap"] = 0.16 + random.uniform(0.0, 0.08)
                 if enemy.ai["burst_left"] <= 0:
-                    enemy.attack_cd = 1.45 + random.uniform(0.2, 0.55)
+                    enemy.attack_cd = (1.45 + random.uniform(0.2, 0.55)) / sustained_cd_scale(enemy)
                     enemy.ai["relocate_t"] = 0.5 + random.uniform(0.0, 0.6)
                     enemy.ai["strafe_sign"] *= -1.0
                 else:

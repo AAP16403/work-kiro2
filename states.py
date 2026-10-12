@@ -384,6 +384,13 @@ class PlayingState(State):
         spawn_loot_on_enemy_death(s, behavior_name, e.pos, current_weapon=getattr(game.player, "current_weapon", None))
         if getattr(game, 'score', None):
             game.score.on_enemy_kill(behavior_name, multiplier=(float(config.ELITE_SCORE_MULT) if is_elite else 1.0))
+        run = getattr(game, "run_stats", None)
+        if run is not None:
+            run.on_kill(
+                elite=is_elite,
+                boss=behavior_name.startswith("boss_"),
+                combo=float(getattr(getattr(game, 'score', None), 'combo', 1.0)),
+            )
 
     def update(self, dt: float):
         game = self.game
@@ -779,6 +786,9 @@ class PlayingState(State):
                 game.fsm.set_state(GameStateName.BOSS_REWARD)
             if getattr(game, 'score', None):
                 game.score.on_wave_clear(cleared_wave)
+            run = getattr(game, "run_stats", None)
+            if run is not None:
+                run.on_wave_clear(cleared_wave)
 
         if hit_shake > 0.0:
             add_shake(s, min(float(config.SHAKE_HIT_FRAME_MAX), hit_shake), limit=float(config.SHAKE_HIT_CEILING))
@@ -951,6 +961,7 @@ class PausedState(State):
         if action == "resume":
             self.game.fsm.set_state(GameStateName.PLAYING)
         elif action == "quit_to_menu":
+            self.game._finish_meta_run()
             self.game._return_to_menu()
             self.game.fsm.set_state(GameStateName.MENU)
 
@@ -1015,6 +1026,7 @@ class GameOverState(State):
         if score_obj:
             is_new_high = score_obj.submit_score(wave)
             high_score = score_obj.get_high_score()
+        game._finish_meta_run()  # saves the run's meta progress once, at the moment it ends
         game.game_over_menu.set_results(wave, final_score, high_score, is_new_high)
         # A daily run only ever touches its own date's record in progress.json.
         daily_result = None

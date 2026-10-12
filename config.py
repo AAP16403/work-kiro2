@@ -9,6 +9,7 @@ FPS = 60
 ENABLE_OBSTACLES = False
 ENABLE_ADVANCED_FX = True
 ADVANCED_FX_STRENGTH = 0.55
+USE_PLAYER_ART = True  # Pod-robot player character (player_art.py). False draws the legacy ship.
 
 # Room settings
 ROOM_RADIUS = 400.0

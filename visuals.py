@@ -9,10 +9,12 @@ import pyglet
 from pyglet import shapes
 from pyglet.graphics import Group
 
+import config
 from config import ENEMY_COLORS, SCREEN_H, SHIELD_MAX
 from drone_art import DroneArt
 from enemy import brute_charge_lane
 from event_visuals import ArenaEventFx
+from player_art import DEFAULT_PALETTE, PlayerArt
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
@@ -79,6 +81,8 @@ class Visuals:
         self._player_handle: RenderHandle | None = None
         self._drone_art: DroneArt | None = None
         self._drone_handle: RenderHandle | None = None
+        self._player_art: PlayerArt | None = None  # set when config.USE_PLAYER_ART built the character
+        self.player_palette = DEFAULT_PALETTE      # skins replace this dict to recolour the character
         self._scene_stars: list[tuple[shapes.Circle, float, float, float]] = []
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
@@ -174,7 +178,12 @@ class Visuals:
         right.opacity = int(v_op * 0.8)
 
     def make_player(self):
-        """Create player visual."""
+        """Create player visual: PlayerArt when config.USE_PLAYER_ART is set, else the legacy ship."""
+        if config.USE_PLAYER_ART:
+            self._player_art = PlayerArt(self.batch, None)
+            self._player_handle = RenderHandle(*self._player_art.shapes)
+            return
+        self._player_art = None
         sh = shapes.Ellipse(0, 0, 30, 12, color=(0, 0, 0), batch=self.batch)
         sh.opacity = 130
 
@@ -231,6 +240,16 @@ class Visuals:
 
     def sync_player(self, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None):
         """Update player visual position."""
+        # Rebuild if config.USE_PLAYER_ART changed since the last build, so the flag switches paths at runtime.
+        if self._player_handle is None or (self._player_art is not None) != bool(config.USE_PLAYER_ART):
+            if self._player_handle is not None:
+                self._player_handle.delete()
+            self._player_handle = None
+            self.make_player()
+        if self._player_art is not None:
+            cx, cy = self._player_art.sync(player, shake, t=t, aim_dir=aim_dir, palette=self.player_palette)
+            self._set_depth(self._player_handle, cy, shake)
+            return
         assert self._player_handle is not None
         (
             sh, glow, glow2, shield_ring2, shield_ring, laser_ring, boost_ring,

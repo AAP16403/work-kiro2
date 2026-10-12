@@ -881,6 +881,7 @@ class PlayingState(State):
         aim_dir = (iso_to_world(game.mouse_xy) - game.player.pos).normalized()
         game.visuals.sync_player(game.player, shake, t=s.time, aim_dir=aim_dir)
         game.visuals.sync_drone(s.drone, shake, t=s.time)
+        game.visuals.sync_juice(s.time, shake, game.player, game.width, game.height)
 
         for e in game.state.enemies:
             game.visuals.ensure_enemy(e)

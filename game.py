@@ -534,6 +534,7 @@ class Game(pyglet.window.Window):
         # Cycle variants for built-in variety while preserving predictable control.
         variant = int(getattr(self.player, "ultra_variant_idx", 0)) % 3
         self.player.ultra_variant_idx = (variant + 1) % 3
+        flash_r = 120.0  # Ultra flash radius for the beam variants; the shockwave variant uses its blast radius
 
         if variant == 0:
             # Classic piercing beam.
@@ -565,6 +566,7 @@ class Game(pyglet.window.Window):
         else:
             # Shockwave + forward finisher beam.
             blast_r = 160.0
+            flash_r = blast_r
             blast_dmg = int(dmg * 0.58)
             for e in list(s.enemies):
                 if dist(e.pos, self.player.pos) <= blast_r:
@@ -582,6 +584,10 @@ class Game(pyglet.window.Window):
             )
             add_shake(s, 16.0)  # capped at SHAKE_CAP (14) like every other stacked impulse
 
+        if getattr(self, "visuals", None):
+            # White flash tinted by this variant's colour, layered over the shockwave ring.
+            flash_color = (tuple(config.ULTRA_BEAM_COLOR), (255, 180, 180), (255, 220, 180))[variant]
+            self.visuals.trigger_ultra_flash(self.player.pos, flash_color, flash_r, s.time)
         self.audio.play("ultra_fire", volume=0.9)
         self._hitstop = max(self._hitstop, 0.06)
         self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)

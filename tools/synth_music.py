@@ -20,14 +20,19 @@ fade-out so it ends inside its buffer, and add_at() refuses to write past the lo
 The drone and LFO frequencies are whole cycles per loop, so they are periodic.
 
 Run from the project root:  .venv\\Scripts\\python.exe tools\\synth_music.py
+Options: --jobs 2 renders the two loops in parallel processes (same bytes as serial);
+         --out-dir DIR writes somewhere other than assets/audio.
 """
 
+import argparse
 import math
+import multiprocessing
 import os
 import random
 import struct
 import sys
 import wave
+from concurrent.futures import ProcessPoolExecutor
 
 SR = 22050
 TWO_PI = 2.0 * math.pi
@@ -418,14 +423,45 @@ def render_battle(cfg):
 
 
 # ----------------------------------------------------------------- main
-def main():
+_RENDERS = {"menu": (MENU, render_menu), "battle": (BATTLE, render_battle)}
+
+
+def render_job(key, out_dir):
+    """Renders one loop ("menu" or "battle") and writes its WAV. Entry point for --jobs worker processes.
+
+    Returns (path, analysis). Only the key and the directory cross the process boundary. The worker
+    gets the config and renderer from its own copy of this module, which spawn re-imports.
+    """
+    cfg, render = _RENDERS[key]
+    path = os.path.join(out_dir, cfg["name"] + ".wav")
+    write_wav(path, to_pcm16(render(cfg), cfg["peak"]))
+    return path, analyse(path)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Render the PLOUTO music loops to WAV files.")
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="render the two loops in parallel processes; the WAV bytes do not depend on N")
+    ap.add_argument("--out-dir", default="", help="directory for the WAV files (default: assets/audio)")
+    args = ap.parse_args(argv)
+    if args.jobs < 1:
+        raise SystemExit("--jobs must be at least 1")
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    out_dir = os.path.join(root, "assets", "audio")
+    out_dir = args.out_dir or os.path.join(root, "assets", "audio")
+    os.makedirs(out_dir, exist_ok=True)
+
+    keys = ["menu", "battle"]
+    if args.jobs == 1:
+        outs = [render_job(key, out_dir) for key in keys]
+    else:
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=min(args.jobs, len(keys)), mp_context=ctx) as pool:
+            futures = [pool.submit(render_job, key, out_dir) for key in keys]
+            outs = [fut.result() for fut in futures]
+
     results = []
-    for cfg, render in ((MENU, render_menu), (BATTLE, render_battle)):
-        path = os.path.join(out_dir, cfg["name"] + ".wav")
-        write_wav(path, to_pcm16(render(cfg), cfg["peak"]))
-        results.append((cfg, path, analyse(path)))
+    for key, (path, info) in zip(keys, outs):
+        results.append((_RENDERS[key][0], path, info))
 
     print("%-14s %9s %7s %7s %10s %12s" % ("name", "dur_s", "peak", "rms", "bytes", "seam_jump"))
     failed = False

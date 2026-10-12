@@ -177,6 +177,15 @@ def active_batcher():
     return _configured[1]
 
 
+def close_batcher() -> None:
+    """Shut down the steering pool (and any test override). Called on window close; safe to repeat."""
+    global _configured
+    for batcher in (_override, None if _configured is None else _configured[1]):
+        if batcher is not None:
+            batcher.close()
+    _configured = None
+
+
 def maybe_update_enemies(state, game, dt: float, player_pos: Vec2, player_vel: Vec2):
     """Hook for the playing state. Returns the batch-updated enemy ids, or None to use the default loop.
 

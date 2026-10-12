@@ -126,6 +126,22 @@ def place_panel(parts: list, x: float, y: float, w: float, h: float, *, border_p
     shine.height = strip
 
 
+SHINE_ALPHA = 16  # opacity of a panel's top highlight, the faint third part draw_panel returns
+
+
+def set_panel_alpha(parts: list, alpha: int) -> None:
+    """Set the opacity of a draw_panel() result: edge and body take ``alpha``.
+
+    The shine keeps its faint highlight. Setting every part to one opacity would turn the
+    highlight into a solid bar across labels and text, so the shine is capped at SHINE_ALPHA.
+    """
+    edge, body, shine = parts
+    a = max(0, min(255, int(alpha)))
+    edge.opacity = a
+    body.opacity = a
+    shine.opacity = min(SHINE_ALPHA, a)
+
+
 def draw_panel(
     batch: pyglet.graphics.Batch,
     x: float,

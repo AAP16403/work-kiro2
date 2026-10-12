@@ -189,16 +189,16 @@ def test_unlocked_skin_selection_persists(g):
         return
     import progress
     import skins
-    target = next(sid for sid in skins.SKINS if sid != "default")
+    target = next(skin.id for skin in skins.SKINS if skin.id != skins.DEFAULT_SKIN_ID)
     d, path = _temp_progress_dir()
     try:
         data = progress.default_progress()
         data["unlocked_skins"] = [target]
-        progress.save_progress(data, path)
+        progress.save(data, path)
         menu = _hangar_menu(path)
         assert skins.unlocked(menu.progress, target), "the granted skin must read as unlocked"
         menu.on_mouse_press(*_card_center(menu, target), LEFT)
-        on_disk = progress.load_progress(path)
+        on_disk = progress.load(path)
         assert on_disk.get("selected_skin") == target, f"selection did not persist, file says {on_disk.get('selected_skin')!r}"
         assert menu._card_state(target) == "selected", "the card should now show SELECTED"
     finally:
@@ -315,7 +315,7 @@ def test_each_card_previews_its_own_palette(g):
         menu.open()
         menu.update(0.1)
         for sid in menu.skin_ids:
-            assert menu._arts[sid].palette == skins.palette_for(sid), f"card '{sid}' does not preview its own palette"
+            assert menu._arts[sid].palette == skins.get(sid).palette, f"card '{sid}' does not preview its own palette"
     finally:
         H.PlayerArt = original
         shutil.rmtree(d, ignore_errors=True)

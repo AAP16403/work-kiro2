@@ -144,8 +144,8 @@ def settle_daily_run(date_iso: str, score: int, wave: int, path: str | None = No
     """
     import progress as store  # wave-1 store; imported here so this file loads without it
 
-    data = store.load_progress(path)
+    data = store.load(path)  # keeps the "daily" table, which progress.load does not drop
     result = record_run(data, date_iso, score, wave)
     if result.changed:
-        store.save_progress(data, path)
+        store.save(data, path)
     return result

@@ -14,6 +14,7 @@ import config
 import audio_cues
 import daily
 import replay
+import parallel
 from config import SCREEN_W, SCREEN_H, FPS, MAP_CIRCLE, ENEMY_COLORS
 
 from map import Room
@@ -22,6 +23,7 @@ from level import GameState as GameStateData, get_difficulty_mods, spawn_loot_on
 from utils import set_view_size, compute_room_radius, Vec2, clamp_to_map, enemy_behavior_name, iso_to_world, dist, point_segment_distance
 
 from visuals import Visuals, GroupCache
+from skin_apply import default_run_skin, read_run_skin
 from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
@@ -162,7 +164,8 @@ class Game(pyglet.window.Window):
         self.player = None
         self.visuals = None
         self.particle_system = None
-        
+        self.run_skin = default_run_skin()  # replaced with the selected skin at each run start
+
         self.keys = pyglet.window.key.KeyStateHandler()
         self.push_handlers(self.keys)
 
@@ -174,6 +177,8 @@ class Game(pyglet.window.Window):
         # mutator ids that run is built with. A daily run has exactly one mutator, chosen by its date.
         self.daily_date: str | None = None
         self.run_mutator_ids: tuple[str, ...] = ()
+        # Achievements earned by the last finished run. The next run's HUD shows them as toasts.
+        self._pending_achievement_ids: list[str] = []
         # progress.json location for the daily record; None means the store's default. Tests point it at a temp file.
         self.progress_path: str | None = None
         self.balance = BalanceLogic(fps=float(FPS))
@@ -264,8 +269,11 @@ class Game(pyglet.window.Window):
         self.groups = GroupCache()
         self.room = Room(self.batch, self.width, self.height, map_type=self.settings.get("map_type", MAP_CIRCLE))
 
-        # The only place mutators are applied: the run keeps this snapshot for its whole duration.
-        self.run_mutators = mutators.normalize_selection(self.mutator_ids if mutator_ids is None else mutator_ids)
+        # The only place mutators are applied: the run keeps this snapshot for its whole duration. A daily run
+        # keeps its one mutator through Try Again (run_mutator_ids); every other run uses the title selection.
+        if mutator_ids is None:
+            mutator_ids = self.run_mutator_ids if self.daily_date else self.mutator_ids
+        self.run_mutators = mutators.normalize_selection(mutator_ids)
         self.run_rules = mutators.apply_mutators(self.run_mutators)
 
         difficulty = str(self.settings.get("difficulty", "normal")).lower()
@@ -326,9 +334,12 @@ class Game(pyglet.window.Window):
         self._dash_cd_mult = 1.0
         self._dash_cd_difficulty = float(get_difficulty_mods(difficulty).get("dash_cd", 1.0))
 
+        # The skin selected in progress is read once per run start and drives the ship, shots and trails.
+        self.run_skin = read_run_skin()
         self.visuals = Visuals(self.batch, self.groups)
+        self.visuals.apply_skin(self.run_skin)
         self.visuals.make_player()
-        
+
         self.particle_system = ParticleSystem(self.batch)
         self.popups = DamagePopups()
         self._hitstop = 0.0
@@ -341,6 +352,9 @@ class Game(pyglet.window.Window):
         self.hud = HUD(self.width, self.height)
         self.hud.on_toast = self._play_toast_cue
         self.hud.set_skin_name(current_skin_name())
+        if self._pending_achievement_ids:
+            self.hud.push_achievement_toasts(self._pending_achievement_ids)
+            self._pending_achievement_ids = []
 
     def _start_daily_run(self, today=None):
         """Start the daily run for the local date (or for ``today`` when a test passes one).
@@ -350,13 +364,7 @@ class Game(pyglet.window.Window):
         """
         date_iso = daily.today_iso(today)
         self.daily_date = date_iso
-        try:
-            picked = daily.daily_mutator(date_iso)
-        except ImportError:
-            # mutators.py is not in this build (the wave-1 mutators item is not merged). The date's run still
-            # starts, with no mutator, instead of raising from the title screen.
-            picked = None
-        self.run_mutator_ids = (picked,) if picked is not None else ()
+        self.run_mutator_ids = (daily.daily_mutator(date_iso),)
         # The daily run plays with its own one-mutator list, not the saved title-screen selection.
         self._init_game(mutator_ids=self.run_mutator_ids)
 
@@ -570,6 +578,7 @@ class Game(pyglet.window.Window):
         # Cycle variants for built-in variety while preserving predictable control.
         variant = int(getattr(self.player, "ultra_variant_idx", 0)) % 3
         self.player.ultra_variant_idx = (variant + 1) % 3
+        flash_r = 120.0  # Ultra flash radius for the beam variants; the shockwave variant uses its blast radius
 
         if variant == 0:
             # Classic piercing beam.
@@ -601,6 +610,7 @@ class Game(pyglet.window.Window):
         else:
             # Shockwave + forward finisher beam.
             blast_r = 160.0
+            flash_r = blast_r
             blast_dmg = int(dmg * 0.58)
             for e in list(s.enemies):
                 if dist(e.pos, self.player.pos) <= blast_r:
@@ -618,6 +628,10 @@ class Game(pyglet.window.Window):
             )
             add_shake(s, 16.0)  # capped at SHAKE_CAP (14) like every other stacked impulse
 
+        if getattr(self, "visuals", None):
+            # White flash tinted by this variant's colour, layered over the shockwave ring.
+            flash_color = (tuple(config.ULTRA_BEAM_COLOR), (255, 180, 180), (255, 220, 180))[variant]
+            self.visuals.trigger_ultra_flash(self.player.pos, flash_color, flash_r, s.time)
         self.audio.play("ultra_fire", volume=0.9)
         self._hitstop = max(self._hitstop, 0.06)
         self.player.ultra_charges = max(0, int(self.player.ultra_charges) - 1)
@@ -639,7 +653,7 @@ class Game(pyglet.window.Window):
         )
         if did_dash:
             self.audio.play("dash", volume=0.7, pitch_jitter=0.05)
-            self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction)
+            self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction, color=self.run_skin.dash_color)
             if getattr(self, "advanced_fx", None):
                 self.advanced_fx.trigger_dash(0.7)
 
@@ -870,6 +884,7 @@ class Game(pyglet.window.Window):
         )
         # The run's progress goes to the same file the daily record uses (progress_path, or the store default).
         self.last_run_summary = meta_progress.end_run(run, path=self.progress_path)
+        self._pending_achievement_ids.extend(self.last_run_summary.get("new_achievements", []))
         if self.last_run_summary.get("new_achievements"):
             audio_cues.cue(self.audio, "achievement")
         if self.recorder is not None:
@@ -903,6 +918,7 @@ class Game(pyglet.window.Window):
     def on_close(self):
         """Handle window close event."""
         self._finish_meta_run()  # a run still in progress is saved rather than lost
+        parallel.close_batcher()  # the steering pool's worker processes stop with the window
         self._schedule_app_close()
         return True
 

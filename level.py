@@ -114,7 +114,7 @@ def spawn_wave(state: GameState, center: Vec2):
             hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
             speed *= float(_run_rules(state).enemy_speed_mult)
             pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type, rng=state.rng)
-            
+
             # Elite enemies roll on wave 3+
             is_elite = False
             affix = ""

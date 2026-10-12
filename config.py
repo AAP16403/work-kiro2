@@ -209,6 +209,8 @@ EVENT_NEBULA_SHIELD = 24            # shield an enemy gains on entering the clou
 # spawned worker costs seconds of start-up on Windows (warmed on the first playing frame).
 PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a process pool
 PARALLEL_STEER_MIN_ENEMIES = 32     # live enemy count at which the batch path is used
+# Named threshold for the multicore wiring tests and bench: the batch path runs at or above this live enemy count.
+PARALLEL_MIN_ENEMIES = PARALLEL_STEER_MIN_ENEMIES
 PARALLEL_STEER_WORKERS = 3          # process-pool size when enabled
 PARALLEL_LOADER_WORKERS = 4         # threads for I/O-bound asset reads
 

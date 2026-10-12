@@ -199,7 +199,7 @@ def test_title_buttons_keep_text_and_actions():
         assert got == action, f"{btn.text} returned {got!r}, expected {action!r}"
     assert menu.on_mouse_press(1.0, 1.0, pyglet.window.mouse.LEFT) is None, "a miss returns None"
     assert menu.on_mouse_press(menu.buttons[0].x, menu.buttons[0].y, pyglet.window.mouse.RIGHT) is None, "only LMB acts"
-    print("[PASS] test_title_buttons_keep_text_and_actions passed (4 labels and actions unchanged, misses ignored)")
+    print("[PASS] test_title_buttons_keep_text_and_actions passed (6 labels and actions in order, misses ignored)")
 
 
 def test_reduced_motion_freezes_title_animation():

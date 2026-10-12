@@ -22,6 +22,7 @@ from hud_widgets import (
     token,
     weapon_swatch,
 )
+from ui_theme import set_panel_alpha
 
 
 CONTRAST_LIFT = 0.45      # high contrast: each HUD text channel moves this far toward white
@@ -63,19 +64,14 @@ def _reduce_motion() -> bool:
 def current_skin_name(progress=None) -> str:
     """Name of the selected skin, from `progress` or from progress.json when none is given.
 
-    Falls back to DEFAULT_SKIN_NAME while the progress or skins modules are missing, and never
-    raises, so a bad save file cannot stop a run from starting.
+    progress.load() never raises: a missing or corrupt save file gives the default record, so the
+    selected skin is the default and a bad save cannot stop a run from starting.
     """
-    try:
-        import skins
-        import progress as progress_store
-    except ImportError:
-        return DEFAULT_SKIN_NAME
-    try:
-        data = progress if progress is not None else progress_store.load_progress()
-        return str(skins.selected(data).name) or DEFAULT_SKIN_NAME
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return DEFAULT_SKIN_NAME
+    import progress as progress_store  # wave-1 store
+    import skins
+
+    data = progress if progress is not None else progress_store.load()
+    return str(skins.selected(data).name) or DEFAULT_SKIN_NAME
 
 
 def achievement_name(achievement_id) -> str:
@@ -332,16 +328,12 @@ class HUD:
         if shadow:
             offset = self._sz(3)
             shadow_shapes = draw_panel(self._frame_batch, x + offset, y - offset, w, h, color=token("BG"))
+            set_panel_alpha(shadow_shapes, PANEL_SHADOW_ALPHA)
         edge_shapes = draw_panel(self._frame_batch, x - edge, y - edge, w + 2 * edge, h + 2 * edge, color=token("ACCENT"))
+        set_panel_alpha(edge_shapes, PANEL_EDGE_ALPHA)
         fill_shapes = draw_panel(self._frame_batch, x, y, w, h, color=token("PANEL"))
-        # draw_panel returns [edge, body, shine]. The HUD alphas go on the edge and the body only; the shine strip
-        # keeps the soft alpha draw_panel gave it, so it does not sit over the HULL and SCORE labels.
-        for shp in shadow_shapes[:2]:
-            shp.opacity = PANEL_SHADOW_ALPHA
-        for shp in edge_shapes[:2]:
-            shp.opacity = PANEL_EDGE_ALPHA
-        for shp in fill_shapes[:2]:
-            shp.opacity = PANEL_FILL_ALPHA
+        set_panel_alpha(fill_shapes, PANEL_FILL_ALPHA)
+        # Keep this order: test_w2_hudv2 reads the last entry of each panel's list.
         self._frames[key] = shadow_shapes + edge_shapes + fill_shapes
 
     # ------------------------------------------------------------------

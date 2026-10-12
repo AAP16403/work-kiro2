@@ -64,10 +64,11 @@ class Skin:
 
 _SKIN_LIST: tuple[Skin, ...] = (
     Skin(
+        # Equal to player_art.DEFAULT_PALETTE, the look every run shows for this skin, so the Hangar card matches the run.
         "classic", "Classic Pod", "The original cyan pod. Always unlocked.",
         {
-            "body": (132, 224, 255), "accent": (10, 200, 255), "eye": (30, 60, 90),
-            "glow": (60, 140, 220), "trail": (100, 220, 255), "bullet": (150, 235, 255), "cheek": (255, 140, 175),
+            "body": (132, 224, 255), "accent": (255, 206, 90), "eye": (16, 24, 46),
+            "glow": (100, 220, 255), "trail": (130, 210, 255), "bullet": (235, 240, 255), "cheek": (255, 140, 175),
         },
         UnlockRule("default"),
     ),

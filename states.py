@@ -22,6 +22,7 @@ from physics import resolve_circle_obstacles
 from level import spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death, get_difficulty_mods
 from enemy import update_enemy
 from boss_rage import celebrate_boss_death, FANFARE_MIN_GAP
+from parallel import maybe_update_enemies
 from powerup import apply_powerup
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
@@ -583,10 +584,12 @@ class PlayingState(State):
             game.particle_system.add_muzzle_flash(d_muzzle, d_aim)
             game.audio.play("shot_basic", volume=0.25, pitch_jitter=0.05, min_gap=0.04)
 
+        batched = maybe_update_enemies(s, game, dt, game.player.pos, player_vel)
         for e in list(s.enemies):
             if e not in s.enemies or e.hp <= 0 or getattr(e, "_is_dead", False):
                 continue
-            update_enemy(e, game.player.pos, s, dt, game, player_vel=player_vel)
+            if batched is None or id(e) not in batched:
+                update_enemy(e, game.player.pos, s, dt, game, player_vel=player_vel)
             behavior_name = enemy_behavior_name(e)
             e._behavior_name = behavior_name
             e._radius = game.balance.enemy_radius(behavior_name)

@@ -212,7 +212,8 @@ _BENCH = None
 def _load_bench():
     global _BENCH
     if _BENCH is None:
-        spec = importlib.util.spec_from_file_location("bench_module", os.path.join(ROOT, "tools", "bench.py"))
+        # The wave-1 frame-loop bench lives in tools/bench_frames.py; tools/bench.py is the wave-2/3 AI bench.
+        spec = importlib.util.spec_from_file_location("bench_module", os.path.join(ROOT, "tools", "bench_frames.py"))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         _BENCH = module

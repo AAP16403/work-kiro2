@@ -189,7 +189,7 @@ def test_unlocked_skin_selection_persists(g):
         return
     import progress
     import skins
-    target = next(skin.id for skin in skins.SKINS if skin.id != skins.DEFAULT_SKIN_ID)
+    target = next(skin.id for skin in skins.SKINS.values() if skin.id != skins.DEFAULT_SKIN_ID)
     d, path = _temp_progress_dir()
     try:
         data = progress.default_progress()

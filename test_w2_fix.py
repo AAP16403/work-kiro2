@@ -45,7 +45,7 @@ def test_hangar_menu_opens_with_integrated_modules(g):
     d = _temp_dir()
     try:
         menu = HangarMenu(980, 620, progress_path=os.path.join(d, "progress.json"))
-        ids = [s.id for s in skins.SKINS]
+        ids = [s.id for s in skins.SKINS.values()]  # SKINS is a dict id -> Skin (wave-3 contract)
         assert menu.skin_ids == ids, f"hangar lists {menu.skin_ids}, catalogue is {ids}"
         assert set(menu._palettes) == set(ids), "every skin needs a preview palette"
     finally:
@@ -57,8 +57,8 @@ def test_daily_run_starts_with_one_mutator(g):
     g._start_daily_run(DAY)
     assert g.daily_date == DAY_ISO, f"daily date is {g.daily_date!r}"
     assert len(g.run_mutator_ids) == 1, "a daily run never stacks mutators"
-    assert g.run_mutator_ids[0] in mutators.MUTATORS, "the daily mutator must be a real mutators.py id"
-    assert g.state.mutator_mods == mutators.combined(g.run_mutator_ids), "the run must carry the mutator's multipliers"
+    assert g.run_mutator_ids[0] in {m.id for m in mutators.MUTATORS}, "the daily mutator must be a real mutators.py id"
+    assert g.run_rules == mutators.apply_mutators(g.run_mutator_ids), "the run must carry the mutator's rules, applied once"
     print(f"[PASS] test_daily_run_starts_with_one_mutator passed (mutator '{g.run_mutator_ids[0]}' applied to the run)")
 
 
@@ -75,18 +75,17 @@ def test_mutator_changes_player_damage(g):
 
 
 def test_mutator_module_has_five_daily_rules(g):
-    assert len(mutators.MUTATORS) == 5, f"expected 5 mutators, got {sorted(mutators.MUTATORS)}"
-    assert set(mutators.MUTATORS) == {"bullet_hell", "drift", "frenzy", "glass_cannon", "iron_man"}
-    assert daily.mutator_pool() == tuple(sorted(mutators.MUTATORS))
-    assert mutators.combined(()) == mutators.Mods(), "no mutators is the identity"
-    assert mutators.combined(("glass_cannon", "glass_cannon")).player_damage == 2.25
-    try:
-        mutators.combined(("nope",))
-    except KeyError:
-        pass
-    else:
-        raise AssertionError("an unknown mutator id must raise")
-    print("[PASS] test_mutator_module_has_five_daily_rules passed (5 ids, combined() multiplies, unknown ids raise)")
+    # Wave-2 expectation updated to the contract mutators.py (one module): MUTATORS is a tuple of records,
+    # apply_mutators folds the rules, and an unknown id is dropped instead of raising.
+    ids = {m.id for m in mutators.MUTATORS}
+    assert len(mutators.MUTATORS) == 5, f"expected 5 mutators, got {sorted(ids)}"
+    assert ids == {"bullet_hell", "drift", "frenzy", "glass_cannon", "iron_man"}
+    assert daily.mutator_pool() == tuple(sorted(ids))
+    assert mutators.apply_mutators(()) == mutators.RunRules(), "no mutators is the stock rules"
+    # Contract: a selection is a set, so a repeated id applies once (wave-2 expected 2.25 from stacking).
+    assert mutators.apply_mutators(("glass_cannon", "glass_cannon")).player_damage_mult == 1.5
+    assert mutators.apply_mutators(("nope",)) == mutators.RunRules(), "an unknown mutator id is dropped"
+    print("[PASS] test_mutator_module_has_five_daily_rules passed (5 ids, apply_mutators multiplies, unknown ids dropped)")
 
 
 def test_daily_game_over_settles_record(g):

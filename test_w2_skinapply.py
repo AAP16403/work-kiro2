@@ -355,7 +355,7 @@ def test_real_progress_and_skins_select_next_run(g):
         return
     progress, skins = mods
     data = progress.default_progress()
-    ids = [skin.id for skin in skins.SKINS]
+    ids = [skin.id for skin in skins.SKINS.values()]  # SKINS is a dict id -> Skin (wave-3 contract)
     locked = [sid for sid in ids if not skins.unlocked(data, sid)]
     if locked:
         assert skins.select(data, locked[0]) is False, "a locked skin must be refused"

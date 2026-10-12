@@ -6,6 +6,11 @@
     guide         the Guide's rows fit above the nav strip at 980x620 (medium)
     contract      the progress load/save contract names exist (medium)
 
+The mutator tests use the contract API of mutators.py (wave-3 integration): the selection is
+mutators.save_selection / load_selection, the rules are mutators.apply_mutators, and the title chips
+are menu.MutatorChipRow. The wave-1 names they used before (save_selected_ids, combined, Mods,
+_mutator_chips) no longer exist in the merged build.
+
 Every test writes only to temp files: the settings file, progress.json and the high-score board.
 """
 
@@ -51,6 +56,10 @@ def _center(obj):
     return obj.x + obj.width / 2.0, obj.y + obj.height / 2.0
 
 
+def _chip_centre(chip):
+    return chip.x + chip.w / 2.0, chip.y + chip.h / 2.0
+
+
 class _Radius:
     """A stand-in shape that counts radius writes."""
 
@@ -73,84 +82,88 @@ class _Radius:
 # ---------------------------------------------------------------------------
 
 def test_mutator_table_and_identity():
-    assert set(mutators.MUTATORS) == {"bullet_hell", "drift", "frenzy", "glass_cannon", "iron_man"}, sorted(mutators.MUTATORS)
-    assert mutators.combined(()) == mutators.Mods(), "no mutators must be the identity"
-    assert mutators.combined(("drift",)).player_speed == 1.25
-    frenzy = mutators.combined(("frenzy",))
-    assert frenzy.player_fire_rate == 1.3 and frenzy.enemy_speed == 1.2, frenzy
-    try:
-        mutators.combined(("not_a_mutator",))
-    except KeyError:
-        pass
-    else:
-        raise AssertionError("an unknown mutator id must fail loudly")
-    print("[PASS] test_mutator_table_and_identity passed (five mutators, identity with none, unknown ids raise)")
+    ids = {m.id for m in mutators.MUTATORS}
+    assert ids == {"bullet_hell", "drift", "frenzy", "glass_cannon", "iron_man"}, sorted(ids)
+    assert mutators.apply_mutators(()) == mutators.RunRules(), "no mutators must be the stock rules"
+    assert mutators.apply_mutators(("drift",)).player_accel == mutators.DRIFT_ACCEL
+    frenzy = mutators.apply_mutators(("frenzy",))
+    assert frenzy.enemy_speed_mult == mutators.FRENZY_ENEMY_SPEED_MULT, frenzy
+    assert frenzy.spawn_size_mult == mutators.FRENZY_SPAWN_SIZE_MULT, frenzy
+    # Contract (wave 3): an unknown id is ignored rather than raised, so a stale save cannot crash a run.
+    assert mutators.apply_mutators(("not_a_mutator",)) == mutators.RunRules(), "an unknown id must be ignored"
+    print("[PASS] test_mutator_table_and_identity passed (five mutators, stock rules with none, unknown ids ignored)")
 
 
 def test_selection_round_trips_and_keeps_other_keys():
     path = _fresh_settings()
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({"music_volume": 0.5, "sfx_volume": 0.25}, fh)
-    assert mutators.save_selected_ids(("frenzy", "drift", "drift", "not_a_mutator"), path=path)
-    assert mutators.load_selected_ids(path=path) == ("drift", "frenzy"), mutators.load_selected_ids(path=path)
+    mutators.save_selection(("frenzy", "drift", "drift", "not_a_mutator"), path=path)
+    assert mutators.load_selection(path=path) == ("drift", "frenzy"), mutators.load_selection(path=path)
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
     assert data["music_volume"] == 0.5 and data["sfx_volume"] == 0.25, "saving mutators must keep the audio keys"
-    assert data[mutators.SETTINGS_KEY] == ["drift", "frenzy"], data
+    assert data[mutators.MUTATORS_KEY] == ["drift", "frenzy"], data
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("{not json")
-    assert mutators.load_selected_ids(path=path) == (), "a broken settings file gives no selection"
-    assert mutators.normalise_ids("drift") == (), "a bare string is not a selection"
+    assert mutators.load_selection(path=path) == (), "a broken settings file gives no selection"
+    assert mutators.normalize_selection("drift") == (), "a bare string is not a selection"
     print("[PASS] test_selection_round_trips_and_keeps_other_keys passed (saved to user_settings.json, audio keys kept, bad file gives none)")
 
 
-def test_title_chips_toggle_and_keep_the_four_actions(g):
+def test_title_chips_toggle_and_keep_the_action_buttons(g):
     _fresh_settings()
     m = g.main_menu
-    m._mutator_selected = set()
-    m._sync_mutator_chips()
+    g.mutator_ids = ()
+    m.set_mutator_selection(())
     g.switch_to()
-    assert [b.text for b in m.buttons] == ["Start Game", "Guide", "Settings", "Quit"], [b.text for b in m.buttons]
-    chips = dict(m._mutator_chips)
-    assert set(chips) == set(mutators.MUTATORS), sorted(chips)
-
-    x, y = _center(chips["drift"])
+    # Wave-3 title screen: six buttons (Daily Run and Hangar were added in wave 2).
+    assert [b.text for b in m.buttons] == ["Start Game", "Daily Run", "Guide", "Settings", "Hangar", "Quit"], [b.text for b in m.buttons]
+    chip = next(c for c in m.mutator_row._chips if c.mutator.id == "drift")
+    x, y = _chip_centre(chip)
     assert m.on_mouse_press(x, y, _LEFT) is None, "a chip click is not a menu action"
-    assert m.selected_mutator_ids() == ("drift",), m.selected_mutator_ids()
-    assert mutators.load_selected_ids() == ("drift",), "the chip click must save the selection"
+    assert g.mutator_ids == ("drift",), g.mutator_ids
+    assert mutators.load_selection() == ("drift",), "the chip click must save the selection"
     m.on_mouse_press(x, y, _LEFT)
-    assert m.selected_mutator_ids() == () and mutators.load_selected_ids() == (), "a second click clears it"
+    assert g.mutator_ids == () and mutators.load_selection() == (), "a second click clears it"
 
     assert m.on_mouse_press(*_center(m.buttons[0]), _LEFT) == "start_game", "Start Game keeps its action"
-    print("[PASS] test_title_chips_toggle_and_keep_the_four_actions passed (chips toggle and save, four action buttons unchanged)")
+    print("[PASS] test_title_chips_toggle_and_keep_the_action_buttons passed (chips toggle and save, action buttons unchanged)")
 
 
 def _select(g, ids):
     """Set the title-screen selection the way the chips do, without a click."""
-    g.main_menu._mutator_selected = set(ids)
-    g.main_menu._sync_mutator_chips()
+    g.mutator_ids = mutators.normalize_selection(ids)
+    g.main_menu.set_mutator_selection(g.mutator_ids)
 
 
 def test_run_applies_the_selection_once(g):
     _fresh_settings()
     _select(g, ("drift", "frenzy"))
     g._init_game()
-    assert g.run_mutator_ids == ("drift", "frenzy"), g.run_mutator_ids
-    assert g.state.mutator_mods == mutators.combined(("drift", "frenzy")), g.state.mutator_mods
-    assert abs(g._effective_player_speed() - g.player.speed * 1.25) < 1e-9, "Drift must raise player speed"
-    assert abs(g._effective_player_fire_rate() - max(0.08, g.player.fire_rate / 1.3)) < 1e-9, "Frenzy must shorten the shot interval"
+    assert g.run_mutators == ("drift", "frenzy"), g.run_mutators
+    assert g.run_rules == mutators.apply_mutators(("drift", "frenzy")), "the run must carry the selection's rules"
+    assert g.run_rules.player_accel == mutators.DRIFT_ACCEL, "Drift must ease the steering"
+    assert g.run_rules.enemy_speed_mult == mutators.FRENZY_ENEMY_SPEED_MULT, "Frenzy must speed the enemies"
+    g._init_game()  # a second start with the same selection must not stack the rules
+    assert g.run_rules == mutators.apply_mutators(("drift", "frenzy")), "rules must not stack across starts"
 
     # A stale saved file must not override what the chips show.
-    mutators.save_selected_ids(())
-    _select(g, ("drift",))
+    mutators.save_selection(())
+    _select(g, ("glass_cannon",))
     g._init_game()
-    assert g.run_mutator_ids == ("drift",), "the run must follow the chips, not an older saved file"
+    assert g.run_mutators == ("glass_cannon",), "the run must follow the chips, not an older saved file"
+    base = int(g.player.damage)
+    expected = max(1, int(base * mutators.GLASS_CANNON_DAMAGE_MULT + 0.5))
+    assert g._effective_player_damage() == expected, f"glass cannon damage {g._effective_player_damage()}, expected {expected}"
+    g._init_game()
+    assert g._effective_player_damage() == expected, "the damage multiplier must be applied once, not per start"
 
     _select(g, ())
     g._init_game()
-    assert g.run_mutator_ids == () and g.state.mutator_mods == mutators.Mods()
-    assert g._effective_player_speed() == g.player.speed, "no mutators must leave the player unchanged"
-    print("[PASS] test_run_applies_the_selection_once passed (the chips' selection is applied in _init_game, Drift and Frenzy change the player, none is identity)")
+    assert g.run_mutators == () and g.run_rules == mutators.RunRules(), "no mutators must be the stock rules"
+    assert g._effective_player_speed() == g.player.speed, "no mutators must leave the player speed unchanged"
+    print("[PASS] test_run_applies_the_selection_once passed (the chips' selection is applied once in _init_game, stock with none)")
 
 
 def test_enemy_stats_follow_the_selection():
@@ -160,25 +173,35 @@ def test_enemy_stats_follow_the_selection():
     mut = level.GameState(difficulty="normal")
     mut.init_rng(12345)
     mut.wave = 2
-    mut.mutator_mods = mutators.combined(("iron_man", "bullet_hell"))
+    mut.rules = mutators.apply_mutators(("frenzy",))
     # The wave plan draws from the global random module, so seed it before each spawn to get the same enemies.
     random.seed(99)
     level.spawn_wave(base, Vec2(0.0, 0.0))
     random.seed(99)
     level.spawn_wave(mut, Vec2(0.0, 0.0))
-    assert base.enemies and len(base.enemies) == len(mut.enemies), (len(base.enemies), len(mut.enemies))
-    for eb, em in zip(base.enemies, mut.enemies):
-        assert em.hp == int(round(eb.hp * 1.5)), (eb.hp, em.hp)
-        assert abs(em.attack_cd - eb.attack_cd / 1.5) < 1e-9, (eb.attack_cd, em.attack_cd)
-    print("[PASS] test_enemy_stats_follow_the_selection passed (Iron Man scales enemy HP, Bullet Hell shortens attack cooldown, same spawns)")
+    assert base.enemies and mut.enemies, "both waves must spawn enemies"
+    # Frenzy also raises the spawn size, so the plans differ; compare the first enemy of each behaviour that both waves spawn.
+    first_base, first_mut = {}, {}
+    for e in base.enemies:
+        first_base.setdefault(e.behavior, e)
+    for e in mut.enemies:
+        first_mut.setdefault(e.behavior, e)
+    pairs = [(first_base[b], first_mut[b]) for b in first_base if b in first_mut and first_base[b].elite_affix == first_mut[b].elite_affix]
+    assert pairs, "no behaviour spawned in both waves with the same affix"
+    for eb, em in pairs:
+        assert abs(em.speed - eb.speed * mutators.FRENZY_ENEMY_SPEED_MULT) < 1e-6, (eb.behavior, eb.speed, em.speed)
+    print(f"[PASS] test_enemy_stats_follow_the_selection passed (Frenzy scales {len(pairs)} matched enemies by 1.2 on the same spawn)")
 
 
 def test_game_over_shows_the_combined_multiplier(g):
     menu = g.game_over_menu
-    menu.set_mutators(("drift", "frenzy"))
-    assert menu.mutator_label.text == "Mutators: Drift, Frenzy  |  speed x1.25, fire rate x1.30, enemy speed x1.20", menu.mutator_label.text
-    menu.set_mutators(())
-    assert menu.mutator_label.text == "Mutators: none", menu.mutator_label.text
+    pair = ("drift", "frenzy")
+    mult = mutators.combined_score_multiplier(pair)
+    menu.set_mutators(["Drift", "Frenzy"], mult)
+    expected = f"Mutators: Drift, Frenzy   |   score {mutators.format_score_mult(mult)}"
+    assert menu.mutator_label.text == expected, menu.mutator_label.text
+    menu.set_mutators([], 1.0)
+    assert menu.mutator_label.text == "Mutators: none   |   score x1.00", menu.mutator_label.text
 
     # A real run: the selection is applied, and the Game Over screen reports it.
     _fresh_settings()
@@ -191,7 +214,8 @@ def test_game_over_shows_the_combined_multiplier(g):
     g.score.score = 10
     g.fsm.set_state(GameStateName.GAME_OVER)
     text = g.game_over_menu.mutator_label.text
-    assert text == "Mutators: Iron Man  |  enemy HP x1.50", text
+    expected_run = f"Mutators: Iron Man   |   score {mutators.format_score_mult(mutators.combined_score_multiplier(('iron_man',)))}"
+    assert text == expected_run, text
     print("[PASS] test_game_over_shows_the_combined_multiplier passed (Game Over names the mutators and their combined multiplier)")
 
 
@@ -264,7 +288,7 @@ def run_all():
         g.set_visible(False)
         g.switch_to()
         try:
-            test_title_chips_toggle_and_keep_the_four_actions(g)
+            test_title_chips_toggle_and_keep_the_action_buttons(g)
             test_run_applies_the_selection_once(g)
             test_enemy_stats_follow_the_selection()
             test_game_over_shows_the_combined_multiplier(g)

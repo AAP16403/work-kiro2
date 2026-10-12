@@ -41,6 +41,7 @@ class GameState:
     max_enemies: int = 12  # Base per-wave head count from the difficulty table; spawn_wave adds the wave ramp (wave_cap)
     enemy_combo_value: int = 0
     enemy_combo_text: str = ""
+    arena_event: object | None = None  # Running arena event (events.py), or None
 
     def init_rng(self, seed: int | None = None) -> None:
         """Initialize or reseed the deterministic RNG used for reproducible runs."""

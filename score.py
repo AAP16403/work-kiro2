@@ -1,10 +1,16 @@
 """Score tracking, combo system, and high-score persistence."""
 
-import json
 import os
 import time as _time
 
 import config
+from savefile import (
+    HIGH_SCORES_VERSION,
+    board_entries,
+    load_versioned,
+    migrate_high_scores,
+    save_versioned,
+)
 
 # ---------------------------------------------------------------------------
 # Point values per enemy type (base, before combo multiplier)
@@ -104,25 +110,18 @@ class ScoreTracker:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def load_high_scores() -> dict[str, list[dict]]:
-        """Load high scores from disk.  Returns {difficulty: [{score, wave, date}, ...]}."""
-        try:
-            with open(HIGH_SCORE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                return data
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            pass
-        return {}
+    def load_high_scores() -> dict:
+        """Load high scores from disk.  Returns {difficulty: [{score, wave, date}, ...], "version": N}.
+
+        Never raises: a missing file reads as an empty board, and a corrupt file is renamed to
+        high_scores.json.corrupt-<n> and reads as an empty board.
+        """
+        return load_versioned(HIGH_SCORE_FILE, HIGH_SCORES_VERSION, migrate_high_scores, dict)
 
     @staticmethod
-    def save_high_scores(data: dict[str, list[dict]]) -> None:
-        """Persist high scores to disk."""
-        try:
-            with open(HIGH_SCORE_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except OSError:
-            pass
+    def save_high_scores(data: dict) -> None:
+        """Persist high scores to disk atomically. A failed write leaves the previous file in place."""
+        save_versioned(HIGH_SCORE_FILE, data, HIGH_SCORES_VERSION)
 
     def submit_score(self, wave: int) -> bool:
         """Submit the current run score and place it on the board.
@@ -132,7 +131,7 @@ class ScoreTracker:
         ``last_rank`` and ``last_points_to_next`` for the Game Over screen.
         """
         data = self.load_high_scores()
-        entries = data.get(self.difficulty, [])
+        entries = board_entries(data, self.difficulty)
         prev_best = max((int(e.get("score", 0)) for e in entries), default=0)
 
         entry = {
@@ -166,7 +165,7 @@ class ScoreTracker:
     def get_high_score(self) -> int:
         """Return the current top high score for this difficulty."""
         data = self.load_high_scores()
-        entries = data.get(self.difficulty, [])
+        entries = board_entries(data, self.difficulty)
         if entries:
             return int(entries[0].get("score", 0))
         return 0

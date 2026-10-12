@@ -22,10 +22,10 @@ The record lives in one JSON file, ``progress.json``, at the project root. Publi
 by assigning ``progress.PROGRESS_FILE``. Importing this module does no I/O.
 """
 
-import json
 import math
 import os
-import tempfile
+
+import savefile
 
 import achievements
 import skins
@@ -90,41 +90,26 @@ def _normalise(raw) -> dict:
 
 
 def load(path=None) -> dict:
-    """Read the progress record. Never raises: missing or corrupt input gives defaults."""
+    """Read the progress record through savefile. Never raises.
+
+    A missing file gives defaults. A corrupt file is quarantined by savefile (renamed to
+    progress.json.corrupt-<n>) and the caller gets defaults. Fields with a bad type fall back.
+    """
     target = PROGRESS_FILE if path is None else path
-    try:
-        with open(target, "r", encoding="utf-8") as fh:
-            raw = json.load(fh)
-    except (OSError, ValueError, RecursionError):
-        return default_progress()
-    return _normalise(raw)
+    data = savefile.load_versioned(target, savefile.PROGRESS_VERSION, savefile.migrate_progress, default_progress)
+    return _normalise(data)
 
 
 def save(data: dict, path=None) -> bool:
-    """Write the record atomically. Returns True on success and never raises.
+    """Write the record through savefile's atomic helper. Returns True on success and never raises.
 
     The temp file sits beside the target so os.replace is a same-volume rename. On any
     failure the temp file is removed and the previous progress.json is left as it was.
     """
     target = os.path.abspath(PROGRESS_FILE if path is None else path)
-    tmp_path = None
-    try:
-        fd, tmp_path = tempfile.mkstemp(prefix=".progress-", suffix=".tmp", dir=os.path.dirname(target))
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(_normalise(data), fh, indent=2, sort_keys=True)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_path, target)
-        tmp_path = None
-        return True
-    except (OSError, TypeError, ValueError):
-        return False
-    finally:
-        if tmp_path is not None:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+    if not os.path.isdir(os.path.dirname(target)):
+        return False  # progress.json is written into an existing folder; savefile would create one
+    return savefile.save_versioned(target, _normalise(data), savefile.PROGRESS_VERSION)
 
 
 def apply_run(data: dict, stats: dict) -> dict:

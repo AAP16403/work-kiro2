@@ -1,26 +1,29 @@
 """Flyer behavior for enemies."""
-from enemy_behaviors.base import Behavior
+from enemy_behaviors.base import Behavior, add_windup_telegraph
 from utils import Vec2, perp
 import random
 
 class Flyer(Behavior):
     """
     A flyer behavior that circles the player and performs dashing attacks.
-    It uses a simple state machine to switch between CIRCLING and DASHING.
+    It uses a simple state machine to switch between CIRCLING, WINDUP and DASHING.
+    The WINDUP holds still and locks the dash target, drawn as an aim line, before the dash starts.
     """
 
-    def __init__(self, circling_duration=2.5, dash_speed_mult=4.0, circling_dist=150.0):
+    def __init__(self, circling_duration=2.05, dash_speed_mult=4.0, circling_dist=150.0, windup_time=0.45):
         """
         Initialize the Flyer behavior.
-        
+
         Args:
-            circling_duration (float): Time in seconds to circle before a dash.
+            circling_duration (float): Time in seconds to circle before a dash windup.
             dash_speed_mult (float): Multiplier for speed during a dash.
             circling_dist (float): Preferred distance to keep from the player while circling.
+            windup_time (float): Seconds the flyer holds still and shows its aim line before dashing.
         """
         self.circling_duration = circling_duration
         self.dash_speed_mult = dash_speed_mult
         self.circling_dist = circling_dist
+        self.windup_time = windup_time
 
     def update(self, enemy, player_pos, state, dt, player_vel, game=None):
         """Update the enemy's state based on its behavior."""
@@ -43,8 +46,12 @@ class Flyer(Behavior):
             # Timer to decide when to dash
             enemy.ai["state_timer"] -= dt
             if enemy.ai["state_timer"] <= 0:
-                enemy.ai["state"] = "DASHING"
-                enemy.ai["dash_target"] = player_pos  # Lock on to the player's position at the start of the dash
+                # Lock on to the player's position now and show the dash path while the flyer holds still.
+                enemy.ai["state"] = "WINDUP"
+                enemy.ai["state_timer"] = self.windup_time
+                enemy.ai["dash_target"] = Vec2(player_pos.x, player_pos.y)
+                enemy.vel = Vec2(0.0, 0.0)
+                enemy.ai["telegraph_beam"] = add_windup_telegraph(state, enemy.pos, enemy.ai["dash_target"], self.windup_time)
                 return
 
             # Separation from other enemies
@@ -64,6 +71,14 @@ class Flyer(Behavior):
             move_dir = (dir_to_circle_pos * 0.6 + strafe_dir * 0.4 + sep * 0.5).normalized()
             enemy.vel = move_dir * enemy.speed
             enemy.pos += enemy.vel * dt
+
+        elif current_state == "WINDUP":
+            # --- Telegraph the dash: stay still while the aim line shows where it will go ---
+            enemy.vel = Vec2(0.0, 0.0)
+            enemy.ai["state_timer"] -= dt
+            if enemy.ai["state_timer"] <= 0:
+                enemy.ai["state"] = "DASHING"
+            return
 
         elif current_state == "DASHING":
             # --- Dashing Behavior ---

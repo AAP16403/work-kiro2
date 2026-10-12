@@ -1,11 +1,13 @@
 """Charger behavior for enemies."""
-from enemy_behaviors.base import Behavior
+from enemy_behaviors.base import Behavior, add_windup_telegraph, set_windup_telegraph
 from utils import Vec2
 
 class Charger(Behavior):
     """
     A charger behavior that telegraphs its attack.
     It uses a state machine: REPOSITIONING -> WINDUP -> CHARGING -> COOLDOWN.
+    While winding up it draws an aim line to the predicted charge point, and the charge
+    locks onto that same point when the windup ends.
     """
 
     def __init__(self, charge_speed_mult=3.0, windup_time=0.5, cooldown_time=1.0, reposition_dist=200.0):
@@ -32,12 +34,15 @@ class Charger(Behavior):
         enemy.ai["state_timer"] -= dt
 
         if current_state == "REPOSITIONING":
+            enemy.ai["charger_dashing"] = False
             # --- Move to a good charging distance ---
             # If we are at a good distance, start winding up
             if dist_to_player < self.reposition_dist:
                 enemy.ai["state"] = "WINDUP"
                 enemy.ai["state_timer"] = self.windup_time
                 enemy.vel = Vec2(0, 0) # Stop to telegraph
+                aim = self._predicted_target(enemy, player_pos, player_vel, dist_to_player)
+                enemy.ai["telegraph_beam"] = add_windup_telegraph(state, enemy.pos, aim, self.windup_time)
                 return
 
             # Move towards the player
@@ -49,15 +54,19 @@ class Charger(Behavior):
         elif current_state == "WINDUP":
             # --- Telegraph the charge ---
             enemy.vel = Vec2(0, 0) # Stay still
+            # Redraw the aim line every frame so the drawn path is the path that gets run.
+            aim = self._predicted_target(enemy, player_pos, player_vel, dist_to_player)
+            set_windup_telegraph(enemy.ai.get("telegraph_beam"), enemy.pos, aim)
             if enemy.ai["state_timer"] <= 0:
                 enemy.ai["state"] = "CHARGING"
-                # Lock on to a predicted position
-                prediction_time = dist_to_player / (enemy.speed * self.charge_speed_mult) * 0.5 # Simple prediction
-                enemy.ai["charge_target"] = player_pos + player_vel * prediction_time
+                enemy.ai["charger_dashing"] = True
+                # Lock on to the predicted position drawn by the aim line
+                enemy.ai["charge_target"] = aim
                 enemy.ai["charge_dir"] = (enemy.ai["charge_target"] - enemy.pos).normalized()
 
         elif current_state == "CHARGING":
             # --- Dash in a straight line ---
+            enemy.ai["charger_dashing"] = True
             # Use the locked-on direction
             charge_dir = enemy.ai["charge_dir"]
             enemy.vel = charge_dir * enemy.speed * self.charge_speed_mult
@@ -69,15 +78,21 @@ class Charger(Behavior):
             if dist_to_target < 30 or (charge_dir.dot( (enemy.ai["charge_target"] - enemy.pos).normalized() ) < 0): # Overshot
                 enemy.ai["state"] = "COOLDOWN"
                 enemy.ai["state_timer"] = self.cooldown_time
+                enemy.ai["charger_dashing"] = False
 
         elif current_state == "COOLDOWN":
             # --- Brief pause after charging ---
+            enemy.ai["charger_dashing"] = False
             # Slow down significantly
             enemy.vel *= 0.9 * (1.0 - dt)
             enemy.pos += enemy.vel * dt
             if enemy.ai["state_timer"] <= 0:
                 enemy.ai["state"] = "REPOSITIONING"
 
+    def _predicted_target(self, enemy, player_pos: Vec2, player_vel: Vec2, dist_to_player: float) -> Vec2:
+        """Point the charge aims at: the player's position, led by their velocity."""
+        prediction_time = dist_to_player / (enemy.speed * self.charge_speed_mult) * 0.5 # Simple prediction
+        return player_pos + player_vel * prediction_time
 
     def _separation(self, enemy, others, radius: float = 50.0, weight: float = 1.5) -> Vec2:
         """Repel from nearby enemies to reduce stacking."""

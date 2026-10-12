@@ -10,6 +10,7 @@ from pyglet import shapes
 from pyglet.graphics import Group
 
 from config import ENEMY_COLORS, SCREEN_H
+from enemy import brute_charge_lane
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
@@ -387,7 +388,10 @@ class Visuals:
                 horn.opacity = 220
                 scar = shapes.Line(0, 0, 0, 0, thickness=4, color=(40, 10, 10), batch=self.batch)
                 scar.opacity = 200
-                self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, horn, scar)
+                # Charge lane: hidden except while the brute telegraphs its charge. Kept last so body_idx stays 4.
+                lane = shapes.Line(0, 0, 0, 0, thickness=4, color=(255, 70, 70), batch=self.batch)
+                lane.opacity = 0
+                self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, horn, scar, lane)
             else:
                 self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body)
             return
@@ -603,11 +607,19 @@ class Visuals:
                 orb2.x, orb2.y = sx + math.cos(enemy.t * 2.2 + 2.1) * r, sy + bob + math.sin(enemy.t * 2.2 + 2.1) * r
                 orb3.x, orb3.y = sx + math.cos(enemy.t * 2.2 + 4.2) * r, sy + bob + math.sin(enemy.t * 2.2 + 4.2) * r
             elif behavior == "boss_brute":
-                sh, glow, ring, crown, body, horn, scar = h.objs
+                sh, glow, ring, crown, body, horn, scar, lane = h.objs
                 horn.x, horn.y = sx, sy + bob + 26
                 horn.x2, horn.y2 = sx + 18, sy + bob + 16
                 horn.x3, horn.y3 = sx - 18, sy + bob + 16
                 scar.x, scar.y, scar.x2, scar.y2 = sx - 10, sy + bob + 2, sx + 10, sy + bob - 6
+                lane_geom = brute_charge_lane(enemy)
+                if lane_geom is None:
+                    lane.opacity = 0
+                else:
+                    lane_dir, lane_len = lane_geom
+                    lx, ly = to_iso(enemy.pos + lane_dir * lane_len, shake)
+                    lane.x, lane.y, lane.x2, lane.y2 = sx, sy, lx, ly
+                    lane.opacity = int(145 + 55 * math.sin(enemy.t * 10.0))
             else:
                 sh, glow, ring, crown, body = h.objs
 
@@ -1101,12 +1113,18 @@ class Visuals:
     def ensure_trap(self, tr):
         if id(tr) in self._trap_handles:
             return
-        if getattr(tr, "kind", "") in ("slam", "slam_warn"):
-            base = shapes.Circle(0, 0, tr.radius, color=(255, 80, 80), batch=self.batch)
-            base.opacity = 40 if getattr(tr, "kind", "") == "slam_warn" else 65
+        kind = getattr(tr, "kind", "")
+        if kind in ("slam", "slam_warn", "womb_warn"):
+            # Ring-style hazard. Womb warnings reuse it in a violet tint, so they never read as slam red.
+            if kind == "womb_warn":
+                tint, core_tint = (150, 110, 255), (235, 215, 255)
+            else:
+                tint, core_tint = (255, 80, 80), (255, 220, 200)
+            base = shapes.Circle(0, 0, tr.radius, color=tint, batch=self.batch)
+            base.opacity = 40 if kind in ("slam_warn", "womb_warn") else 65
             ring = shapes.Arc(0, 0, tr.radius * 1.05, segments=48, thickness=5, color=(255, 255, 255), batch=self.batch)
             ring.opacity = 170
-            core = shapes.Circle(0, 0, max(10, tr.radius * 0.2), color=(255, 220, 200), batch=self.batch)
+            core = shapes.Circle(0, 0, max(10, tr.radius * 0.2), color=core_tint, batch=self.batch)
             core.opacity = 200
             self._trap_handles[id(tr)] = RenderHandle(base, ring, core)
         else:
@@ -1120,7 +1138,8 @@ class Visuals:
 
     def sync_trap(self, tr, shake: Vec2):
         h = self._trap_handles[id(tr)]
-        if getattr(tr, "kind", "") in ("slam", "slam_warn"):
+        kind = getattr(tr, "kind", "")
+        if kind in ("slam", "slam_warn", "womb_warn"):
             base, ring, core = h.objs
             sx, sy = to_iso(tr.pos, shake)
             base.x, base.y = sx, sy
@@ -1128,7 +1147,7 @@ class Visuals:
             core.x, core.y = sx, sy
             pulse = 0.6 + 0.4 * math.sin(tr.t * 16.0)
             ring.opacity = int(110 + 110 * pulse)
-            if getattr(tr, "kind", "") == "slam_warn":
+            if kind in ("slam_warn", "womb_warn"):
                 base.opacity = int(40 + 60 * pulse)
             self._set_depth(h, sy)
             return
@@ -1175,10 +1194,19 @@ class Visuals:
         x2, y2 = to_iso(lb.end, shake)
         line.x, line.y, line.x2, line.y2 = x1, y1, x2, y2
         core.x, core.y, core.x2, core.y2 = x1, y1, x2, y2
-        # Telegraph: low opacity + thinner look before firing.
-        if getattr(lb, "t", 0.0) < getattr(lb, "warn", 0.0):
-            line.opacity = 70
-            core.opacity = 40
+        # Telegraph: visible warning line before firing.
+        warn = float(getattr(lb, "warn", 0.0))
+        lb_t = float(getattr(lb, "t", 0.0))
+        if lb_t < warn:
+            if getattr(lb, "owner", "") == "telegraph":
+                # Windup aim line (no damage): brightens as the windup runs down to the moment it resolves.
+                progress = min(1.0, max(0.0, lb_t / warn))
+                line.opacity = int(90 + 50 * progress)
+                core.opacity = int(50 + 30 * progress)
+            else:
+                # Boss and enemy beams: the warning has to be readable before the beam hits.
+                line.opacity = 120
+                core.opacity = 80
         else:
             line.opacity = 200
             core.opacity = 180
@@ -1207,9 +1235,9 @@ class Visuals:
         outer.x, outer.y, outer.x2, outer.y2 = x1, y1, x2, y2
         core.x, core.y, core.x2, core.y2 = x1, y1, x2, y2
         if getattr(th, "t", 0.0) < getattr(th, "warn", 0.0):
-            # Warning line: subtle and steady.
-            outer.opacity = 55
-            core.opacity = 20
+            # Warning line: steady, and visible enough to dodge before the strike lands.
+            outer.opacity = 110
+            core.opacity = 50
         else:
             outer.opacity = int(140 + 70 * (0.5 + 0.5 * math.sin(th.t * 40.0)))
             core.opacity = int(200 + 40 * (0.5 + 0.5 * math.sin(th.t * 55.0)))

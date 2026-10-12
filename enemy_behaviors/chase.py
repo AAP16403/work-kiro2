@@ -1,8 +1,13 @@
 """Chase behavior for enemies."""
-from enemy_behaviors.base import Behavior
+from enemy_behaviors.base import Behavior, add_windup_telegraph
 from utils import Vec2, perp
 import math
 import random
+
+# Planted windup before every lunge. The direction is locked when it starts.
+LUNGE_WINDUP_S = 0.22
+# Nominal lunge speed (1.7x) times its average duration (0.28-0.38 s), used to size the aim line.
+LUNGE_REACH_MULT = 1.7 * 0.33
 
 class Chase(Behavior):
     """A simple chase behavior."""
@@ -13,6 +18,8 @@ class Chase(Behavior):
             enemy.ai["lunge_cd"] = random.uniform(0.4, 1.2)
         if "lunge_t" not in enemy.ai:
             enemy.ai["lunge_t"] = 0.0
+        if "lunge_windup" not in enemy.ai:
+            enemy.ai["lunge_windup"] = 0.0
         if "orbit_sign" not in enemy.ai:
             enemy.ai["orbit_sign"] = 1.0 if ((int(enemy.seed * 1000) + id(enemy)) % 2) else -1.0
 
@@ -33,10 +40,28 @@ class Chase(Behavior):
         enemy.ai["lunge_cd"] -= dt
         enemy.ai["lunge_t"] = max(0.0, float(enemy.ai["lunge_t"]) - dt)
 
-        if enemy.ai["lunge_t"] <= 0.0 and enemy.ai["lunge_cd"] <= 0.0 and 80.0 < dist_to_player < 240.0:
+        windup = float(enemy.ai["lunge_windup"])
+        if windup > 0.0:
+            # Planted windup: hold still while the locked aim line shows the lunge direction.
+            windup = max(0.0, windup - dt)
+            enemy.ai["lunge_windup"] = windup
+            enemy.vel = Vec2(0.0, 0.0)
+            if windup > 0.0:
+                return
+            # Windup finished this frame: launch along the direction locked at windup start.
             enemy.ai["lunge_t"] = 0.28 + random.uniform(0.0, 0.1)
-            enemy.ai["lunge_cd"] = 1.4 + random.uniform(0.0, 0.6)
-            enemy.ai["lunge_dir"] = (player_pos + player_vel * 0.22 - enemy.pos).normalized()
+        elif enemy.ai["lunge_t"] <= 0.0 and enemy.ai["lunge_cd"] <= 0.0 and 80.0 < dist_to_player < 240.0:
+            lunge_dir = (player_pos + player_vel * 0.22 - enemy.pos).normalized()
+            enemy.ai["lunge_windup"] = LUNGE_WINDUP_S
+            # The windup counts against the cooldown so the lunge cadence is unchanged.
+            enemy.ai["lunge_cd"] = 1.4 + random.uniform(0.0, 0.6) - LUNGE_WINDUP_S
+            enemy.ai["lunge_dir"] = lunge_dir
+            reach = enemy.speed * LUNGE_REACH_MULT
+            enemy.ai["telegraph_beam"] = add_windup_telegraph(
+                state, enemy.pos, enemy.pos + lunge_dir * reach, LUNGE_WINDUP_S
+            )
+            enemy.vel = Vec2(0.0, 0.0)
+            return
 
         if enemy.ai["lunge_t"] > 0.0:
             lunge_dir = enemy.ai.get("lunge_dir", dir_to)

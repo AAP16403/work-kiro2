@@ -11,6 +11,7 @@ from pyglet.graphics import Group
 
 from config import ENEMY_COLORS, SCREEN_H
 from enemy import brute_charge_lane
+from projectile_art import ProjectileVisual
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
@@ -855,105 +856,16 @@ class Visuals:
             h.delete()
 
     def ensure_projectile(self, proj):
-        """Ensure projectile visual exists."""
+        """Ensure projectile visual exists. The look comes from projectile_art, keyed by weapon."""
         if id(proj) in self._proj_handles:
             return
-        
-        # Different visuals for different projectile types
-        projectile_type = getattr(proj, 'projectile_type', 'bullet')
-        is_enemy = str(getattr(proj, "owner", "player")) == "enemy"
-        is_crit = bool(getattr(proj, "is_crit", False))
-        simple_dot = projectile_type in ("bullet", "spread") and not is_crit
-        
-        if is_crit:
-            sh = shapes.Circle(0, 0, 5, color=(255, 205, 50), batch=self.batch, group=self._projectile_group)
-            core = shapes.Circle(0, 0, 3, color=(255, 255, 240), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "bomb":
-            # Bomb: heavy orange core with dark casing.
-            sh = shapes.Circle(0, 0, 7, color=(120, 70, 45), batch=self.batch, group=self._projectile_group)
-            core = shapes.Circle(0, 0, 4, color=(255, 145, 90), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "railgun":
-            # Railgun: high-velocity electric slug with glowing sheath
-            sh = shapes.Circle(0, 0, 6, color=(60, 180, 255), batch=self.batch, group=self._projectile_group)
-            core = shapes.Circle(0, 0, 3, color=(230, 255, 255), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "flak":
-            # Flak: cluster fragmentation shell
-            sh = shapes.Circle(0, 0, 5, color=(255, 130, 40), batch=self.batch, group=self._projectile_group)
-            core = shapes.Circle(0, 0, 2.5, color=(255, 235, 160), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "missile":
-            # Larger missile
-            if is_enemy:
-                sh = shapes.Circle(0, 0, 6, color=(170, 60, 60), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 3, color=(255, 120, 120), batch=self.batch, group=self._projectile_group)
-            else:
-                sh = shapes.Circle(0, 0, 6, color=(200, 100, 50), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 3, color=(255, 150, 100), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "plasma":
-            # Plasma projectile
-            if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 90, 180), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 180, 220), batch=self.batch, group=self._projectile_group)
-            else:
-                sh = shapes.Circle(0, 0, 4, color=(150, 100, 255), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(200, 150, 255), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "spread":
-            # Spread pellets
-            if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 110, 90), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch, group=self._projectile_group)
-            else:
-                sh = shapes.Circle(0, 0, 4, color=(255, 200, 100), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
-        else:  # bullet or default
-            # Default bullet
-            if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 90, 90), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch, group=self._projectile_group)
-            else:
-                sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
-
-        if simple_dot:
-            # Tight dot (no trailing streak) to avoid visual noise.
-            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
-            flare.opacity = 90 if is_enemy else 130
-            handle = RenderHandle(sh, core, flare)
-        else:
-            # Streaked projectile for heavier/kinetic types.
-            trail_color = (255, 220, 80) if is_crit else sh.color
-            trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=trail_color, batch=self.batch, group=self._projectile_group)
-            trail.opacity = 95 if is_enemy else (150 if is_crit else 125)
-            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
-            flare.opacity = 150 if is_crit else 120
-            handle = RenderHandle(trail, sh, core, flare)
-
         # Every shape is created in the unified projectile group, so projectiles never join
         # the depth groups and never pay a batch migration after creation.
-        self._proj_handles[id(proj)] = handle
+        self._proj_handles[id(proj)] = ProjectileVisual(self.batch, self._projectile_group, proj)
 
     def sync_projectile(self, proj, shake: Vec2):
-        """Update projectile visual position."""
-        h = self._proj_handles[id(proj)]
-        if len(h.objs) == 3:
-            sh, core, flare = h.objs
-            trail = None
-        else:
-            trail, sh, core, flare = h.objs
-        sx, sy = to_iso(proj.pos, shake)
-        v = getattr(proj, "vel", Vec2(0.0, 0.0))
-        v2 = Vec2(v.x, v.y)
-        speed = v2.length()
-        if trail is not None:
-            if speed <= 1e-6:
-                v2 = Vec2(1.0, 0.0)
-                speed = 1.0
-            vd = v2.normalized()
-            trail_len = (18.0 if getattr(proj, "projectile_type", "") == "railgun" else 8.0) + min(22.0, speed * 0.035)
-            trail.x, trail.y = sx, sy
-            trail.x2, trail.y2 = sx - vd.x * trail_len, sy - vd.y * trail_len * 0.65
-        sh.x, sh.y = sx, sy
-        core.x, core.y = sx, sy
-        flare.x, flare.y = sx, sy
+        """Update projectile visual position and animation."""
+        self._proj_handles[id(proj)].sync(proj, shake)
 
     def drop_projectile(self, proj):
         """Remove projectile visual."""

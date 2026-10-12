@@ -80,6 +80,8 @@ class DamagePopups:
         self._max_items = max(1, int(max_items))
         self._batch = pyglet.graphics.Batch()
         self._shadow_group = pyglet.graphics.Group(order=_ORDER_SHADOW)
+        # Shadows sit exactly under their text on purpose; tools/screens.py skips layered groups.
+        self._shadow_group.layered = True
         self._text_group = pyglet.graphics.Group(order=_ORDER_TEXT)
         self._slots: list[_Slot] = []
         self._live = 0

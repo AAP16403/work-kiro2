@@ -9,7 +9,9 @@ import pyglet
 from pyglet import shapes
 import config
 from config import MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
+from drone import DRONE_DURATION, DRONE_FIRE_INTERVAL, DRONE_RANGE
 from fonts import register_ui_fonts
+import guide_info
 
 register_ui_fonts()
 
@@ -1233,7 +1235,7 @@ class GuideMenu:
         {"key": "boss_brute", "name": "Boss: Brute", "icon": "BR", "what": "Close-range slams and brawler bursts.", "deal": "Stay mobile and punish post-slam windows.", "lore": "Execution platform stripped to raw kinetic violence."},
         {"key": "boss_abyss_gaze", "name": "Boss: Abyss Gaze", "icon": "AG", "what": "Dark pulse patterns and pressure rings.", "deal": "Keep spacing disciplined; avoid center traps.", "lore": "A deep-scan optic that learned predation."},
         {"key": "boss_womb_core", "name": "Boss: Womb Core", "icon": "WC", "what": "Spawns adds and compresses safe zones.", "deal": "Clear adds fast; save burst for pulse gaps.", "lore": "A growth reactor that treats battle as incubation."},
-    ]
+    ] + guide_info.enemy_entries()
     POWERUP_INFO = [
         {"key": "heal", "name": "Heal (+)", "icon": "+", "what": "Restores HP instantly.", "deal": "Grab when low; avoid wasting near full HP.", "lore": "Nanite med-gel distilled from station triage kits."},
         {"key": "damage", "name": "Damage (!)", "icon": "!", "what": "Permanent run damage increase.", "deal": "Best early pickup for faster clears.", "lore": "Illegal coil tuning for hotter impact loads."},
@@ -1244,23 +1246,24 @@ class GuideMenu:
         {"key": "vortex", "name": "Vortex (@)", "icon": "@", "what": "Temporary damaging aura around you.", "deal": "Play aggressively but keep exits open.", "lore": "Collapsed singularity shard in a containment ring."},
         {"key": "weapon", "name": "Weapon (W)", "icon": "W", "what": "Switches current weapon pattern.", "deal": "Adapt playstyle to the new spread/tempo.", "lore": "Recovered armament cache from dead merc squads."},
         {"key": "ultra", "name": "Ultra (U)", "icon": "U", "what": "Adds an Ultra charge for RMB/Q.", "deal": "Spend on boss spikes or dangerous swarms.", "lore": "A forbidden core spark meant for ship cannons."},
-        {"key": "boost", "name": "Overdrive (B)", "icon": "B", "what": "Restores boost and grants 6s infinite overdrive + shield.", "deal": "Grab to ram through swarms or kite aggressive bosses.", "lore": "Supercharged fusion capacitor designed for orbital interceptors."},
-        {"key": "drone", "name": "Drone (D)", "icon": "D", "what": "Rare. A drone orbits you for 12s and fires at the nearest enemy.", "deal": "Shoots every 0.6s within 300 units; re-picks refresh the timer.", "lore": "Salvaged escort drone reflashed to fight beside its owner."},
-    ]
+        {"key": "boost", "name": "Overdrive (B)", "icon": "B", "what": f"Restores boost and grants {config.BOOST_OVERDRIVE_SECONDS:g}s infinite overdrive + shield.", "deal": "Ram swarms or kite aggressive bosses.", "lore": "Supercharged fusion capacitor designed for orbital interceptors."},
+        {"key": "drone", "name": "Drone (D)", "icon": "D", "what": f"Rare. A drone orbits you for {DRONE_DURATION:g}s and fires at the nearest enemy.", "deal": f"Fires every {DRONE_FIRE_INTERVAL:g}s within {DRONE_RANGE:g} units.", "lore": "Salvaged escort drone reflashed to fight beside its owner."},
+    ] + guide_info.powerup_entries()
     BASICS_INFO = [
         {"key": "move", "name": "Movement", "icon": "MV", "what": "Use WASD or Arrow keys to move.", "deal": "Stay moving; linear retreats get punished.", "lore": "Mobility is your main defense layer."},
         {"key": "fire", "name": "Primary Fire", "icon": "LMB", "what": "LMB toggles auto-fire; it starts ON each run.", "deal": "Leave it on, then focus on dodging and spacing.", "lore": "Auto-fire replaced hold-to-fire pacing."},
         {"key": "dash", "name": "Dash", "icon": "SP", "what": "Press SPACE to dash through pressure.", "deal": "Save dash for layered patterns, not chip damage.", "lore": "Dash timing decides most boss survivability windows."},
-        {"key": "boost_use", "name": "Boost / Overdrive", "icon": "SHF", "what": "Hold LSHIFT/RSHIFT to boost speed and kinetic ram enemies.", "deal": "Boost ramming shatters weak foes and grants 35% damage reduction.", "lore": "Forward deflection shielding channels kinetic thrust into a battering ram."},
+        {"key": "boost_use", "name": "Boost / Overdrive", "icon": "SHF", "what": "Hold LSHIFT or RSHIFT to boost and ram enemies.", "deal": f"Ramming shatters weak foes; {config.BOOST_DAMAGE_REDUCTION * 100:g}% damage reduction.", "lore": "Forward deflection shielding channels kinetic thrust into a battering ram."},
         {"key": "ultra_use", "name": "Ultra Use", "icon": "U!", "what": "RMB or Q consumes one Ultra charge.", "deal": "Use Ultra during spike phases or add floods.", "lore": "Ultra is burst control, not passive DPS."},
-        {"key": "arsenal", "name": "Arsenal & Crits", "icon": "WPN", "what": "Weapons feature Crits (10% base, 2x dmg) and Piercing.", "deal": "Hyper Railgun pierces lines; Flak Battery cluster-bursts.", "lore": "Mil-spec kinetic accelerators retrofitted with variable-yield munitions."},
+        {"key": "arsenal", "name": "Arsenal & Crits", "icon": "WPN", "what": f"Weapons feature Crits ({config.CRIT_CHANCE_BASE * 100:g}% base, {config.CRIT_MULT_BASE:g}x dmg) and Piercing.", "deal": "Railgun pierces lines; Flak cluster-bursts.", "lore": "Mil-spec kinetic accelerators retrofitted with variable-yield munitions."},
         {"key": "arena", "name": "Arena Control", "icon": "AR", "what": "Fight near edge lanes, avoid center traps.", "deal": "Rotate clockwise/counter-clockwise with intent.", "lore": "Bad pathing is deadlier than low HP."},
-        {"key": "elites", "name": "Elites", "icon": "EL", "what": "Wave 3+ elites: 2.2x HP, one affix each.", "deal": "Volatile: 45 blast in 130 px, hits you too. Shielded: break shield first.", "lore": "Swift moves 30% faster. Affixes are rogue overclocks on standard frames."},
-        {"key": "boss_schedule", "name": "Boss Schedule", "icon": "BS", "what": "A boss arrives every 5th wave (5, 10, 15...).", "deal": "Save dash and ultra for it; clearing the wave opens card picks.", "lore": "Boss kills always drop a weapon plus a heal, shield or laser."},
+        {"key": "elites", "name": "Elites", "icon": "EL", "what": f"Wave {config.ELITE_SPAWN_BASE_WAVE}+ elites: {config.ELITE_HP_MULT:g}x HP, {config.ELITE_SCORE_MULT:g}x score.", "deal": f"Volatile: {config.ELITE_VOLATILE_BLAST_DAMAGE:g} blast in {config.ELITE_VOLATILE_BLAST_RADIUS:g} px, hits you too. Shielded: break shield.", "lore": f"One affix each: Volatile, Swift, Shielded, Splitter, Reflector. Swift moves {(config.ELITE_SWIFT_SPEED_MULT - 1.0) * 100:g}% faster."},
+        {"key": "boss_schedule", "name": "Boss Schedule", "icon": "BS", "what": f"A boss arrives every {guide_info.ordinal(config.BOSS_WAVE_EVERY)} wave ({config.BOSS_WAVE_EVERY:g}, {2 * config.BOSS_WAVE_EVERY:g}, {3 * config.BOSS_WAVE_EVERY:g}...).", "deal": "Save dash and ultra for it; clearing the wave opens card picks.", "lore": "Boss kills always drop a weapon plus a heal, shield or laser."},
         {"key": "loot", "name": "Loot Priority", "icon": "LT", "what": "Powerups and weapon drops shape run tempo.", "deal": "Early damage/fire-rate usually beats greed picks.", "lore": "Boss waves guarantee high-value drops."},
         {"key": "rpg", "name": "Boss Rewards", "icon": "CRD", "what": "Boss kills open temp + permanent card picks.", "deal": "Pick consistency first, then high-risk scaling.", "lore": "Card flow is your long-run progression core."},
         {"key": "pause", "name": "Pause/Menu", "icon": "ESC", "what": "Press ESC to pause or navigate menus.", "deal": "Use pause to reset focus in dense waves.", "lore": "A short reset often saves a run."},
     ]
+    SYSTEMS_INFO = guide_info.systems_entries()
 
     def __init__(self, width: int, height: int):
         self.screen_width = width
@@ -1309,10 +1312,11 @@ class GuideMenu:
         self.btn_enemies = MenuButton(0, 0, 180, 50, "Enemies", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_powerups = MenuButton(0, 0, 180, 50, "Powerups", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_basics = MenuButton(0, 0, 180, 50, "Basics", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
+        self.btn_systems = MenuButton(0, 0, 180, 50, "Systems", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_prev = MenuButton(0, 0, 120, 44, "Prev", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_next = MenuButton(0, 0, 120, 44, "Next", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_back = MenuButton(0, 0, 200, 54, "Back to Menu", lambda: None, color=(110, 110, 150), hover_color=(145, 145, 195))
-        self._buttons = [self.btn_enemies, self.btn_powerups, self.btn_basics, self.btn_prev, self.btn_next, self.btn_back]
+        self._buttons = [self.btn_enemies, self.btn_powerups, self.btn_basics, self.btn_systems, self.btn_prev, self.btn_next, self.btn_back]
         for b in self._buttons:
             b.ensure(self.batch)
 
@@ -1353,6 +1357,8 @@ class GuideMenu:
             return self.ENEMY_INFO
         if self.tab == "powerups":
             return self.POWERUP_INFO
+        if self.tab == "systems":
+            return self.SYSTEMS_INFO
         return self.BASICS_INFO
 
     def _total_pages(self) -> int:
@@ -1368,7 +1374,7 @@ class GuideMenu:
     def _entry_color(self, e: dict) -> tuple:
         key = str(e.get("key", ""))
         if self.tab == "enemies":
-            return config.ENEMY_COLORS.get(key, (200, 200, 200))
+            return guide_info.ACCENT_COLORS.get(key, config.ENEMY_COLORS.get(key, (200, 200, 200)))
         if self.tab == "powerups":
             return config.POWERUP_COLORS.get(key, (200, 200, 200))
         return (140, 200, 255)
@@ -1409,29 +1415,23 @@ class GuideMenu:
         self._panel_shine.height = max(6, int(14 * scale))
 
         self.title.x = cx
-        self.title.y = height - int(64 * scale)
+        self.title.y = height - int(48 * scale)  # clear of the panel border (the title's descent crossed it at 64)
         _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(20, int(34 * scale)))
         self.subtitle.x = cx
-        self.subtitle.y = self.title.y - int(30 * scale)
+        self.subtitle.y = self.title.y - int(46 * scale)
         _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
 
         top_y = panel_y + panel_h - int(86 * scale)
-        self.btn_enemies.width = int(190 * scale)
-        self.btn_enemies.height = int(52 * scale)
-        self.btn_enemies.font_size = max(12, int(17 * scale))
-        self.btn_enemies.x = panel_x + int(28 * scale)
-        self.btn_enemies.y = top_y
-
-        self.btn_powerups.width = int(190 * scale)
-        self.btn_powerups.height = int(52 * scale)
-        self.btn_powerups.font_size = max(12, int(17 * scale))
-        self.btn_powerups.x = self.btn_enemies.x + self.btn_enemies.width + int(14 * scale)
-        self.btn_powerups.y = top_y
-        self.btn_basics.width = int(190 * scale)
-        self.btn_basics.height = int(52 * scale)
-        self.btn_basics.font_size = max(12, int(17 * scale))
-        self.btn_basics.x = self.btn_powerups.x + self.btn_powerups.width + int(14 * scale)
-        self.btn_basics.y = top_y
+        tab_w = int(140 * scale)
+        tab_gap = int(12 * scale)
+        tab_x = panel_x + int(28 * scale)
+        for tab_btn in (self.btn_enemies, self.btn_powerups, self.btn_basics, self.btn_systems):
+            tab_btn.width = tab_w
+            tab_btn.height = int(52 * scale)
+            tab_btn.font_size = max(12, int(17 * scale))
+            tab_btn.x = tab_x
+            tab_btn.y = top_y
+            tab_x += tab_w + tab_gap
 
         self.btn_back.width = int(220 * scale)
         self.btn_back.height = int(52 * scale)
@@ -1439,9 +1439,10 @@ class GuideMenu:
         self.btn_back.x = panel_x + panel_w - self.btn_back.width - int(24 * scale)
         self.btn_back.y = top_y
 
-        row_top = top_y - int(26 * scale)
-        row_h = int(88 * scale)
-        row_gap = int(10 * scale)
+        # Six rows must fit between the tab row and the Prev/Next buttons, so each row is three text lines tall.
+        row_top = top_y - int(14 * scale)
+        row_h = int(52 * scale)
+        row_gap = int(6 * scale)
         row_x = panel_x + int(24 * scale)
         row_w = panel_w - int(48 * scale)
         for i, (bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, _) in enumerate(self._rows):
@@ -1465,15 +1466,15 @@ class GuideMenu:
 
             text_x = row_x + int(56 * scale)
             name.x = text_x
-            name.y = y + row_h - int(22 * scale)
+            name.y = y + row_h - int(14 * scale)
             _sync_label_style_if_ready(name, UI_FONT_BODY, max(11, int(16 * scale)))
 
             desc.x = text_x
-            desc.y = y + row_h - int(45 * scale)
+            desc.y = y + row_h - int(30 * scale)
             _sync_label_style_if_ready(desc, UI_FONT_META, max(9, int(12 * scale)))
 
             lore.x = text_x
-            lore.y = y + row_h - int(66 * scale)
+            lore.y = y + row_h - int(43 * scale)
             _sync_label_style_if_ready(lore, UI_FONT_META, max(8, int(11 * scale)))
 
         self.btn_prev.width = int(118 * scale)
@@ -1516,6 +1517,10 @@ class GuideMenu:
             self.tab = "basics"
             self.page = 0
             return None
+        if self.btn_systems.contains_point(x, y):
+            self.tab = "systems"
+            self.page = 0
+            return None
         total_pages = self._total_pages()
         if self.btn_prev.contains_point(x, y):
             self.page = (self.page - 1) % total_pages
@@ -1535,9 +1540,11 @@ class GuideMenu:
         self.btn_enemies.is_hovered = self.btn_enemies.is_hovered or self.tab == "enemies"
         self.btn_powerups.is_hovered = self.btn_powerups.is_hovered or self.tab == "powerups"
         self.btn_basics.is_hovered = self.btn_basics.is_hovered or self.tab == "basics"
+        self.btn_systems.is_hovered = self.btn_systems.is_hovered or self.tab == "systems"
         self.btn_enemies.sync()
         self.btn_powerups.sync()
         self.btn_basics.sync()
+        self.btn_systems.sync()
         entries = self._page_entries()
         for i, row in enumerate(self._rows):
             bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, phase = row
@@ -1562,8 +1569,12 @@ class GuideMenu:
             icon.color = self._entry_color(e)
             glyph.text = str(e.get("icon", "?"))
             name.text = str(e.get("name", "Unknown"))
-            desc.text = f"Threat: {str(e.get('what', ''))}  |  Counter: {str(e.get('deal', ''))}"
-            lore.text = f"Lore: {str(e.get('lore', ''))}"
+            if self.tab == "systems":
+                desc.text = f"About: {str(e.get('what', ''))}  |  Tip: {str(e.get('deal', ''))}"
+                lore.text = f"Note: {str(e.get('lore', ''))}"
+            else:
+                desc.text = f"Threat: {str(e.get('what', ''))}  |  Counter: {str(e.get('deal', ''))}"
+                lore.text = f"Lore: {str(e.get('lore', ''))}"
 
         page_info = f"Page {self.page + 1}/{self._total_pages()}  |  Left/Right or buttons to browse"
         if self.tab == "enemies":
@@ -1572,6 +1583,9 @@ class GuideMenu:
         elif self.tab == "powerups":
             self.subtitle.text = "Powerup effects, timing advice, and field notes."
             self.footer.text = f"{page_info}  |  {len(self.POWERUP_INFO)} entries"
+        elif self.tab == "systems":
+            self.subtitle.text = "Hangar, achievements, mutators, daily runs and arena events."
+            self.footer.text = f"{page_info}  |  {len(self.SYSTEMS_INFO)} entries"
         else:
             self.subtitle.text = "Core controls, movement rules, and run-flow fundamentals."
             self.footer.text = f"{page_info}  |  {len(self.BASICS_INFO)} entries"
@@ -1579,6 +1593,7 @@ class GuideMenu:
         self.btn_enemies.is_hovered = False
         self.btn_powerups.is_hovered = False
         self.btn_basics.is_hovered = False
+        self.btn_systems.is_hovered = False
 
 
 class PauseMenu:

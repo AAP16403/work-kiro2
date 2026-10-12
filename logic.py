@@ -134,7 +134,9 @@ class EnemySpawnPlan:
 class EnemySpawnLogic:
     """Enemy composition planner with grouped classes and combo scoring."""
 
-    def __init__(self) -> None:
+    def __init__(self, tuning: "EnemyTuningLogic | None" = None) -> None:
+        # Difficulty spawn multipliers and caps come from the shared tuning table.
+        self._tuning: EnemyTuningLogic = tuning if tuning is not None else EnemyTuningLogic()
         self.enemy_classes: tuple[EnemyClass, ...] = (
             EnemyClass("frontline", ("chaser", "charger"), unlock_wave=1, weight=3.0),
             EnemyClass("gunline", ("ranged",), unlock_wave=1, weight=2.2),
@@ -175,21 +177,23 @@ class EnemySpawnLogic:
         }
         # Prevent wave plans from collapsing into a single class too often.
         self.max_class_share: float = 0.6
+        # Head-count ramp on top of the difficulty cap: +1 enemy every `wave_cap_ramp_every` waves past
+        # `wave_cap_ramp_start`, capped at `wave_cap_ramp_max` extra enemies.
+        self.wave_cap_ramp_start: int = 5
+        self.wave_cap_ramp_every: int = 3
+        self.wave_cap_ramp_max: int = 8
 
-    @staticmethod
-    def _spawn_mod(difficulty: str) -> float:
-        d = str(difficulty or "normal").lower()
-        if d == "easy":
-            return 0.85
-        if d == "hard":
-            return 1.12
-        return 1.0
+    def wave_cap(self, wave: int, base_cap: int) -> int:
+        """Return the per-wave head-count cap: the difficulty base plus the wave ramp."""
+        steps = max(0, int(wave) - int(self.wave_cap_ramp_start)) // max(1, int(self.wave_cap_ramp_every))
+        return int(base_cap) + min(int(self.wave_cap_ramp_max), steps)
 
     def _base_count(self, wave: int, difficulty: str, cap: int) -> int:
         wave_i = max(1, int(wave))
         cap_i = max(1, int(cap))
         base = 4 + int(wave_i * 1.4)
-        scaled = int(base * self._spawn_mod(difficulty))
+        spawn_mult = float(self._tuning.difficulty_mods(difficulty).get("spawn", 1.0))
+        scaled = int(base * spawn_mult)
         return max(1, min(cap_i, max(1, scaled)))
 
     def _active_classes(self, wave: int) -> list[EnemyClass]:
@@ -270,10 +274,11 @@ class EnemyTuningLogic:
     """Centralized tuning for difficulty, boss rotation, and enemy stat formulas."""
 
     def __init__(self) -> None:
+        # "max_enemies" is the base per-wave head count; the wave ramp in EnemySpawnLogic.wave_cap adds to it.
         self.difficulty_modifiers: dict[str, dict[str, float]] = {
-            "easy": {"spawn": 0.85, "hp": 0.88, "speed": 0.92, "powerup": 1.15, "boss_hp": 0.92, "dash_cd": 0.9},
-            "normal": {"spawn": 1.0, "hp": 1.0, "speed": 1.0, "powerup": 1.0, "boss_hp": 1.0, "dash_cd": 1.0},
-            "hard": {"spawn": 1.12, "hp": 1.16, "speed": 1.08, "powerup": 0.9, "boss_hp": 1.08, "dash_cd": 1.12},
+            "easy": {"spawn": 0.85, "hp": 0.88, "speed": 0.92, "powerup": 1.15, "boss_hp": 0.92, "dash_cd": 0.9, "max_enemies": 10},
+            "normal": {"spawn": 1.0, "hp": 1.0, "speed": 1.0, "powerup": 1.0, "boss_hp": 1.0, "dash_cd": 1.0, "max_enemies": 12},
+            "hard": {"spawn": 1.12, "hp": 1.16, "speed": 1.08, "powerup": 0.9, "boss_hp": 1.08, "dash_cd": 1.12, "max_enemies": 14},
         }
         self.enemy_profiles: dict[str, EnemyStatProfile] = {
             "chaser": EnemyStatProfile(hp_offset=0.0, hp_mult=1.0, speed_mult=1.32, attack_mult=1.0),

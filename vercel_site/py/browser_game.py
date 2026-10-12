@@ -61,7 +61,7 @@ from utils import (
     set_view_size,
     to_iso,
 )
-from weapons import get_effective_fire_rate, get_weapon_for_wave
+from weapons import get_effective_fire_rate, get_weapon_for_wave, roll_wave_clear_upgrade
 
 
 TAU = math.tau
@@ -336,7 +336,8 @@ class BrowserGame:
     def _effective_player_damage(self) -> int:
         if not self.player:
             return 10
-        return max(1, int(round(float(self.player.damage) * float(self._temp_damage_mult))))
+        # Half-up rounding (not round(), which is banker's rounding at .5) so the 1.28 Overdrive multiplier lands predictably.
+        return max(1, math.floor(float(self.player.damage) * float(self._temp_damage_mult) + 0.5))
 
     def _effective_player_speed(self) -> float:
         if not self.player:
@@ -607,7 +608,7 @@ class BrowserGame:
             if self.player and dist(self.player.pos, enemy_obj.pos) <= v_r:
                 self._damage_player(20)
 
-        spawn_loot_on_enemy_death(self.state, behavior, enemy_obj.pos)
+        spawn_loot_on_enemy_death(self.state, behavior, enemy_obj.pos, current_weapon=getattr(self.player, "current_weapon", None))
         self.particles.add_death_explosion(enemy_obj.pos, ENEMY_COLORS.get(behavior, (220, 220, 220)), behavior)
         self.score.on_enemy_kill(behavior)
         self.impact = max(self.impact, 0.32)
@@ -662,14 +663,13 @@ class BrowserGame:
         self.score = ScoreTracker(difficulty=difficulty)
         self._recompute_temp_reward_mods()
 
+        # Base per-wave head count lives in logic.py's difficulty table (the wave ramp is applied in level.spawn_wave).
+        self.state.max_enemies = int(get_difficulty_mods(difficulty).get("max_enemies", 12))
         if difficulty == "easy":
-            self.state.max_enemies = 10
             self._incoming_damage_mult = 0.85
         elif difficulty == "hard":
-            self.state.max_enemies = 14
             self._incoming_damage_mult = 1.15
         else:
-            self.state.max_enemies = 12
             self._incoming_damage_mult = 1.0
 
         self._dash_cd_difficulty = float(get_difficulty_mods(difficulty).get("dash_cd", 1.0))
@@ -984,7 +984,10 @@ class BrowserGame:
             new_segment = (s.wave - 1) // 5
             if config.ENABLE_OBSTACLES and new_segment != getattr(s, "layout_segment", 0):
                 self._regen_layout(new_segment)
-            self.player.current_weapon = get_weapon_for_wave(s.wave)
+            # Weapons only ever upgrade at a wave clear: a seeded roll that equips a pool weapon only if it outranks the current one.
+            upgrade = roll_wave_clear_upgrade(getattr(self.player, "current_weapon", None), s.wave, s.rng)
+            if upgrade is not None:
+                self.player.current_weapon = upgrade
             maybe_spawn_powerup(s, Vec2(0.0, 0.0))
             self.score.on_wave_clear(cleared_wave)
             self._last_cleared_wave = cleared_wave

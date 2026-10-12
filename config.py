@@ -32,8 +32,8 @@ FIRE_RATE_CURVE = 0.85
 
 # Gameplay tuning
 WAVE_COOLDOWN = 2.0
-MAX_ENEMIES = 12  # Maximum concurrent enemies in a wave
 MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter
+WEAPON_WAVE_UPGRADE_CHANCE = 0.5  # Chance per wave clear to roll a weapon; it is equipped only if it outranks the current one
 
 # Ultra ability (special powerup -> right click)
 ULTRA_MAX_CHARGES = 2

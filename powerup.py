@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from config import PLAYER_HP, ULTRA_MAX_CHARGES
 from utils import Vec2
-from weapons import WEAPONS
+from weapons import WEAPONS, is_weapon_upgrade
 
 if TYPE_CHECKING:
     from player import Player
@@ -25,7 +25,8 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
         cap = int(getattr(player, "max_hp", PLAYER_HP))
         player.hp = min(cap, player.hp + 25)
     elif p.kind == "damage":
-        player.damage += 4
+        # +1 base is about +10% on every shot once the base scales the whole projectile (see spawn_projectiles).
+        player.damage += 1
     elif p.kind == "speed":
         player.speed += 18
     elif p.kind == "firerate":
@@ -39,9 +40,13 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
         # A damaging aura that swirls around the player.
         player.vortex_until = max(player.vortex_until, now + 10.0)
     elif p.kind == "weapon":
+        # Upgrade-only: equip the pickup only if it outranks the current weapon, otherwise it still pays off as a shield top-up.
         key = str(p.data or "basic").lower()
-        if key in WEAPONS:
-            player.current_weapon = WEAPONS[key]
+        candidate = WEAPONS.get(key)
+        if candidate is not None and is_weapon_upgrade(getattr(player, "current_weapon", None), candidate):
+            player.current_weapon = candidate
+        else:
+            player.shield = min(120, int(getattr(player, "shield", 0)) + 20)
     elif p.kind == "ultra":
         player.ultra_charges = min(ULTRA_MAX_CHARGES, int(getattr(player, "ultra_charges", 0)) + 1)
     elif p.kind == "boost":

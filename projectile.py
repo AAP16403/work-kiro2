@@ -5,6 +5,7 @@ import math
 import random
 from typing import TYPE_CHECKING
 
+from config import PLAYER_DAMAGE
 from utils import Vec2
 
 if TYPE_CHECKING:
@@ -52,8 +53,10 @@ def spawn_projectiles(
     projectiles = []
     rng = rng or random
     
-    # Weapon damage = weapon base damage + player damage bonus (50%)
-    raw_damage = weapon.damage + int(base_damage * 0.5)
+    # The player's damage scales the whole shot: the weapon's own damage and the 50% player bonus
+    # are both multiplied by base_damage / PLAYER_DAMAGE, rounded half-up. At base 10 this is
+    # weapon.damage + 5 (basic 15, heavy 25, railgun 45), so the tuning point is unchanged.
+    raw_damage = math.floor((weapon.damage + 0.5 * PLAYER_DAMAGE) * float(base_damage) / PLAYER_DAMAGE + 0.5)
 
     # Roll critical hit
     effective_crit_chance = min(0.85, max(0.0, getattr(weapon, "crit_chance", 0.10) + crit_chance_bonus))

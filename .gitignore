@@ -43,3 +43,9 @@ progress.json
 
 # Run recordings written with --record (replay.py)
 replays/
+
+# Local user settings (audio, shake, accessibility, run mutator selection)
+user_settings.json
+
+# Claude Code session worktrees must never be committed
+.claude/

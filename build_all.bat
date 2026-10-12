@@ -59,8 +59,12 @@ if not exist "assets\fonts\Rajdhani-SemiBold.ttf" (
   goto :fail
 )
 
-echo Installing/updating dependencies...
-"%PY_EXE%" -m pip install -U pip pyglet pyinstaller moderngl
+echo Installing pinned dependencies from requirements.txt...
+if not exist "requirements.txt" (
+  echo ERROR: Missing requirements file: requirements.txt
+  goto :fail
+)
+"%PY_EXE%" -m pip install -r requirements.txt
 if errorlevel 1 goto :fail
 
 echo.
@@ -77,6 +81,10 @@ echo Running quick syntax validation...
 if errorlevel 1 goto :fail
 
 echo.
+echo Checking asset coverage...
+"%PY_EXE%" asset_manifest.py
+if errorlevel 1 goto :fail
+
 echo Building executable ^(PyInstaller^)...
 %PS_EXE% -NoProfile -ExecutionPolicy Bypass -File ".\%BUILD_PS1%"
 if errorlevel 1 goto :fail

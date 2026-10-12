@@ -1,0 +1,16 @@
+# Pinned Python packages for Plouto on Windows (Python 3.12).
+# build_all.bat runs "pip install -r requirements.txt" and never upgrades anything.
+# Install by hand: .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# pyglet 2.1.16 is the tested version. The direct dependencies come first; the rest are the
+# packages they pull in, pinned so that every build installs the same versions.
+pyglet==2.1.16
+moderngl==5.13.0
+pyinstaller==6.22.3
+altgraph==0.17.5
+glcontext==3.1.0
+packaging==26.3
+pefile==2024.8.26
+pyinstaller-hooks-contrib==2026.8
+pywin32-ctypes==0.2.3
+setuptools==84.0.0

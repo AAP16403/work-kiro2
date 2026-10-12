@@ -1,11 +1,33 @@
-"""HUD (Heads-Up Display) – health, shield, wave, status, score, banners and boss bar."""
+"""HUD (Heads-Up Display) – health, shield, wave, status, score, banners and boss bar.
+
+Panels and chips are drawn with ui_theme helpers (see hud_widgets.py). The in-run additions are
+the radial Ultra gauge, the weapon and skin chips, and the achievement toast queue.
+"""
 
 import pyglet
 from pyglet import shapes
 
+import config
 from config import SHIELD_MAX
 from menu import UI_FONT_HEAD, UI_FONT_BODY, UI_FONT_META
+from hud_widgets import (
+    Chip,
+    RadialGauge,
+    ToastQueue,
+    ToastView,
+    WeaponChip,
+    draw_panel,
+    fit_text as _fit_text,
+    set_text as _set_text,
+    token,
+    weapon_swatch,
+)
 
+
+CONTRAST_LIFT = 0.45      # high contrast: each HUD text channel moves this far toward white
+CONTRAST_PLATE_COLOR = (6, 10, 18)
+CONTRAST_PLATE_ALPHA = 215  # opacity of the dark plate behind each HUD number in high contrast
+CONTRAST_PLATE_PAD = 4      # reference pixels between a number and its plate's edge
 
 BANNER_IN_S = 0.25        # ease-out slide/scale-in
 BANNER_OUT_S = 0.45       # fade-out at the end of a banner
@@ -13,6 +35,11 @@ BOSS_LAG_HOLD_S = 0.10    # damage trail waits this long before it starts shrink
 BOSS_LAG_SHRINK_S = 0.40  # then shrinks toward the real HP (about 0.5 s in total)
 STATUS_SEP = "   |   "    # between status segments
 STATUS_CACHE_MAX = 256    # fitted status strings kept before the cache is reset
+PANEL_SHADOW_ALPHA = 78
+PANEL_FILL_ALPHA = 216
+PANEL_EDGE_ALPHA = 228
+TOAST_KICKER = "ACHIEVEMENT UNLOCKED"
+DEFAULT_SKIN_NAME = "Default"
 
 
 def _ui_scale(width: int, height: int) -> float:
@@ -20,35 +47,52 @@ def _ui_scale(width: int, height: int) -> float:
     return max(1.0, min(1.35, min(width / 980.0, height / 620.0)))
 
 
-def _set_text(label, text: str) -> None:
-    """Assign label text only when it changed (pyglet relayouts on every assignment)."""
-    if label.text != text:
-        label.text = text
-
-
 def _set_size(label, size: int) -> None:
     if int(label.font_size) != size:
         label.font_size = size
 
 
-def _fit_text(label, text: str, max_w: float) -> None:
-    """Set label text, trimmed with '...' so its width stays within max_w pixels."""
-    label.text = text
-    if max_w <= 0 or label.content_width <= max_w:
-        return
-    lo, hi = 0, len(text)
-    while lo < hi:
-        mid = (lo + hi + 1) // 2
-        label.text = text[:mid].rstrip() + "..."
-        if label.content_width <= max_w:
-            lo = mid
-        else:
-            hi = mid - 1
-    label.text = text[:lo].rstrip() + "..."
+def _spans_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
+    return a0 < b1 and b0 < a1
+
+
+def _reduce_motion() -> bool:
+    return bool(getattr(config, "REDUCE_MOTION", False))
+
+
+def current_skin_name(progress=None) -> str:
+    """Name of the selected skin, from `progress` or from progress.json when none is given.
+
+    Falls back to DEFAULT_SKIN_NAME while the progress or skins modules are missing, and never
+    raises, so a bad save file cannot stop a run from starting.
+    """
+    try:
+        import skins
+        import progress as progress_store
+    except ImportError:
+        return DEFAULT_SKIN_NAME
+    try:
+        data = progress if progress is not None else progress_store.load_progress()
+        return str(skins.selected(data).name) or DEFAULT_SKIN_NAME
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return DEFAULT_SKIN_NAME
+
+
+def achievement_name(achievement_id) -> str:
+    """Display name for an achievement id, or the id itself while achievements.py is missing."""
+    try:
+        import achievements
+    except ImportError:
+        return str(achievement_id)
+    for ach in getattr(achievements, "ACHIEVEMENTS", []):
+        if getattr(ach, "id", None) == achievement_id:
+            return str(getattr(ach, "name", achievement_id))
+    return str(achievement_id)
 
 
 class HUD:
-    """In-game overlay: HP/shield/boost, wave chip, status bar, score, banners and boss bar."""
+    """In-game overlay: HP/shield/boost, wave chip, status bar, score, Ultra gauge, weapon and
+    skin chips, achievement toasts, banners and boss bar."""
 
     def __init__(self, width: int, height: int):
         self.width = width
@@ -56,23 +100,27 @@ class HUD:
         self._s = 1.0
         self._bar_w = 240
         self._scaled_labels = []  # (label, reference font size) pairs resized in layout()
+        self._frames = {}         # panel key -> shapes drawn for it (rebuilt in layout)
         self._meta_src = ""
         self._meta_max_w = 200.0
         self._status_max_w = 540.0  # pixel budget for the status line; set in layout()
         self._status_cache = {}     # (segments, width) -> fitted status text
+        self._pulse_t = 0.0         # clock for the Ultra gauge's full-charge pulse
+
+        text_color = token("TEXT")
+        muted = token("MUTED")
+        accent = token("ACCENT")
 
         self.batch = pyglet.graphics.Batch()
+        # Panel backgrounds live in their own batch, drawn first, so bars, chips and text sit on top.
+        self._frame_batch = pyglet.graphics.Batch()
+        # Order inside self.batch: panels (order 0), number plates (1), text (2). Labels default to the text group.
+        self._plate_group = pyglet.graphics.Group(order=1)
+        self._text_group = pyglet.graphics.Group(order=2)
+        self._contrast = bool(getattr(config, "HIGH_CONTRAST_HUD", False))
+        self._label_base = {}  # id(label) -> (label, base RGBA), so high contrast can be toggled at any time
 
-        # ── Health / Shield panel (top-left) ────────────────────────
-        self.panel_shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.batch)
-        self.panel_shadow.opacity = 78
-        self.panel_bg = shapes.Rectangle(0, 0, 1, 1, color=(14, 21, 30), batch=self.batch)
-        self.panel_bg.opacity = 216
-        self.panel_border = shapes.BorderedRectangle(
-            0, 0, 1, 1, border=2, color=(20, 28, 40), border_color=(82, 146, 212), batch=self.batch
-        )
-        self.panel_border.opacity = 228
-
+        # ── Health / Shield / Boost bars (bottom-left panel; panel shapes come from layout) ──
         self.hp_bar_bg = shapes.Rectangle(0, 0, 1, 1, color=(42, 45, 55), batch=self.batch)
         self.hp_bar = shapes.Rectangle(0, 0, 1, 1, color=(120, 210, 120), batch=self.batch)
         self.shield_bar_bg = shapes.Rectangle(0, 0, 1, 1, color=(36, 44, 58), batch=self.batch)
@@ -80,49 +128,48 @@ class HUD:
         self.boost_bar_bg = shapes.Rectangle(0, 0, 1, 1, color=(48, 34, 20), batch=self.batch)
         self.boost_bar = shapes.Rectangle(0, 0, 1, 1, color=(255, 145, 45), batch=self.batch)
 
-        # ── Wave chip (top-center) ──────────────────────────────────
-        self.wave_chip_shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.batch)
-        self.wave_chip_shadow.opacity = 86
-        self.wave_chip_bg = shapes.Rectangle(0, 0, 1, 1, color=(18, 28, 42), batch=self.batch)
-        self.wave_chip_bg.opacity = 230
-        self.wave_chip_border = shapes.BorderedRectangle(
-            0, 0, 1, 1, border=2, color=(18, 28, 42), border_color=(110, 186, 255), batch=self.batch
-        )
-
-        # ── Status bar (below wave chip) ────────────────────────────
-        self.status_bg = shapes.Rectangle(0, 0, 1, 1, color=(10, 16, 24), batch=self.batch)
-        self.status_bg.opacity = 196
-        self.status_border = shapes.BorderedRectangle(
-            0, 0, 1, 1, border=1, color=(10, 16, 24), border_color=(70, 128, 184), batch=self.batch
-        )
-
-        # ── Score panel (top-right) ─────────────────────────────────
-        self.score_shadow = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.batch)
-        self.score_shadow.opacity = 78
-        self.score_bg = shapes.Rectangle(0, 0, 1, 1, color=(14, 21, 30), batch=self.batch)
-        self.score_bg.opacity = 216
-        self.score_border = shapes.BorderedRectangle(
-            0, 0, 1, 1, border=2, color=(20, 28, 40), border_color=(212, 180, 82), batch=self.batch
-        )
-        self.score_border.opacity = 228
-
         # ── Labels ──────────────────────────────────────────────────
-        self.hp_label = self._label("HULL", UI_FONT_META, 9)
-        self.hp_value_label = self._label("", UI_FONT_BODY, 10, ax="right", color=(244, 250, 255, 255))
-        self.shield_label = self._label("SHIELD", UI_FONT_META, 9, color=(188, 210, 232, 220))
-        self.shield_value_label = self._label("", UI_FONT_BODY, 10, ax="right", color=(232, 244, 255, 255))
+        self.hp_label = self._label("HULL", UI_FONT_META, 9, color=(*muted, 220))
+        self.hp_value_label = self._label("", UI_FONT_BODY, 10, ax="right", color=(*text_color, 255))
+        self.shield_label = self._label("SHIELD", UI_FONT_META, 9, color=(*muted, 220))
+        self.shield_value_label = self._label("", UI_FONT_BODY, 10, ax="right", color=(*text_color, 255))
         self.boost_label = self._label("BOOST", UI_FONT_META, 9, color=(255, 185, 95, 220))
         self.boost_value_label = self._label("", UI_FONT_BODY, 10, ax="right", color=(255, 210, 130, 255))
-        self.weapon_label = self._label("", UI_FONT_META, 9, color=(160, 215, 255, 220))
 
-        # Wave chip text sits on baselines (title above the meta line), so it cannot leave the chip.
-        self.wave_label = self._label("", UI_FONT_HEAD, 22, ax="center", ay="baseline", color=(238, 245, 255, 255))
-        self.meta_label = self._label("", UI_FONT_META, 10, ax="center", ay="baseline", color=(168, 194, 222, 230))
-        self.status_label = self._label("", UI_FONT_BODY, 12, ax="center", ay="center", color=(170, 186, 206, 255))
+        # Weapon and skin chips along the foot of the health panel
+        self.weapon_chip = WeaponChip(self.batch, self._label, frame_batch=self._frame_batch)
+        self.skin_chip = Chip(self.batch, self._label, label_color=accent, frame_batch=self._frame_batch)
+        self.skin_chip.set_text(DEFAULT_SKIN_NAME)
+        self._skin_name = DEFAULT_SKIN_NAME
+
+        # Radial Ultra gauge (bottom-left)
+        self.ultra_gauge = RadialGauge(self.batch, self._label)
+
+        # Wave chip labels sit on baselines (title above the meta line), so they cannot leave the chip.
+        self.wave_label = self._label("", UI_FONT_HEAD, 22, ax="center", ay="baseline", color=(*text_color, 255))
+        self.meta_label = self._label("", UI_FONT_META, 10, ax="center", ay="baseline", color=(*muted, 230))
+        self.status_label = self._label("", UI_FONT_BODY, 12, ax="center", ay="center", color=(*muted, 255))
 
         self.score_title_label = self._label("SCORE", UI_FONT_META, 10, color=(214, 200, 160, 220))
         self.score_value_label = self._label("0", UI_FONT_HEAD, 20, ax="right", color=(255, 240, 180, 255))
         self.combo_label = self._label("", UI_FONT_META, 10, ax="right", color=(255, 200, 100, 210))
+
+        # Achievement toasts: a FIFO that shows one toast at a time, under the score panel
+        self.toasts = ToastQueue()
+        # Optional callable, run each time a toast is queued. The game sets it to play the toast cue.
+        self.on_toast = None
+        self.toast_view = ToastView(self.batch, self._label, frame_batch=self._frame_batch)
+        # High-contrast plates: one dark plate behind each HUD number, sized to its text in _sync_number_plates().
+        number_labels = [
+            self.hp_value_label, self.shield_value_label, self.boost_value_label,
+            self.wave_label, self.meta_label, self.status_label, self.score_value_label, self.combo_label,
+            *self.weapon_chip.labels(),
+        ]
+        self._number_pairs = []
+        for lbl in number_labels:
+            plate = shapes.Rectangle(0, 0, 1, 1, color=CONTRAST_PLATE_COLOR, batch=self.batch, group=self._plate_group)
+            plate.opacity = 0
+            self._number_pairs.append((lbl, plate))
 
         # ── Banner (center-screen; own batch so it draws over the HUD) ──
         self._banner_batch = pyglet.graphics.Batch()
@@ -148,6 +195,8 @@ class HUD:
             "", font_name=UI_FONT_BODY, font_size=16, x=0, y=0, anchor_x="center", anchor_y="baseline",
             color=(196, 210, 230, 230), batch=self._banner_batch, group=self._banner_g_txt,
         )
+        self._paint(self.banner_title, (238, 245, 255, 255))
+        self._paint(self.banner_sub, (196, 210, 230, 230))
 
         # ── Boss health bar (top-center, under the status bar) ──────
         self._boss_batch = pyglet.graphics.Batch()
@@ -163,7 +212,7 @@ class HUD:
         self._boss_lag_t = 0.0
         self._boss_bar_w = 240
         self.boss_plate = shapes.BorderedRectangle(
-            0, 0, 1, 1, border=2, color=(10, 12, 18), border_color=(196, 78, 70),
+            0, 0, 1, 1, border=2, color=token("BG"), border_color=token("DANGER"),
             batch=self._boss_batch, group=self._boss_g_bg,
         )
         self.boss_plate.opacity = 210
@@ -185,6 +234,9 @@ class HUD:
             "", UI_FONT_BODY, 13, ax="right", ay="baseline", color=(255, 236, 220, 255),
             batch=self._boss_batch, group=self._boss_g_txt,
         )
+        boss_plate = shapes.Rectangle(0, 0, 1, 1, color=CONTRAST_PLATE_COLOR, batch=self._boss_batch, group=self._boss_g_bar)
+        boss_plate.opacity = 0
+        self._number_pairs.append((self.boss_pct_label, boss_plate))
 
         self.layout(width, height)
 
@@ -197,15 +249,100 @@ class HUD:
         """Create a label that is resized with the HUD scale in layout()."""
         lbl = pyglet.text.Label(
             text, font_name=font, font_size=size, x=0, y=0,
-            anchor_x=ax, anchor_y=ay, color=color,
-            batch=batch if batch is not None else self.batch, group=group,
+            anchor_x=ax, anchor_y=ay, color=self._tone(color),
+            batch=batch if batch is not None else self.batch,
+            group=group if group is not None else self._text_group,
         )
+        self._label_base[id(lbl)] = (lbl, self._base_rgba(color))
         self._scaled_labels.append((lbl, size))
         return lbl
+
+    @staticmethod
+    def _base_rgba(color) -> tuple:
+        vals = tuple(int(c) for c in color)
+        return vals + (255,) if len(vals) == 3 else vals
+
+    def _tone(self, color) -> tuple:
+        """The colour a label is drawn in. High contrast moves each channel toward white and makes the text opaque."""
+        rgba = self._base_rgba(color)
+        if not self._contrast:
+            return rgba
+        r, g, b = (int(round(c + (255 - c) * CONTRAST_LIFT)) for c in rgba[:3])
+        return (r, g, b, 255)
+
+    def _paint(self, label, color) -> None:
+        """Set a label's base colour and draw it toned. Every colour change goes through here, so high contrast stays in force."""
+        base = self._base_rgba(color)
+        self._label_base[id(label)] = (label, base)
+        label.color = self._tone(base)
+
+    def set_high_contrast(self, on: bool) -> None:
+        """Turn the high-contrast HUD on or off. Applies at once to every label, plate and banner."""
+        self._contrast = bool(on)
+        for label, base in self._label_base.values():
+            label.color = self._tone(base)
+
+    @property
+    def high_contrast(self) -> bool:
+        return self._contrast
+
+    def _sync_number_plates(self) -> None:
+        """Size and place a dark plate behind every HUD number while high contrast is on. Hidden otherwise.
+
+        The plate covers the glyphs (cap height above the baseline), not the full line box, so it does not
+        stretch past the panel it sits in. Pyglet font sizes are points; the window draws them at 96 dpi.
+        """
+        pad_x = self._sz(CONTRAST_PLATE_PAD)
+        for label, plate in self._number_pairs:
+            if not self._contrast or not str(label.text or "").strip():
+                plate.opacity = 0
+                continue
+            w = float(label.content_width)
+            h = float(label.content_height)
+            em = float(label.font_size) * (96.0 / 72.0)
+            cap = 0.72 * em
+            descent = 0.22 * em
+            pad_y = 0.25 * em
+            ax = label.anchor_x
+            ay = label.anchor_y
+            if ay == "baseline":
+                baseline = label.y
+            elif ay == "bottom":
+                baseline = label.y + descent
+            elif ay == "center":
+                baseline = label.y - h / 2.0 + descent
+            else:
+                baseline = label.y - h + descent
+            left = label.x - (w if ax == "right" else w / 2.0 if ax == "center" else 0.0)
+            plate.x = left - pad_x
+            plate.y = baseline - pad_y
+            plate.width = w + pad_x * 2
+            plate.height = cap + pad_y * 2
+            plate.opacity = CONTRAST_PLATE_ALPHA
 
     def _sz(self, value: float) -> int:
         """Scale a reference (980x620) pixel value to the current window."""
         return int(round(value * self._s))
+
+    def _frame(self, key: str, x: int, y: int, w: int, h: int, edge: int, shadow: bool = True) -> None:
+        """Rebuild one HUD panel from ui_theme: a drop shadow, an accent edge and the fill."""
+        for shp in self._frames.pop(key, []):
+            shp.delete()
+        shadow_shapes = []
+        if shadow:
+            offset = self._sz(3)
+            shadow_shapes = draw_panel(self._frame_batch, x + offset, y - offset, w, h, color=token("BG"))
+        edge_shapes = draw_panel(self._frame_batch, x - edge, y - edge, w + 2 * edge, h + 2 * edge, color=token("ACCENT"))
+        fill_shapes = draw_panel(self._frame_batch, x, y, w, h, color=token("PANEL"))
+        # draw_panel returns [edge, body, shine]. The HUD alphas go on the edge and the body only; the shine strip
+        # keeps the soft alpha draw_panel gave it, so it does not sit over the HULL and SCORE labels.
+        for shp in shadow_shapes[:2]:
+            shp.opacity = PANEL_SHADOW_ALPHA
+        for shp in edge_shapes[:2]:
+            shp.opacity = PANEL_EDGE_ALPHA
+        for shp in fill_shapes[:2]:
+            shp.opacity = PANEL_FILL_ALPHA
+        self._frames[key] = shadow_shapes + edge_shapes + fill_shapes
 
     # ------------------------------------------------------------------
     # Layout
@@ -222,31 +359,23 @@ class HUD:
         self._banner_fonts()
 
         margin = sz(14)
-        panel_w = sz(max(220, min(360, int(width * 0.33))))
-        panel_h = sz(104)
-        panel_x = margin
-        panel_y = height - margin - panel_h
+        min_gap = sz(12)
+        edge = max(1, sz(2))
 
-        # Health / shield / boost panel
-        self.panel_shadow.x = panel_x + sz(3)
-        self.panel_shadow.y = panel_y - sz(3)
-        self.panel_shadow.width = panel_w
-        self.panel_shadow.height = panel_h
-        self.panel_bg.x = panel_x
-        self.panel_bg.y = panel_y
-        self.panel_bg.width = panel_w
-        self.panel_bg.height = panel_h
-        self.panel_border.x = panel_x
-        self.panel_border.y = panel_y
-        self.panel_border.width = panel_w
-        self.panel_border.height = panel_h
+        # Health / shield / boost panel (bottom-left), with the weapon and skin chips along its foot.
+        # It sits low so the status line, under the wave chip, never runs into it.
+        panel_w = sz(max(220, min(360, int(width * 0.33))))
+        panel_h = sz(116)
+        panel_x = margin
+        panel_y = margin
+        self._frame("hull", panel_x, panel_y, panel_w, panel_h, edge)
 
         bar_margin_x = sz(14)
         self._bar_w = panel_w - (bar_margin_x * 2)
         bar_h = sz(10)
-        hp_y = panel_y + sz(68)
-        sh_y = panel_y + sz(45)
-        boost_y = panel_y + sz(22)
+        hp_y = panel_y + sz(84)
+        sh_y = panel_y + sz(56)
+        boost_y = panel_y + sz(28)
         bar_x = panel_x + bar_margin_x
 
         self.hp_bar_bg.x = bar_x
@@ -285,64 +414,37 @@ class HUD:
         self.boost_label.y = boost_y + bar_h
         self.boost_value_label.x = bar_x + self._bar_w
         self.boost_value_label.y = boost_y + bar_h
-        self.weapon_label.x = bar_x
-        self.weapon_label.y = panel_y + sz(8)
+
+        chip_h = sz(16)
+        row_y = panel_y + sz(6)
+        chip_gap = sz(6)
+        skin_w = self.skin_chip.width_for(self._bar_w * 0.42, pad=sz(6), min_w=sz(56))
+        weapon_w = self._bar_w - skin_w - chip_gap
+        self.weapon_chip.place(bar_x, row_y, weapon_w, chip_h, pad=sz(6), swatch=sz(8), gap=sz(5))
+        self.skin_chip.place(bar_x + weapon_w + chip_gap, row_y, skin_w, chip_h, pad=sz(6))
+
+        # Radial Ultra gauge (top-left). Its caption block is reserved so the status line keeps clear.
+        ring_r = sz(34)
+        ring_cx = margin + ring_r
+        ring_cy = height - margin - ring_r
+        ring_block_right = ring_cx + ring_r + sz(64)
+        self.ultra_gauge.place(ring_cx, ring_cy, ring_r, max(2, sz(6)), caption_x=ring_cx + ring_r + sz(10))
 
         # Wave chip (top-center). Reference 56 px tall: meta baseline at 11, wave baseline at 26,
         # which leaves ~11 px above the title and below the meta line with a 6 px gap between them.
         chip_w = sz(max(160, min(320, int(width * 0.26))))
-        chip_h = sz(56)
+        wave_h = sz(56)
         chip_x = (width - chip_w) // 2
-        chip_y = height - margin - chip_h
-        min_gap = sz(12)
-        panel_right = panel_x + panel_w
-        chip_left = chip_x
+        wave_y = height - margin - wave_h
         chip_right = chip_x + chip_w
-        chip_overlaps_panel = not (chip_left >= panel_right + min_gap or chip_right <= panel_x - min_gap)
-        if chip_overlaps_panel:
-            chip_y = panel_y - chip_h - sz(8)
-
-        self.wave_chip_shadow.x = chip_x + sz(3)
-        self.wave_chip_shadow.y = chip_y - sz(3)
-        self.wave_chip_shadow.width = chip_w
-        self.wave_chip_shadow.height = chip_h
-        self.wave_chip_bg.x = chip_x
-        self.wave_chip_bg.y = chip_y
-        self.wave_chip_bg.width = chip_w
-        self.wave_chip_bg.height = chip_h
-        self.wave_chip_border.x = chip_x
-        self.wave_chip_border.y = chip_y
-        self.wave_chip_border.width = chip_w
-        self.wave_chip_border.height = chip_h
+        self._frame("wave", chip_x, wave_y, chip_w, wave_h, edge)
 
         self.wave_label.x = chip_x + chip_w // 2
-        self.wave_label.y = chip_y + sz(26)
+        self.wave_label.y = wave_y + sz(26)
         self.meta_label.x = chip_x + chip_w // 2
-        self.meta_label.y = chip_y + sz(11)
+        self.meta_label.y = wave_y + sz(11)
         self._meta_max_w = chip_w - sz(24)
         _fit_text(self.meta_label, self._meta_src, self._meta_max_w)
-
-        # Status bar
-        is_stacked = chip_y < panel_y
-        if is_stacked:
-            status_w = min(sz(700), max(sz(220), int(width * 0.9)))
-        else:
-            status_w = max(sz(240), min(sz(640), int(width * 0.58)))
-        status_h = sz(28)
-        status_x = (width - status_w) // 2
-        status_y = max(sz(6), chip_y - status_h - sz(10))
-        self.status_bg.x = status_x
-        self.status_bg.y = status_y
-        self.status_bg.width = status_w
-        self.status_bg.height = status_h
-        self.status_border.x = status_x
-        self.status_border.y = status_y
-        self.status_border.width = status_w
-        self.status_border.height = status_h
-        self.status_label.x = status_x + status_w // 2
-        self.status_label.y = status_y + status_h // 2
-        self._status_max_w = float(max(sz(60), status_w - sz(28)))
-        self._status_cache.clear()  # cached widths depend on the font size and the bar width
 
         # Score panel (top-right)
         score_panel_w = sz(max(160, min(260, int(width * 0.22))))
@@ -350,22 +452,10 @@ class HUD:
         score_panel_x = width - margin - score_panel_w
         score_panel_y = height - margin - score_panel_h
 
-        # Avoid overlapping with wave chip
+        # Avoid overlapping with the wave chip: drop the score panel under it when they share a column
         if score_panel_x < chip_right + min_gap:
-            score_panel_y = panel_y - score_panel_h - sz(8)
-
-        self.score_shadow.x = score_panel_x + sz(3)
-        self.score_shadow.y = score_panel_y - sz(3)
-        self.score_shadow.width = score_panel_w
-        self.score_shadow.height = score_panel_h
-        self.score_bg.x = score_panel_x
-        self.score_bg.y = score_panel_y
-        self.score_bg.width = score_panel_w
-        self.score_bg.height = score_panel_h
-        self.score_border.x = score_panel_x
-        self.score_border.y = score_panel_y
-        self.score_border.width = score_panel_w
-        self.score_border.height = score_panel_h
+            score_panel_y = wave_y - score_panel_h - sz(8)
+        self._frame("score", score_panel_x, score_panel_y, score_panel_w, score_panel_h, edge)
 
         score_pad = sz(12)
         self.score_title_label.x = score_panel_x + score_pad
@@ -375,8 +465,35 @@ class HUD:
         self.combo_label.x = score_panel_x + score_panel_w - score_pad
         self.combo_label.y = score_panel_y + sz(8)
 
+        # Status bar (under the wave chip). Where it shares a row with the Ultra gauge block or the
+        # score panel, it is centred within the free span so it never runs into either one.
+        status_w = max(sz(240), min(sz(640), int(width * 0.58)))
+        status_h = sz(28)
+        status_y = max(sz(6), wave_y - status_h - sz(10))
+        half = status_w // 2
+        center = width // 2
+        if _spans_overlap(status_y, status_y + status_h, ring_cy - ring_r, ring_cy + ring_r):
+            half = min(half, center - (ring_block_right + min_gap))
+        if _spans_overlap(status_y, status_y + status_h, score_panel_y, score_panel_y + score_panel_h):
+            half = min(half, (score_panel_x - min_gap) - center)
+        status_w = min(status_w, max(sz(220), 2 * half))
+        status_x = (width - status_w) // 2
+        self._frame("status", status_x, status_y, status_w, status_h, max(1, sz(1)), shadow=False)
+        self.status_label.x = status_x + status_w // 2
+        self.status_label.y = status_y + status_h // 2
+        self._status_max_w = float(max(sz(60), status_w - sz(28)))
+        self._status_cache.clear()  # cached widths depend on the font size and the bar width
+
+        # Achievement toasts stack under the score panel, one at a time
+        toast_h = sz(44)
+        toast_y = score_panel_y - sz(8) - toast_h
+        self.toast_view.place(
+            score_panel_x, toast_y, score_panel_w, toast_h, pad=sz(12),
+            title_y=toast_h - sz(18), sub_y=sz(11), edge=edge,
+        )
+
         # Boss bar sits below the status bar and the health panel, whichever is lower.
-        self._layout_boss(min(status_y, panel_y) - sz(8))
+        self._layout_boss(status_y - sz(8))
         if self._boss_active:
             self._refresh_boss()
 
@@ -494,7 +611,7 @@ class HUD:
         self.banner_sub.opacity = int(230 * alpha)
 
     # ------------------------------------------------------------------
-    # Banner and boss bar API
+    # Banner, boss bar, toast and skin API
     # ------------------------------------------------------------------
 
     def show_banner(
@@ -557,8 +674,43 @@ class HUD:
         name_max = bar_w - self.boss_pct_label.content_width - self._sz(14)
         _fit_text(self.boss_name_label, self._boss_name.upper(), name_max)
 
+    def push_toast(self, title: str, subtitle: str = "") -> None:
+        """Queue a toast. Toasts show one at a time, in order, each for TOAST_SECONDS."""
+        self.toasts.push(title, subtitle)
+        self._sync_toast()
+        if callable(self.on_toast):
+            self.on_toast()
+
+    def push_achievement_toasts(self, achievement_ids) -> int:
+        """Queue one toast per newly earned achievement id (the list achievements.evaluate returns).
+
+        Returns how many ids were queued.
+        """
+        count = 0
+        for achievement_id in achievement_ids or ():
+            self.push_toast(achievement_name(achievement_id), TOAST_KICKER)
+            count += 1
+        return count
+
+    def set_skin_name(self, name: str) -> None:
+        """Show the selected skin's name on the skin chip (the chip is re-sized to fit its name)."""
+        self._skin_name = str(name) or DEFAULT_SKIN_NAME
+        self.skin_chip.set_text(self._skin_name)
+        self.layout(self.width, self.height)
+
+    @property
+    def skin_name(self) -> str:
+        return self._skin_name
+
+    def _sync_toast(self) -> None:
+        current = self.toasts.current
+        if current is None:
+            self.toast_view.hide()
+        else:
+            self.toast_view.show(current[0], current[1], self.toasts.queued, self.toasts.alpha())
+
     def tick(self, dt: float) -> None:
-        """Advance banner timing and the boss damage trail by one frame of real time."""
+        """Advance banner timing, the boss damage trail, toasts and the Ultra pulse by one frame."""
         dt = max(0.0, float(dt))
         if self._banner_active:
             self._banner_t += dt
@@ -576,6 +728,10 @@ class HUD:
                 self._boss_trail = self._boss_lag_from + (self._boss_frac - self._boss_lag_from) * eased
             if p > 0.0:
                 self.boss_trail_bar.width = self._boss_bar_w * max(self._boss_trail, self._boss_frac)
+        self.toasts.tick(dt)
+        self._sync_toast()
+        self._pulse_t += dt
+        self.ultra_gauge.animate(self._pulse_t, reduce_motion=_reduce_motion())
 
     # ------------------------------------------------------------------
     # Per-frame update
@@ -679,21 +835,25 @@ class HUD:
         if has_inf:
             self.boost_bar.color = (255, 235, 90)
             _set_text(self.boost_value_label, "INF")
-            self.boost_value_label.color = (255, 245, 120, 255)
+            self._paint(self.boost_value_label, (255, 245, 120, 255))
         else:
             self.boost_bar.color = (255, 155, 50) if getattr(player, "is_boosting", False) else (205, 120, 40)
             _set_text(self.boost_value_label, f"{int(boost_now)}%")
-            self.boost_value_label.color = (255, 210, 130, 255)
+            self._paint(self.boost_value_label, (255, 210, 130, 255))
 
-        # Weapon readout
+        # Weapon chip: name (with pierce), swatch from projectile_art, and the crit chance
         wp = getattr(player, "current_weapon", None)
         if wp:
             pierce_str = f" [P+{wp.pierce}]" if getattr(wp, "pierce", 0) > 0 else ""
             total_crit = min(1.0, max(0.0, getattr(wp, "crit_chance", 0.10) + float(crit_chance_bonus)))
             crit_pct = int(round(total_crit * 100))
-            _set_text(self.weapon_label, f"{wp.name.upper()}{pierce_str}  CRIT {crit_pct}%")
+            self.weapon_chip.set_weapon(f"{wp.name.upper()}{pierce_str}", f"CRIT {crit_pct}%", weapon_swatch(wp))
         else:
-            _set_text(self.weapon_label, "")
+            self.weapon_chip.set_weapon("", "", None)
+
+        # Radial Ultra gauge: charges held out of capacity
+        ultra_cap = int(getattr(player, "ultra_max_charges", config.ULTRA_MAX_CHARGES))
+        self.ultra_gauge.update(int(getattr(player, "ultra_charges", 0)), ultra_cap)
 
         # Wave chip: title and meta line (meta is trimmed to fit the chip)
         _set_text(self.wave_label, f"WAVE {int(state.wave):02d}")
@@ -721,7 +881,7 @@ class HUD:
                 # Gold-orange pulsing as combo rises
                 intensity = min(1.0, (score.combo - 1.0) / (6.0 - 1.0))
                 g = int(200 - 80 * intensity)
-                self.combo_label.color = (255, g, 80, 230)
+                self._paint(self.combo_label, (255, g, 80, 230))
             else:
                 _set_text(self.combo_label, "")
         else:
@@ -729,6 +889,8 @@ class HUD:
             _set_text(self.combo_label, "")
 
     def draw(self) -> None:
+        self._sync_number_plates()
+        self._frame_batch.draw()
         self.batch.draw()
         if self._boss_active:
             self._boss_batch.draw()

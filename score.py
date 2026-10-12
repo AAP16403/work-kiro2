@@ -1,8 +1,16 @@
 """Score tracking, combo system, and high-score persistence."""
 
-import json
 import os
 import time as _time
+
+import config
+from savefile import (
+    HIGH_SCORES_VERSION,
+    board_entries,
+    load_versioned,
+    migrate_high_scores,
+    save_versioned,
+)
 
 # ---------------------------------------------------------------------------
 # Point values per enemy type (base, before combo multiplier)
@@ -44,9 +52,11 @@ MAX_HIGH_SCORES = 5
 class ScoreTracker:
     """Tracks score, combo multiplier, and high scores for a single run."""
 
-    def __init__(self, difficulty: str = "normal"):
+    def __init__(self, difficulty: str = "normal", score_mult: float = 1.0):
         self.score: int = 0
         self.combo: float = 1.0
+        # Run-wide score multiplier from the run's mutators (1.0 for a stock run).
+        self.score_mult: float = float(score_mult)
         self._combo_timer: float = 0.0  # time since last kill
         self.difficulty: str = difficulty
         self.kills: int = 0
@@ -63,7 +73,7 @@ class ScoreTracker:
     def on_enemy_kill(self, behavior: str, multiplier: float = 1.0) -> int:
         """Record an enemy kill.  Returns points awarded."""
         base = KILL_POINTS.get(behavior, 100)
-        points = int(base * self.combo * multiplier)
+        points = int(base * self.combo * multiplier * self.score_mult)
         self.score += points
         self.kills += 1
 
@@ -75,11 +85,11 @@ class ScoreTracker:
 
     def on_wave_clear(self, wave: int) -> int:
         """Award wave-clear bonus.  Returns bonus points."""
-        is_boss = wave % 5 == 0
+        is_boss = wave % config.BOSS_WAVE_EVERY == 0
         bonus = WAVE_CLEAR_BASE + wave * WAVE_CLEAR_PER_WAVE
         if is_boss:
             bonus += BOSS_WAVE_BONUS
-        bonus = int(bonus * self.combo)
+        bonus = int(bonus * self.combo * self.score_mult)
         self.score += bonus
         return bonus
 
@@ -102,25 +112,18 @@ class ScoreTracker:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def load_high_scores() -> dict[str, list[dict]]:
-        """Load high scores from disk.  Returns {difficulty: [{score, wave, date}, ...]}."""
-        try:
-            with open(HIGH_SCORE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                return data
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            pass
-        return {}
+    def load_high_scores() -> dict:
+        """Load high scores from disk.  Returns {difficulty: [{score, wave, date}, ...], "version": N}.
+
+        Never raises: a missing file reads as an empty board, and a corrupt file is renamed to
+        high_scores.json.corrupt-<n> and reads as an empty board.
+        """
+        return load_versioned(HIGH_SCORE_FILE, HIGH_SCORES_VERSION, migrate_high_scores, dict)
 
     @staticmethod
-    def save_high_scores(data: dict[str, list[dict]]) -> None:
-        """Persist high scores to disk."""
-        try:
-            with open(HIGH_SCORE_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except OSError:
-            pass
+    def save_high_scores(data: dict) -> None:
+        """Persist high scores to disk atomically. A failed write leaves the previous file in place."""
+        save_versioned(HIGH_SCORE_FILE, data, HIGH_SCORES_VERSION)
 
     def submit_score(self, wave: int) -> bool:
         """Submit the current run score and place it on the board.
@@ -130,7 +133,7 @@ class ScoreTracker:
         ``last_rank`` and ``last_points_to_next`` for the Game Over screen.
         """
         data = self.load_high_scores()
-        entries = data.get(self.difficulty, [])
+        entries = board_entries(data, self.difficulty)
         prev_best = max((int(e.get("score", 0)) for e in entries), default=0)
 
         entry = {
@@ -164,7 +167,7 @@ class ScoreTracker:
     def get_high_score(self) -> int:
         """Return the current top high score for this difficulty."""
         data = self.load_high_scores()
-        entries = data.get(self.difficulty, [])
+        entries = board_entries(data, self.difficulty)
         if entries:
             return int(entries[0].get("score", 0))
         return 0

@@ -8,16 +8,21 @@ its own random.Random from its name.
 
 Run from the project root:
     .venv\\Scripts\\python.exe tools\\synth_sfx.py
+    .venv\\Scripts\\python.exe tools\\synth_sfx.py --jobs 4        (same bytes, rendered in 4 processes)
+    .venv\\Scripts\\python.exe tools\\synth_sfx.py --out-dir DIR   (write somewhere other than assets/audio)
 
 Prints a table of name, duration (s), peak (0..1) and RMS (0..1) per file.
 """
 
+import argparse
 import math
+import multiprocessing
 import os
 import random
 import struct
 import sys
 import wave
+from concurrent.futures import ProcessPoolExecutor
 
 SR = 22050
 TWO_PI = 2.0 * math.pi
@@ -638,37 +643,316 @@ def _spawn_in(rng):
     return buf
 
 
+# ---- New systems: power-ups, drones, arena events, elites, meta ------------
+
+@sound("ricochet", level=0.66, drive=1.4)
+def _ricochet(rng):
+    buf = []
+    # Metallic ping: a falling tone with an inharmonic partial (about 2.76x) that rings out fast.
+    add_at(buf, tone_env(0.22, sweep(1900, 1150, 0.12), "sine", 0.0008, 0.07), 0.0, 1.0)
+    add_at(buf, tone_env(0.16, sweep(5240, 3170, 0.10), "sine", 0.0008, 0.035), 0.0, 0.35)
+    # Hard tick at the bounce point.
+    add_at(buf, noise_env(0.012, rng, 0.0003, 0.004, hp=4500.0), 0.0, 0.5)
+    return buf
+
+
+@sound("homing_lock", level=0.62, drive=1.2)
+def _homing_lock(rng):
+    buf = []
+    # Two quick square blips a fifth apart: the seeker has locked on.
+    for k, freq in enumerate((1320.0, 1980.0)):
+        add_at(buf, tone_env(0.07, freq, "square", 0.0008, 0.03, lp=5000.0), 0.075 * k,
+               0.6 if k == 0 else 0.8)
+    add_at(buf, tone_env(0.16, 1980.0, "sine", 0.002, 0.07), 0.075, 0.3)
+    return buf
+
+
+@sound("time_slow_on", level=0.70, drive=1.4)
+def _time_slow_on(rng):
+    buf = []
+    # Tape-stop glide: the pitch falls and wobbles as the world winds down.
+    add_at(buf, tone_env(0.60, vib(sweep(960, 150, 0.55), 7.0, 0.02), "tri", 0.005, 0.22,
+                         release=0.08), 0.0, 0.8)
+    add_at(buf, tone_env(0.60, vib(sweep(966, 153, 0.55), 7.0, 0.02), "sine", 0.005, 0.22,
+                         release=0.08), 0.0, 0.5)
+    add_at(buf, tone_env(0.60, sweep(96, 48, 0.55), "sine", 0.01, 0.35, sustain=0.2,
+                         release=0.1), 0.0, 0.6)
+    add_at(buf, noise_env(0.25, rng, 0.005, 0.10, lp=sweep(1400, 200, 0.22)), 0.0, 0.25)
+    return buf
+
+
+@sound("time_slow_off", level=0.62, drive=1.2)
+def _time_slow_off(rng):
+    buf = []
+    # Glide back up to full speed, then a bright ping as normal time resumes.
+    add_at(buf, tone_env(0.40, sweep(180, 880, 0.32), "tri", 0.01, 0.14), 0.0, 0.8)
+    add_at(buf, tone_env(0.40, sweep(186, 900, 0.32), "sine", 0.01, 0.14), 0.0, 0.4)
+    add_at(buf, tone_env(0.10, 1760.0, "sine", 0.001, 0.05), 0.30, 0.45)
+    return buf
+
+
+@sound("magnet", level=0.66, drive=1.3)
+def _magnet(rng):
+    buf = []
+    # Rising field hum that tightens as pickups are drawn in.
+    add_at(buf, tone_env(0.40, sweep(220, 660, 0.36), "saw", 0.02, 0.18,
+                         lp=sweep(700, 2400, 0.36)), 0.0, 0.5)
+    add_at(buf, tone_env(0.40, sweep(330, 990, 0.36), "sine", 0.02, 0.18), 0.0, 0.4)
+    # Air rushing inward.
+    add_at(buf, noise_env(0.36, rng, 0.04, 0.12, hp=sweep(400, 2500, 0.34),
+                          lp=sweep(3000, 6000, 0.34)), 0.0, 0.35)
+    # Clack as the pickup seats.
+    add_at(buf, tone_env(0.05, 1480.0, "tri", 0.001, 0.02), 0.36, 0.5)
+    add_at(buf, noise_env(0.02, rng, 0.0005, 0.006, hp=3000.0), 0.36, 0.4)
+    return buf
+
+
+@sound("drone_spawn", level=0.64, drive=1.4)
+def _drone_spawn(rng):
+    buf = []
+    n = n_samples(0.55)
+    rotor = am(n, 30.0, 0.5)  # rotor flutter
+    env = env_adsr(n, 0.03, 0.4, 0.5, 0.08)
+    add_at(buf, mul(osc(n, sweep(90, 240, 0.5), "saw"), rotor, env), 0.0, 0.6)
+    add_at(buf, mul(lowpass(osc(n, sweep(180, 480, 0.5), "square"), 900.0), rotor, env), 0.0, 0.3)
+    # Chirp as the drone locks on.
+    add_at(buf, tone_env(0.12, sweep(1400, 2200, 0.10), "sine", 0.002, 0.04), 0.46, 0.6)
+    return buf
+
+
+@sound("drone_fire", level=0.56, drive=1.2)
+def _drone_fire(rng):
+    buf = []
+    # Small pew, lighter and higher than the enemy shot.
+    add_at(buf, tone_env(0.09, sweep(1300, 620, 0.08), "sine", 0.0008, 0.025, lp=4000.0), 0.0, 0.9)
+    add_at(buf, tone_env(0.06, sweep(2600, 1200, 0.05), "tri", 0.0005, 0.012), 0.0, 0.3)
+    add_at(buf, noise_env(0.01, rng, 0.0002, 0.003, hp=5000.0), 0.0, 0.3)
+    return buf
+
+
+@sound("event_warn", level=0.68, drive=1.4)
+def _event_warn(rng):
+    buf = []
+    # Two square bleeps: the arena is about to change.
+    for k in range(2):
+        t0 = 0.22 * k
+        add_at(buf, tone_env(0.16, 880.0, "square", 0.002, 0.10, release=0.02, lp=2600.0), t0, 0.7)
+        add_at(buf, tone_env(0.16, 1320.0, "sine", 0.002, 0.10), t0, 0.35)
+    return buf
+
+
+@sound("meteor_impact", level=0.74, drive=2.2)
+def _meteor_impact(rng):
+    buf = []
+    # Deep impact thump with a sub drop and a debris rumble.
+    add_at(buf, tone_env(0.45, sweep(140, 34, 0.40), "sine", 0.001, 0.14), 0.0, 1.0)
+    add_at(buf, noise_env(0.40, rng, 0.001, 0.12, lp=sweep(1600, 140, 0.25)), 0.0, 0.8)
+    # Rock-crack transient, then falling debris clicks.
+    add_at(buf, noise_env(0.03, rng, 0.0003, 0.008, hp=2500.0), 0.0, 0.7)
+    for _ in range(5):
+        t0 = 0.05 + 0.30 * rng.random()
+        add_at(buf, noise_env(0.02, rng, 0.0005, 0.005, hp=1800.0), t0, 0.25)
+    return buf
+
+
+@sound("flare_sweep", level=0.62, drive=1.2)
+def _flare_sweep(rng):
+    buf = []
+    # Bright airy sweep across the arena, brightening as the flare passes.
+    add_at(buf, noise_env(0.55, rng, 0.08, 0.20, hp=sweep(600, 2400, 0.50),
+                          lp=sweep(1200, 7000, 0.45)), 0.0, 0.8)
+    add_at(buf, tone_env(0.50, vib(sweep(1200, 2400, 0.45), 6.0, 0.01), "tri", 0.05, 0.18), 0.0, 0.35)
+    add_at(buf, tone_env(0.08, 2600.0, "sine", 0.002, 0.04), 0.46, 0.25)
+    return buf
+
+
+@sound("nebula_hum", level=0.50, drive=1.0)
+def _nebula_hum(rng):
+    buf = []
+    # Slow low swell: two close sines and a dark breath of filtered noise.
+    n = n_samples(1.8)
+    swell = am(n, 0.9, 0.4)
+    env = env_adsr(n, 0.35, 0.5, 0.8, 0.45)
+    add_at(buf, mul(osc(n, 110.0, "sine"), swell, env), 0.0, 0.6)
+    add_at(buf, mul(osc(n, 165.5, "sine"), swell, env), 0.0, 0.3)
+    add_at(buf, mul(lowpass(white(n, rng), 500.0), swell, env), 0.0, 0.25)
+    return buf
+
+
+@sound("toast", level=0.56, drive=1.0)
+def _toast(rng):
+    buf = []
+    # Soft two-note notification on a bell: E5 then A5.
+    chime(buf, 0.0, midi_hz(76), 0.22, 0.08, 0.7)
+    chime(buf, 0.09, midi_hz(81), 0.30, 0.10, 0.6)
+    return buf
+
+
+@sound("achievement", level=0.72, drive=1.1)
+def _achievement(rng):
+    buf = []
+    # Rising C major run with a bell on each note, then a held chord.
+    for k, midi in enumerate((72, 76, 79, 84)):  # C5 E5 G5 C6
+        chime(buf, 0.06 * k, midi_hz(midi), 0.45, 0.20, 0.55)
+    for midi in (72, 76, 79):
+        synth_note(buf, 0.26, midi_hz(midi), 0.55, 0.40, gain=0.20, kind="tri", fc=3200.0)
+    add_at(buf, noise_env(0.18, rng, 0.002, 0.05, hp=7000.0), 0.22, 0.10)  # sparkle
+    return buf
+
+
+@sound("daily_record", level=0.72, drive=1.2)
+def _daily_record(rng):
+    buf = []
+    # Quick square run that climbs and lands on a held, vibrato note.
+    for k, midi in enumerate((64, 66, 69, 71, 74)):  # E4 F#4 A4 B4 D5
+        synth_note(buf, 0.055 * k, midi_hz(midi), 0.12, 0.08, gain=0.32, kind="square",
+                   fc=2000.0, detune=0.003)
+    add_at(buf, tone_env(0.70, vib(midi_hz(74), 5.5, 0.012), "tri", 0.004, 0.25,
+                         sustain=0.3, release=0.15, lp=3000.0), 0.28, 0.5)
+    return buf
+
+
+@sound("reflect", level=0.64, drive=1.3)
+def _reflect(rng):
+    buf = []
+    # Swoosh that folds in, then a glassy ping as the shot turns back.
+    n = n_samples(0.16)
+    fold = mul(highpass(white(n, rng), 1200.0), env_adsr(n, 0.12, 0.02, 0.0, 0.01))
+    add_at(buf, fold, 0.0, 0.5)
+    add_at(buf, tone_env(0.30, sweep(2400, 1800, 0.18), "sine", 0.002, 0.10), 0.14, 0.9)
+    add_at(buf, tone_env(0.22, 4450.0, "sine", 0.001, 0.05), 0.14, 0.25)
+    return buf
+
+
+@sound("split", level=0.66, drive=1.4)
+def _split(rng):
+    buf = []
+    # Wet squelch that stretches, then two bloops as the body divides.
+    add_at(buf, tone_env(0.24, sweep(260, 520, 0.22), "tri", 0.004, 0.09,
+                         lp=sweep(1200, 2400, 0.20)), 0.0, 0.7)
+    add_at(buf, tone_env(0.24, sweep(266, 528, 0.22), "tri", 0.004, 0.09,
+                         lp=sweep(1200, 2400, 0.20)), 0.0, 0.35)
+    for k, freq in enumerate((700.0, 520.0)):
+        t0 = 0.22 + 0.06 * k
+        add_at(buf, tone_env(0.09, sweep(freq, freq * 0.45, 0.08), "sine", 0.001, 0.03), t0, 0.7)
+        add_at(buf, noise_env(0.02, rng, 0.0003, 0.006, hp=2500.0), t0, 0.3)
+    return buf
+
+
+@sound("rage_warn", level=0.72, drive=1.8)
+def _rage_warn(rng):
+    buf = []
+    # Growling saw under a rising square siren, both pulsing like a snarl.
+    n = n_samples(1.2)
+    growl = am(n, 18.0, 0.45)
+    env = env_adsr(n, 0.03, 0.0, 1.0, 0.12)
+    add_at(buf, mul(lowpass(osc(n, 110.0, "saw"), 700.0), growl, env), 0.0, 0.6)
+    add_at(buf, mul(lowpass(osc(n, sweep(200, 420, 1.2), "square"), 900.0), growl, env), 0.0, 0.45)
+    add_at(buf, mul(lowpass(white(n, rng), 400.0), growl, env), 0.0, 0.2)
+    return buf
+
+
+@sound("victory_fanfare", level=0.74, drive=1.5)
+def _victory_fanfare(rng):
+    buf = []
+    # Brass-like fanfare: a repeated call (C5 x3, E5, G5) landing on a held C6 over a low chord.
+    for t0, midi, dur in ((0.0, 72, 0.22), (0.24, 72, 0.22), (0.48, 72, 0.22),
+                          (0.72, 76, 0.34), (1.10, 79, 0.34), (1.48, 84, 0.70)):
+        synth_note(buf, t0, midi_hz(midi), dur, 0.25, gain=0.42, kind="saw", fc=2200.0, detune=0.006)
+    for midi in (60, 64, 67, 72):  # C major chord under the final note
+        synth_note(buf, 1.48, midi_hz(midi), 0.70, 0.5, gain=0.18, kind="saw", fc=1800.0, detune=0.006)
+    return buf
+
+
+@sound("skin_select", level=0.52, drive=1.0)
+def _skin_select(rng):
+    buf = []
+    # Two soft rising sines with a high shimmer: a new look is applied.
+    add_at(buf, tone_env(0.14, sweep(1046.5, 1318.5, 0.12), "sine", 0.003, 0.05), 0.0, 0.8)
+    add_at(buf, tone_env(0.22, sweep(1568.0, 1975.5, 0.18), "sine", 0.003, 0.08), 0.07, 0.5)
+    add_at(buf, noise_env(0.20, rng, 0.02, 0.06, hp=sweep(5000, 9000, 0.2)), 0.05, 0.12)
+    return buf
+
+
+@sound("mutator_toggle", level=0.56, drive=1.2)
+def _mutator_toggle(rng):
+    buf = []
+    # Switch flip: a hard transient, then a short low thock as the toggle settles.
+    add_at(buf, noise_env(0.02, rng, 0.0002, 0.004, hp=3500.0), 0.0, 0.9)
+    add_at(buf, tone_env(0.09, sweep(420, 260, 0.07), "tri", 0.0008, 0.025), 0.0, 0.8)
+    add_at(buf, tone_env(0.06, 880.0, "square", 0.0005, 0.012, lp=2500.0), 0.05, 0.25)
+    return buf
+
+
+@sound("hangar_move", level=0.46, drive=1.0)
+def _hangar_move(rng):
+    buf = []
+    # Quick filtered slide, like a ship sliding along a rail, with a soft tick.
+    add_at(buf, noise_env(0.14, rng, 0.01, 0.05, hp=900.0, lp=sweep(1800, 3600, 0.12)), 0.0, 0.8)
+    add_at(buf, tone_env(0.10, sweep(700, 980, 0.09), "sine", 0.004, 0.03), 0.0, 0.25)
+    return buf
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
-def render(name, fn, level, drive):
+def render(name, fn, level, drive, out_dir=OUT_DIR):
     """Renders one recipe, writes its WAV, and returns (duration, peak, rms)."""
     rng = random.Random(seed_for(name))
     samples = to_pcm16(finish(fn(rng), level, drive))
-    write_wav(os.path.join(OUT_DIR, "sfx_%s.wav" % name), samples)
+    write_wav(os.path.join(out_dir, "sfx_%s.wav" % name), samples)
     count = len(samples)
     peak = max(abs(s) for s in samples) / float(PCM_FULL)
     rms = math.sqrt(sum(s * s for s in samples) / float(count)) / PCM_FULL
     return count / float(SR), peak, rms
 
 
-def main():
+def render_job(name, out_dir=OUT_DIR):
+    """Renders the registered sound called ``name``. Entry point for --jobs worker processes.
+
+    Only the name and the output directory cross the process boundary. The worker finds the recipe
+    in its own SOUNDS registry, which the spawn start method rebuilds by importing this file.
+    """
+    for sname, fn, level, drive in SOUNDS:
+        if sname == name:
+            return render(sname, fn, level, drive, out_dir)
+    raise KeyError("unknown sound: %s" % name)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Render the PLOUTO sound effects to WAV files.")
+    ap.add_argument("--jobs", type=int, default=1,
+                    help="render sounds in N worker processes; the WAV bytes do not depend on N")
+    ap.add_argument("--out-dir", default=OUT_DIR, help="directory for the WAV files (default: assets/audio)")
+    args = ap.parse_args(argv)
+    if args.jobs < 1:
+        raise SystemExit("--jobs must be at least 1")
     if len(set(name for name, _, _, _ in SOUNDS)) != len(SOUNDS):
         raise SystemExit("duplicate sound name in registry")
-    os.makedirs(OUT_DIR, exist_ok=True)
-    rows = []
-    for name, fn, level, drive in SOUNDS:
+    for name, _fn, level, _drive in SOUNDS:
         if level > MAX_PEAK:
             raise SystemExit("level for %s exceeds %.2f" % (name, MAX_PEAK))
-        dur, peak, rms = render(name, fn, level, drive)
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    names = [name for name, _, _, _ in SOUNDS]
+    if args.jobs == 1:
+        stats = [render_job(name, args.out_dir) for name in names]
+    else:
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=min(args.jobs, len(names)), mp_context=ctx) as pool:
+            futures = [pool.submit(render_job, name, args.out_dir) for name in names]
+            stats = [fut.result() for fut in futures]
+
+    rows = []
+    for name, (dur, peak, rms) in zip(names, stats):
         if peak > MAX_PEAK:
             raise SystemExit("peak for %s is %.3f" % (name, peak))
         rows.append((name, dur, peak, rms))
     print("%-14s %9s %8s %8s" % ("name", "dur_s", "peak", "rms"))
     for name, dur, peak, rms in rows:
         print("%-14s %9.3f %8.3f %8.4f" % (name, dur, peak, rms))
-    print("wrote %d files to %s" % (len(rows), OUT_DIR))
+    print("wrote %d files to %s" % (len(rows), args.out_dir))
     return 0
 
 

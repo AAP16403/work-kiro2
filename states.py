@@ -7,6 +7,8 @@ import pyglet
 
 from config import ENEMY_COLORS, POWERUP_COLORS
 import config
+import daily
+import motion
 from utils import (
     Vec2,
     clamp_to_map,
@@ -19,14 +21,25 @@ from utils import (
 )
 from physics import resolve_circle_obstacles
 from level import spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death, get_difficulty_mods
-from enemy import update_enemy
-from powerup import apply_powerup
+from enemy import Enemy, update_enemy
+from boss_rage import celebrate_boss_death, FANFARE_MIN_GAP
+from parallel import maybe_update_enemies
+from powerup import (
+    apply_powerup, enemy_time_scale, expire_timed_effects, format_timed_powerups_hud,
+    is_rare_powerup, pickup_magnet_mods, powerup_popup_name, timed_active,
+)
+import shot_mods
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
+from drone import drone_bullets
+from projectile_art import flak_detonation, spawn_impact
 from fsm import State
 from hazards import LaserBeam
+from events import begin_wave_event, update_arena_event, end_wave_event, event_banner_suffix, event_status_text
 from player import perform_dash, recharge_dash, format_dash_hud, update_boost, format_boost_hud
+from mutators import combined_score_multiplier, mutator_names, shape_enemy_volley
 from rpg import format_temp_hud, format_perm_hud
+import audio_cues
 
 
 # Render-only randomness (screen shake). Kept off the seeded run RNG so gameplay
@@ -41,7 +54,8 @@ def add_shake(s, amount: float, limit: float | None = None) -> None:
     as ramming. It stops that source from pushing the shake past ``limit``, but it never lowers
     shake that is already higher, so bigger impacts still stack on top.
     """
-    impulse = float(amount) * float(config.SHAKE_SCALE)
+    # Reduced motion (motion.py) turns every impulse into nothing, whatever the Screen Shake level.
+    impulse = float(amount) * float(config.SHAKE_SCALE) * motion.factor()
     if impulse <= 0.0:
         return
     current = float(s.shake)
@@ -74,6 +88,7 @@ class GameStateName(str, Enum):
     MENU = "MenuState"
     SETTINGS = "SettingsState"
     GUIDE = "GuideState"
+    HANGAR = "HangarState"
     PLAYING = "PlayingState"
     PAUSED = "PausedState"
     BOSS_REWARD = "BossRewardState"
@@ -106,10 +121,15 @@ class MenuState(State):
         if action == "start_game":
             self.game._init_game()
             self.game.fsm.set_state(GameStateName.PLAYING)
+        elif action == "daily":
+            self.game._start_daily_run()
+            self.game.fsm.set_state(GameStateName.PLAYING)
         elif action == "guide":
             self.game.fsm.set_state(GameStateName.GUIDE)
         elif action == "settings":
             self.game.fsm.set_state(GameStateName.SETTINGS)
+        elif action == "hangar":
+            self.game.fsm.set_state(GameStateName.HANGAR)
         elif action == "quit":
             self.game._quit_game()
 
@@ -140,7 +160,14 @@ class SettingsState(State):
         self.game.settings_menu.on_mouse_release(x, y, button)
 
     def on_key_press(self, symbol, modifiers):
-        if symbol == pyglet.window.key.ESCAPE:
+        menu = self.game.settings_menu
+        if symbol == pyglet.window.key.ESCAPE and not menu.is_adjusting():
+            self.game.fsm.set_state(GameStateName.MENU)
+            return
+        # Arrow keys move focus, ENTER activates it (see SettingsMenu.on_key_press).
+        action = menu.on_key_press(symbol, modifiers)
+        if action == "back":
+            self.game._persist_audio_settings()
             self.game.fsm.set_state(GameStateName.MENU)
 
     def update(self, dt: float):
@@ -173,6 +200,36 @@ class GuideState(State):
 
     def draw(self):
         self.game.guide_menu.draw()
+
+
+class HangarState(State):
+    """Skins and achievements. The menu is built on the first visit so the rest of the game never imports it eagerly."""
+
+    def enter(self):
+        self.game._reset_input_flags()
+        if self.game.hangar_menu is None:
+            from hangar import HangarMenu
+            self.game.hangar_menu = HangarMenu(self.game.width, self.game.height)
+        self.game.hangar_menu.audio = self.game.audio
+        self.game.hangar_menu.open()
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        action = self.game.hangar_menu.on_mouse_press(x, y, button)
+        if action == "back":
+            self.game.fsm.set_state(GameStateName.MENU)
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.game.hangar_menu.on_mouse_motion(x, y)
+
+    def on_key_press(self, symbol, modifiers):
+        if self.game.hangar_menu.on_key_press(symbol) == "back":
+            self.game.fsm.set_state(GameStateName.MENU)
+
+    def update(self, dt: float):
+        self.game.hangar_menu.update(dt)
+
+    def draw(self):
+        self.game.hangar_menu.draw()
 
 
 class PlayingState(State):
@@ -235,7 +292,7 @@ class PlayingState(State):
     @staticmethod
     def _spawn_cluster_shrapnel(game, s, p, ignore_entity_id: int | None = None) -> None:
         if game.particle_system:
-            game.particle_system.add_flak_burst(p.pos)
+            flak_detonation(game.particle_system, p.pos)
         add_shake(s, 5.0)
         base_dmg = max(1, int(round(p.damage * 0.45)))
         for angle_deg in (0.0, 90.0, 180.0, 270.0):
@@ -314,6 +371,7 @@ class PlayingState(State):
             game._hitstop = max(game._hitstop, 0.12)
             if game.particle_system:
                 game.particle_system.add_boss_death(e.pos, enemy_color)
+            celebrate_boss_death(game)
         else:
             if is_elite or behavior_name in ("tank", "bomber"):
                 game.audio.play("explode", volume=0.8, pitch_jitter=0.05)
@@ -326,8 +384,8 @@ class PlayingState(State):
 
         # Elite volatile affix death explosion
         if getattr(e, "elite_affix", None) == "volatile":
-            v_r = 130.0
-            v_dmg = 45
+            v_r = float(config.ELITE_VOLATILE_BLAST_RADIUS)
+            v_dmg = int(config.ELITE_VOLATILE_BLAST_DAMAGE)
             if game.particle_system:
                 game.particle_system.add_death_explosion(e.pos, (255, 100, 30), "bomber")
             add_shake(s, 14.0)
@@ -341,9 +399,34 @@ class PlayingState(State):
             if dist(game.player.pos, e.pos) <= v_r:
                 game._damage_player(20)
 
+        # Elite splitter affix: ELITE_SPLIT_COUNT copies on a ring around the death spot, each with
+        # ELITE_SPLIT_HP_FRAC of the elite's max HP. Copies have no affix, so a copy never splits again.
+        if getattr(e, "elite_affix", None) == "splitter":
+            count = max(1, int(config.ELITE_SPLIT_COUNT))
+            child_hp = max(1, int(float(e.max_hp) * float(config.ELITE_SPLIT_HP_FRAC)))
+            child_cd = max(0.5, float(getattr(e, "attack_cd", 1.0)))
+            for i in range(count):
+                ang = math.tau * i / count
+                offset = Vec2(math.cos(ang) * 26.0, math.sin(ang) * 26.0)
+                child = Enemy(
+                    pos=Vec2(e.pos.x + offset.x, e.pos.y + offset.y), hp=child_hp, speed=e.speed,
+                    behavior=e.behavior, max_hp=child_hp,
+                )
+                child.attack_cd = child_cd
+                child.ai["attack_mult"] = float(e.ai.get("attack_mult", 1.0))
+                s.enemies.append(child)
+        audio_cues.play_elite_death(game.audio, e)  # plays the split cue for a splitter
+
         spawn_loot_on_enemy_death(s, behavior_name, e.pos, current_weapon=getattr(game.player, "current_weapon", None))
         if getattr(game, 'score', None):
             game.score.on_enemy_kill(behavior_name, multiplier=(float(config.ELITE_SCORE_MULT) if is_elite else 1.0))
+        run = getattr(game, "run_stats", None)
+        if run is not None:
+            run.on_kill(
+                elite=is_elite,
+                boss=behavior_name.startswith("boss_"),
+                combo=float(getattr(getattr(game, 'score', None), 'combo', 1.0)),
+            )
 
     def update(self, dt: float):
         game = self.game
@@ -361,6 +444,13 @@ class PlayingState(State):
         s.time += dt
         if game.player.invincibility_timer > 0:
             game.player.invincibility_timer -= dt
+        # Timed powerups: drop the expired ones, then take the single enemy time scale for this tick.
+        expire_timed_effects(game.player, s.time)
+        slow_on = timed_active(game.player, "time_slow_until", s.time)
+        if getattr(s, "_time_slow_was_on", False) and not slow_on:
+            audio_cues.cue(game.audio, "time_slow_off")
+        s._time_slow_was_on = slow_on
+        enemy_dt = dt * enemy_time_scale(game.player, s.time)
 
         # Boost handling (LSHIFT or RSHIFT)
         k = pyglet.window.key
@@ -381,13 +471,14 @@ class PlayingState(State):
 
         if not s.wave_active and (s.time - s.last_wave_clear) >= game.balance.wave_cooldown:
             spawn_wave(s, Vec2(0.0, 0.0))
+            begin_wave_event(s, game)
             boss_now = next((e for e in s.enemies if enemy_behavior_name(e).startswith("boss_")), None)
             if boss_now is not None:
                 boss_title = enemy_behavior_name(boss_now)[5:].replace("_", " ").upper()
                 game.audio.play("boss_warn", volume=0.9)
                 game.hud.show_banner("BOSS INCOMING", boss_title, color=(255, 120, 120), duration=2.6)
             else:
-                game.hud.show_banner(f"WAVE {int(s.wave):02d}", f"{str(s.difficulty).upper()}  -  {len(s.enemies)} hostiles", duration=2.0)
+                game.hud.show_banner(f"WAVE {int(s.wave):02d}", f"{str(s.difficulty).upper()}  -  {len(s.enemies)} hostiles{event_banner_suffix(s)}", duration=2.0)
 
         # Weapon-style hits this frame. They sum here and reach the shake once, after the
         # hit loops (see the flush before the decay), so many hits in one frame stay bounded.
@@ -412,12 +503,15 @@ class PlayingState(State):
 
         player_radius = game._player_radius()
         for tr in list(getattr(s, "traps", [])):
-            tr.t += dt
-            tr.ttl -= dt
+            tr.t += enemy_dt
+            tr.ttl -= enemy_dt
             if tr.ttl <= 0:
                 s.traps.remove(tr)
                 game.visuals.drop_trap(tr)
                 continue
+            if getattr(tr, "kind", "") == "meteor" and tr.t >= tr.armed_delay and not getattr(tr, "_landed", False):
+                tr._landed = True  # a meteor lands once, when its trap arms
+                audio_cues.cue(game.audio, "meteor_impact")
             if tr.damage > 0 and tr.t >= tr.armed_delay:
                 hit_r = float(tr.radius) + float(player_radius)
                 if dist_sq(tr.pos, game.player.pos) <= hit_r * hit_r:
@@ -426,7 +520,7 @@ class PlayingState(State):
                     game.visuals.drop_trap(tr)
 
         for th in list(getattr(s, "thunders", [])):
-            th.t += dt
+            th.t += enemy_dt
             if th.t >= th.warn and not th.hit_done:
                 hit_r = th.thickness * 0.6 + player_radius * 0.35
                 if point_segment_distance_sq(game.player.pos, th.start, th.end) <= hit_r * hit_r:
@@ -437,6 +531,8 @@ class PlayingState(State):
                 s.thunders.remove(th)
                 game.visuals.drop_thunder(th)
 
+        update_arena_event(s, game, dt)
+
         old_pos = Vec2(game.player.pos.x, game.player.pos.y)
         if game.player.is_dashing:
             game.player.pos += game.player.dash_direction * game.player.dash_speed * dt
@@ -444,7 +540,9 @@ class PlayingState(State):
             if game.player.dash_timer <= 0:
                 game.player.is_dashing = False
         else:
-            if idir.length() > 0:
+            moving = idir.length() > 0
+            desired_vel = Vec2(0.0, 0.0)
+            if moving:
                 nd = idir.normalized()
                 player_speed = game._effective_player_speed()
                 if is_boosting:
@@ -452,7 +550,9 @@ class PlayingState(State):
                     game.particle_system.add_boost_flame(game.player.pos, nd)
                     if getattr(game, "advanced_fx", None):
                         game.advanced_fx.trigger_boost(0.18)
-                game.player.pos = game.player.pos + nd * player_speed * dt
+                desired_vel = nd * player_speed
+            game._move_player(desired_vel, dt)
+            if moving:
                 game.particle_system.add_step_dust(game.player.pos, nd)
 
         # Recharge dash charges
@@ -461,6 +561,7 @@ class PlayingState(State):
             float(getattr(game, "_dash_cd_difficulty", 1.0)),
             float(getattr(game, "_dash_cd_mult", 1.0)),
         )
+        game._tick_shield_regen(dt)
         game.player.pos = clamp_to_map(game.player.pos, config.ROOM_RADIUS * 0.9, s.map_type)
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
             game.player.pos = resolve_circle_obstacles(game.player.pos, player_radius, s.obstacles)
@@ -520,10 +621,27 @@ class PlayingState(State):
             game.player.last_shot = s.time
             game.player.next_shot_time = s.time + weapon_cd
 
+        # Drone companion: orbit, aim and fire. Its bullets join the player's list and hit through the loops below.
+        drone_shot = s.drone.update(dt, s.time, game.player.drone_until, game.player.pos, s.enemies)
+        if drone_shot is not None:
+            d_muzzle, d_aim = drone_shot
+            s.projectiles.extend(drone_bullets(
+                d_muzzle, d_aim, s.time, game._effective_player_damage(), s.rng,
+                crit_chance_bonus=game._effective_crit_chance(),
+                crit_mult_bonus=game._effective_crit_mult(),
+            ))
+            game.particle_system.add_muzzle_flash(d_muzzle, d_aim)
+            audio_cues.cue(game.audio, "drone_fire")
+
+        batched = maybe_update_enemies(s, game, enemy_dt, game.player.pos, player_vel)
         for e in list(s.enemies):
             if e not in s.enemies or e.hp <= 0 or getattr(e, "_is_dead", False):
                 continue
-            update_enemy(e, game.player.pos, s, dt, game, player_vel=player_vel)
+            shots_before = len(s.projectiles)
+            if batched is None or id(e) not in batched:
+                update_enemy(e, game.player.pos, s, enemy_dt, game, player_vel=player_vel)
+            if len(s.projectiles) > shots_before:
+                shape_enemy_volley(s.projectiles, shots_before, getattr(s, "rules", None))  # Bullet Hell; a no-op in stock runs
             behavior_name = enemy_behavior_name(e)
             e._behavior_name = behavior_name
             e._radius = game.balance.enemy_radius(behavior_name)
@@ -578,7 +696,20 @@ class PlayingState(State):
         obstacles = s.obstacles if (config.ENABLE_OBSTACLES and getattr(s, "obstacles", None)) else None
 
         for p in list(s.projectiles):
-            p.update(dt)
+            if p.owner == "player":
+                locked = shot_mods.steer_homing(p, s.enemies, game.player, s.time, dt)
+                if locked is not None and getattr(p, "_homing_lock_id", None) != id(locked):
+                    p._homing_lock_id = id(locked)  # a new target: the lock sound plays once per target
+                    audio_cues.cue(game.audio, "homing_lock")
+            p.update(dt if p.owner == "player" else enemy_dt)
+            if p.owner == "player":
+                ricochet = shot_mods.ricochet_step(p, game.player, s.time, s.map_type, config.ROOM_RADIUS)
+                if ricochet == "bounced":
+                    game.particle_system.add_hit_particles(p.prev_pos, config.POWERUP_COLORS["ricochet"])
+                    audio_cues.cue(game.audio, "ricochet")
+                elif ricochet == "spent":
+                    self._remove_projectile(game, s, p)
+                    continue
             if obstacles:
                 pr = projectile_radius(p)
                 prev = p.prev_pos or p.pos
@@ -623,12 +754,27 @@ class PlayingState(State):
                     if self._segment_hits_circle(psd2, e.pos, p_prev, p.pos, hit_r2):
                         hit_entities.add(id(e))
                         is_crit = getattr(p, "is_crit", False)
+                        if getattr(e, "elite_affix", None) == "reflector" and s.time >= float(e.ai.get("reflect_ready_at", 0.0)):
+                            # Reflector affix: the first player shot in each cooldown window is sent back at the player
+                            # instead of hurting the reflector. A flash and a sound mark the reflection.
+                            e.ai["reflect_ready_at"] = s.time + float(config.ELITE_REFLECT_COOLDOWN)
+                            to_player = game.player.pos - e.pos
+                            aim_len = to_player.length() or 1.0
+                            s.projectiles.append(Projectile(
+                                Vec2(e.pos.x, e.pos.y), to_player / aim_len * float(config.ELITE_REFLECT_SPEED),
+                                int(p.damage), ttl=2.0, owner="enemy", projectile_type="bullet",
+                            ))
+                            if game.particle_system:
+                                game.particle_system.add_shockwave(e.pos, (255, 220, 120), max_radius=34.0, ttl=0.25)
+                            audio_cues.cue(game.audio, "reflect")
+                            self._remove_projectile(game, s, p, detonating_enemy=e)
+                            break
                         PlayingState._damage_enemy(game, s, e, p.damage, is_crit=is_crit)
                         hit_shake += projectile_hit_impulse(p.damage, is_crit)
 
                         behavior_name = getattr(e, "_behavior_name", enemy_behavior_name(e))
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
-                        game.particle_system.add_hit_particles(e.pos, enemy_color)
+                        spawn_impact(game.particle_system, p, e.pos, enemy_color)
 
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e)
@@ -663,15 +809,16 @@ class PlayingState(State):
                     game._damage_player(p.damage)
                     self._remove_projectile(game, s, p)
 
+        magnet_radius_mult, magnet_pull_mult = pickup_magnet_mods(game.player, s.time)
         for pu in list(s.powerups):
             dpu2 = dist_sq(pu.pos, game.player.pos)
             kind = getattr(pu, "kind", "")
-            magnet_r = game.balance.pickup_magnet_radius(kind, game._pickup_magnet_bonus)
+            magnet_r = game.balance.pickup_magnet_radius(kind, game._pickup_magnet_bonus) * magnet_radius_mult
             magnet_r2 = float(magnet_r) * float(magnet_r)
             if 1e-12 < dpu2 < magnet_r2:
                 dpu = math.sqrt(dpu2)
                 pull = (game.player.pos - pu.pos).normalized()
-                pull_speed = game.balance.pickup_pull_speed(magnet_r, dpu)
+                pull_speed = game.balance.pickup_pull_speed(magnet_r, dpu) * magnet_pull_mult
                 pu.pos = pu.pos + pull * pull_speed * dt
                 dpu2 = dist_sq(pu.pos, game.player.pos)
 
@@ -679,12 +826,14 @@ class PlayingState(State):
             if dpu2 < float(pickup_r) * float(pickup_r):
                 color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
                 game.particle_system.add_powerup_collection(pu.pos, color)
-                rare = kind in ("ultra", "weapon", "vortex", "laser")
-                game.audio.play("pickup_rare" if rare else "pickup", volume=0.7, pitch_jitter=0.03)
+                rare = is_rare_powerup(kind)
+                audio_cues.play_pickup(game.audio, kind, rare)
+                if kind == "drone":
+                    audio_cues.cue(game.audio, "drone_spawn")
                 if rare:
                     game.particle_system.add_pickup_ring(pu.pos, color)
                 if game.popups:
-                    game.popups.spawn(pu.pos, kind.upper(), color=color)
+                    game.popups.spawn(pu.pos, powerup_popup_name(kind), color=color)
                 apply_powerup(game.player, pu, s.time)
                 s.powerups.remove(pu)
                 game.visuals.drop_powerup(pu)
@@ -703,11 +852,14 @@ class PlayingState(State):
         if s.wave_active and not s.enemies:
             cleared_wave = int(s.wave)
             s.wave_active = False
+            end_wave_event(s, game)
             s.last_wave_clear = s.time
             s.wave += 1
             game._advance_temp_rewards()
-            game.audio.play("wave_clear", volume=0.8)
-            if cleared_wave % 5 != 0:
+            # A boss kill on this same frame already played the victory fanfare; the chirp is skipped then.
+            if getattr(game, "_fanfare_stamp", None) != s.time:
+                game.audio.play("wave_clear", volume=0.8, min_gap=FANFARE_MIN_GAP)
+            if cleared_wave % config.BOSS_WAVE_EVERY != 0:
                 game.hud.show_banner(f"WAVE {cleared_wave:02d} CLEARED", "Next wave incoming", color=(120, 240, 170), duration=2.0)
             new_segment = (s.wave - 1) // 5
             if config.ENABLE_OBSTACLES and new_segment != getattr(s, "layout_segment", 0):
@@ -718,11 +870,14 @@ class PlayingState(State):
                 game.player.current_weapon = upgrade
             maybe_spawn_powerup(s, Vec2(0.0, 0.0))
 
-            if cleared_wave % 5 == 0:
+            if cleared_wave % config.BOSS_WAVE_EVERY == 0:
                 game._roll_boss_rewards()
                 game.fsm.set_state(GameStateName.BOSS_REWARD)
             if getattr(game, 'score', None):
                 game.score.on_wave_clear(cleared_wave)
+            run = getattr(game, "run_stats", None)
+            if run is not None:
+                run.on_wave_clear(cleared_wave)
 
         if hit_shake > 0.0:
             add_shake(s, min(float(config.SHAKE_HIT_FRAME_MAX), hit_shake), limit=float(config.SHAKE_HIT_CEILING))
@@ -750,7 +905,7 @@ class PlayingState(State):
             game.room.update(dt)
 
         for lb in list(getattr(s, "lasers", [])):
-            lb.t += dt
+            lb.t += (enemy_dt if lb.owner == "enemy" else dt)
             if lb.owner == "enemy" and lb.t >= lb.warn and not lb.hit_done:
                 hit_r = lb.thickness * 0.55 + player_radius * 0.35
                 if point_segment_distance_sq(game.player.pos, lb.start, lb.end) <= hit_r * hit_r:
@@ -771,7 +926,7 @@ class PlayingState(State):
 
         s = game.state
         shake = Vec2(0.0, 0.0)
-        if s.shake > 0:
+        if s.shake > 0 and motion.factor() > 0.0:
             amplitude = min(float(s.shake), float(config.SHAKE_CAP))
             shake = Vec2(_SHAKE_RNG.uniform(-1, 1), _SHAKE_RNG.uniform(-1, 1)) * amplitude
 
@@ -784,6 +939,7 @@ class PlayingState(State):
 
         aim_dir = (iso_to_world(game.mouse_xy) - game.player.pos).normalized()
         game.visuals.sync_player(game.player, shake, t=s.time, aim_dir=aim_dir)
+        game.visuals.sync_drone(s.drone, shake, t=s.time)
 
         for e in game.state.enemies:
             game.visuals.ensure_enemy(e)
@@ -809,6 +965,9 @@ class PlayingState(State):
             game.visuals.ensure_thunder(th)
             game.visuals.sync_thunder(th, shake)
 
+        if getattr(game.state, "arena_event", None) is not None:
+            game.visuals.sync_arena_event(game.state.arena_event, shake)
+
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:
@@ -820,6 +979,9 @@ class PlayingState(State):
         laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
         vortex_left = max(0.0, game.player.vortex_until - game.state.time)
         vortex_txt = f"Vortex {vortex_left:.0f}s" if vortex_left > 0 else ""
+        drone_left = max(0.0, game.player.drone_until - game.state.time)
+        drone_txt = f"Drone {drone_left:.0f}s" if drone_left > 0 else ""
+        timed_txt = format_timed_powerups_hud(game.player, game.state.time)
         ultra_charges = int(getattr(game.player, "ultra_charges", 0))
         ultra_cd = max(0.0, float(getattr(game.player, "ultra_cd_until", 0.0)) - game.state.time)
         ultra_txt = ""
@@ -850,12 +1012,15 @@ class PlayingState(State):
             (1, ultra_txt),
             (2, laser_txt),
             (2, vortex_txt),
+            (2, drone_txt),
+            (2, timed_txt),
             (3, temp_txt),
             (4, dash_txt),
             (5, boost_txt),
             (6, perm_txt),
+            (3, event_status_text(s)),
             # Auto-fire is a mid-fight state the player needs to read, so it outlasts the dash, boost and
-            # permanent-reward text. Only boss, ultra, laser, vortex and temp rewards outrank it.
+            # permanent-reward text. Only boss, ultra, laser, vortex, timed powerups and temp rewards outrank it.
             (3, auto_txt),
         ]
 
@@ -887,6 +1052,7 @@ class PausedState(State):
         if action == "resume":
             self.game.fsm.set_state(GameStateName.PLAYING)
         elif action == "quit_to_menu":
+            self.game._finish_meta_run()
             self.game._return_to_menu()
             self.game.fsm.set_state(GameStateName.MENU)
 
@@ -941,6 +1107,12 @@ _GAME_OVER_KEYS = _GAME_OVER_RETRY_KEYS + _GAME_OVER_MENU_KEYS
 class GameOverState(State):
     """Run-over screen. Input unlocks when the staged reveal ends."""
 
+    _armed_at = float("inf")  # locked until enter() starts the reveal clock
+
+    def accepts_input(self) -> bool:
+        """True once the staged reveal has ended; clicks and keys are ignored before that."""
+        return self._input_armed()
+
     def enter(self):
         game = self.game
         wave = int(game.state.wave)
@@ -951,7 +1123,15 @@ class GameOverState(State):
         if score_obj:
             is_new_high = score_obj.submit_score(wave)
             high_score = score_obj.get_high_score()
+        game._finish_meta_run()  # saves the run's meta progress once, at the moment it ends
         game.game_over_menu.set_results(wave, final_score, high_score, is_new_high)
+        # A daily run only ever touches its own date's record in progress.json.
+        daily_result = None
+        if game.daily_date:
+            daily_result = daily.settle_daily_run(game.daily_date, final_score, wave, path=game.progress_path)
+            if daily_result is not None and daily_result.new_best:
+                audio_cues.cue(game.audio, "daily_record")
+        game.game_over_menu.set_daily(daily_result)
         game.game_over_menu.set_run_stats(
             survived=float(game.state.time),
             kills=int(getattr(score_obj, "kills", 0)),
@@ -960,6 +1140,8 @@ class GameOverState(State):
             points_to_next=getattr(score_obj, "last_points_to_next", None),
             is_new_high=is_new_high,
         )
+        run_mutators = tuple(getattr(game, "run_mutators", ()))
+        game.game_over_menu.set_mutators(mutator_names(run_mutators), combined_score_multiplier(run_mutators))
         # One instance serves every run, so the reveal clock and the input lock restart on each entry.
         self._t0 = float(game._render_time)
         self._armed_at = self._t0 + float(config.GAME_OVER_REVEAL_S)

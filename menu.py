@@ -8,21 +8,23 @@ import random
 import pyglet
 from pyglet import shapes
 import config
+import motion
 from config import MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
+from drone import DRONE_DURATION, DRONE_FIRE_INTERVAL, DRONE_RANGE
 from fonts import register_ui_fonts
+import guide_info
+import title_fx
+import ui_theme
+from ui_theme import FONT_HEAD as UI_FONT_HEAD, FONT_BODY as UI_FONT_BODY, FONT_META as UI_FONT_META
+from mutator_chips import MutatorChipRow
+from mutators import format_score_mult
 
 register_ui_fonts()
 
-UI_FONT_HEAD = "Orbitron"
-UI_FONT_BODY = "Rajdhani"
-UI_FONT_META = "Rajdhani"
-
 
 def _ui_scale(width: int, height: int) -> float:
-    """Responsive UI scale factor based on window size."""
-    base_w, base_h = 980.0, 620.0
-    s = min(max(1.0, float(width)) / base_w, max(1.0, float(height)) / base_h)
-    return max(0.85, min(1.85, s))
+    """Responsive UI scale factor based on window size (see ui_theme.ui_scale)."""
+    return ui_theme.ui_scale(width, height)
 
 
 def _sync_label_style_if_ready(label, font_name: str, font_size: int) -> None:
@@ -251,9 +253,26 @@ class MenuSlider:
 
 
 class Menu:
-    """Main menu screen."""
-    
-    def __init__(self, width: int, height: int):
+    """Title screen: shimmering wordmark, tagline, six buttons, a row of run-mutator chips and a row of key hints.
+
+    The button order and the action strings returned by on_mouse_press are part of the
+    game flow (states.MenuState) and must not change.
+
+    ``mutator_ids`` is the saved run-mutator selection shown as chips under the buttons.
+    ``on_mutator_toggle(mutator_id)`` is called when a chip is clicked; the owner saves the change
+    and pushes the new selection back with ``set_mutator_selection``.
+    """
+
+    HINTS = (
+        ("WASD", "move"),
+        ("SPACE", "dash"),
+        ("SHIFT", "boost"),
+        ("LMB", "auto-fire"),
+        ("RMB", "ultra"),
+        ("ESC", "pause"),
+    )
+
+    def __init__(self, width: int, height: int, mutator_ids=(), on_mutator_toggle=None):
         self.screen_width = width
         self.screen_height = height
         self.batch = pyglet.graphics.Batch()
@@ -262,9 +281,13 @@ class Menu:
         self._button_base_positions: list[tuple[float, float]] = []
         self._orbs: list[tuple[shapes.Circle, float, float, float]] = []
 
-        self._bg_a = shapes.Rectangle(0, 0, width, height, color=(9, 16, 26), batch=self.batch)
-        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
+        # Backdrop group draws first, then the starfield, then the default group with orbs and buttons.
+        backdrop = pyglet.graphics.Group(order=-2)
+        self._bg_a = shapes.Rectangle(0, 0, width, height, color=ui_theme.BACKGROUND, batch=self.batch, group=backdrop)
+        self._bg_b = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch, group=backdrop)
         self._bg_b.opacity = 148
+        self._stars = title_fx.Starfield(self.batch, width, height)
+        self._horizon = title_fx.Horizon(self.batch, width, 0.0)
 
         count = max(10, min(22, int((width * height) / 90_000)))
         for _ in range(count):
@@ -279,36 +302,35 @@ class Menu:
             phase = random.uniform(0, math.tau)
             self._orbs.append((orb, vx, vy, phase))
 
-        # Panel backing for buttons.
-        self._panel_border = shapes.Rectangle(0, 0, 1, 1, color=(155, 205, 255), batch=self.batch)
-        self._panel_border.opacity = 48
-        self._panel = shapes.Rectangle(0, 0, 1, 1, color=(10, 20, 34), batch=self.batch)
-        self._panel.opacity = 196
-        self._panel_shine = shapes.Rectangle(0, 0, 1, 1, color=(255, 255, 255), batch=self.batch)
-        self._panel_shine.opacity = 16
+        # Backing card for the buttons (edge, body, shine), placed in resize().
+        self._panel = ui_theme.draw_panel(self.batch, 0, 0, 1, 1)
 
         self.buttons: list[MenuButton] = []
         self.buttons.append(MenuButton(0, 0, 160, 50, "Start Game", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)))
+        self.buttons.append(MenuButton(0, 0, 160, 50, "Daily Run", lambda: None, color=(214, 150, 58), hover_color=(250, 190, 92)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Guide", lambda: None, color=(120, 95, 220), hover_color=(162, 136, 255)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Settings", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)))
+        self.buttons.append(MenuButton(0, 0, 160, 50, "Hangar", lambda: None, color=(70, 165, 150), hover_color=(80, 220, 160)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Quit", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)))
 
         self.title = pyglet.text.Label(
             "P L O U T O",
-            font_name=UI_FONT_HEAD,
-            font_size=32,
+            font_name=ui_theme.font_name("display"),
+            font_size=ui_theme.font_size("display", 1.0),
             x=width // 2,
             y=height - 80,
             anchor_x="center",
             anchor_y="center",
-            color=(224, 236, 255, 255),
+            color=(*ui_theme.ACCENT, 255),
             batch=self.batch,
         )
+        # Per-letter colour sweep; the wordmark keeps its own colour when motion is reduced.
+        self._wordmark = title_fx.ShimmerText(self.title)
 
         self.subtitle = pyglet.text.Label(
             "Stellar Survival Protocol",
-            font_name=UI_FONT_META,
-            font_size=12,
+            font_name=ui_theme.font_name("tagline"),
+            font_size=ui_theme.font_size("tagline", 1.0),
             x=width // 2,
             y=height - 120,
             anchor_x="center",
@@ -316,51 +338,63 @@ class Menu:
             width=max(320, width - 64),
             multiline=True,
             align="center",
-            color=(166, 184, 202, 255),
+            color=(*ui_theme.MUTED, 255),
             batch=self.batch,
         )
 
-        self.footer = pyglet.text.Label(
-            "WASD move  |  LMB auto-fire  |  SPACE dash  |  RMB ultra  |  SHIFT boost  |  ESC pause",
-            font_name=UI_FONT_META,
-            font_size=12,
-            x=width // 2,
-            y=16,
-            anchor_x="center",
-            anchor_y="bottom",
-            color=(150, 165, 185, 220),
-            batch=self.batch,
-        )
-
+        self._hint_parts: list = []
         for btn in self.buttons:
             btn.ensure(self.batch)
+
+        self.mutator_row = MutatorChipRow(
+            self.batch,
+            selected=mutator_ids,
+            on_toggle=self._on_mutator_chip,
+            font_name=UI_FONT_META,
+            style_label=_sync_label_style_if_ready,
+        )
+        self._on_mutator_toggle = on_mutator_toggle
         self.resize(width, height)
 
+    def set_mutator_selection(self, mutator_ids) -> None:
+        """Show the saved run-mutator selection on the chips."""
+        self.mutator_row.set_selected(mutator_ids)
+
+    def _on_mutator_chip(self, mutator_id: str) -> None:
+        if self._on_mutator_toggle is not None:
+            self._on_mutator_toggle(mutator_id)
+
     def update(self, dt: float):
+        dt = motion.anim_dt(dt)  # animation only: reduced motion stops the orbs, the bob and the wave
         self._t += dt
+        reduced = ui_theme.reduce_motion()
         w = self.screen_width
         h = self.screen_height
-        for orb, vx, vy, phase in self._orbs:
-            orb.x += vx * dt
-            orb.y += vy * dt
-            if orb.x < -60:
-                orb.x = w + 60
-            elif orb.x > w + 60:
-                orb.x = -60
-            if orb.y < -60:
-                orb.y = h + 60
-            elif orb.y > h + 60:
-                orb.y = -60
-            orb.opacity = int(14 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.7 + phase)))
+        if not reduced:
+            for orb, vx, vy, phase in self._orbs:
+                orb.x += vx * dt
+                orb.y += vy * dt
+                if orb.x < -60:
+                    orb.x = w + 60
+                elif orb.x > w + 60:
+                    orb.x = -60
+                if orb.y < -60:
+                    orb.y = h + 60
+                elif orb.y > h + 60:
+                    orb.y = -60
+                orb.opacity = int(14 + 18 * (0.5 + 0.5 * math.sin(self._t * 0.7 + phase)))
+        self._stars.update(dt, reduced)
+        self._wordmark.update(self._t, reduced)
 
-        # Subtle, continuous menu motion to keep the screen feeling alive.
-        self.title.y = int(self._title_base_y + math.sin(self._t * 1.2) * 6.0)
-        self._panel_shine.opacity = int(10 + 16 * (0.5 + 0.5 * math.sin(self._t * 1.45)))
+        # Subtle, continuous menu motion keeps the screen feeling alive. Reduced motion holds it still
+        # (motion.factor() is 0 then, so the bob, the sway and the shine stop).
+        self.title.y = int(self._title_base_y + math.sin(self._t * 1.2) * 6.0 * motion.factor())
+        self._panel[2].opacity = int(10 + 16 * (0.5 + 0.5 * math.sin(self._t * 1.45)))
         for i, btn in enumerate(self.buttons):
             if i >= len(self._button_base_positions):
                 continue
             base_x, base_y = self._button_base_positions[i]
-            wave = math.sin(self._t * 2.15 + i * 0.58)
+            wave = math.sin(self._t * 2.15 + i * 0.58) * motion.factor()
             btn.x = base_x + int(wave * 4.0)
             btn.y = base_y + int(wave * 2.0)
             btn.sync()
@@ -373,83 +407,119 @@ class Menu:
         scale = _ui_scale(width, height)
 
         button_w = int(230 * scale)
-        button_h = int(62 * scale)
-        gap = int(18 * scale)
-        font = max(12, int(18 * scale))
+        # Six stacked buttons. The buttons and gaps are sized so the mutator chip row and the key hints both fit
+        # below the panel at 980x620 without touching it or each other.
+        button_h = int(48 * scale)
+        gap = int(10 * scale)
+        font = ui_theme.font_size("button", scale)
         for btn in self.buttons:
             btn.width = button_w
             btn.height = button_h
             btn.font_size = font
 
         total_h = len(self.buttons) * button_h + (len(self.buttons) - 1) * gap
-        start_y = cy + total_h // 2 - button_h
+        # The stack sits a little below centre so the tagline clears the backing card. Its top edge
+        # never rises into the subtitle band (six buttons need this at 980x620).
+        stack_cy = cy - int(22 * scale)
+        stack_top = min(stack_cy + total_h // 2, height - int(147 * scale))
+        start_y = stack_top - button_h
         for i, btn in enumerate(self.buttons):
             btn.x = cx - button_w // 2
             btn.y = start_y - i * (button_h + gap)
             btn.sync()
         self._button_base_positions = [(btn.x, btn.y) for btn in self.buttons]
 
-        # Panel size wraps buttons with padding.
+        # Panel size wraps buttons with padding. The top pad is kept short so the panel edge stays below the title's sway.
         pad_x = int(70 * scale)
-        pad_y = int(55 * scale)
+        pad_y = int(20 * scale)
         panel_w = button_w + pad_x * 2
         panel_h = total_h + pad_y * 2
         panel_x = cx - panel_w // 2
-        panel_y = cy - panel_h // 2 - int(10 * scale)
-        self._panel_border.x = panel_x - 3
-        self._panel_border.y = panel_y - 3
-        self._panel_border.width = panel_w + 6
-        self._panel_border.height = panel_h + 6
-        self._panel.x = panel_x
-        self._panel.y = panel_y
-        self._panel.width = panel_w
-        self._panel.height = panel_h
-        self._panel_shine.x = panel_x + 4
-        self._panel_shine.y = panel_y + panel_h - max(8, int(22 * scale))
-        self._panel_shine.width = panel_w - 8
-        self._panel_shine.height = max(6, int(16 * scale))
+        panel_y = stack_top - total_h - pad_y
+        ui_theme.place_panel(self._panel, panel_x, panel_y, panel_w, panel_h, border_pad=3)
+        self.mutator_row.layout(cx, panel_y - int(8 * scale), scale)
 
         self.title.x = cx
-        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(22, int(38 * scale)))
-        self.title.y = height - int(85 * scale)
+        _sync_label_style_if_ready(self.title, ui_theme.font_name("display"), ui_theme.font_size("display", scale))
+        self.title.y = height - int(75 * scale)  # raised for the six-button stack; the bob adds up to 6px
         self._title_base_y = self.title.y
         self.subtitle.x = cx
-        _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
-        self.subtitle.y = height - int(130 * scale)
+        _sync_label_style_if_ready(self.subtitle, ui_theme.font_name("tagline"), ui_theme.font_size("tagline", scale))
+        self.subtitle.y = height - int(122 * scale)
         self.subtitle.width = max(320, width - 64)
-        self.footer.x = cx
-        self.footer.y = int(16 * scale)
-        _sync_label_style_if_ready(self.footer, UI_FONT_META, max(11, int(12 * min(scale, 1.25))))
+        self._layout_hints(cx, scale)
 
         self._bg_a.width = width
         self._bg_a.height = height
         self._bg_b.width = width
         self._bg_b.height = height
-    
+        self._stars.resize(width, height)
+        self._horizon.place(width, int(height * 0.16))
+
+    def _layout_hints(self, cx: int, scale: float) -> None:
+        """Rebuild the key-hint row: a keycap chip followed by its action, centred at cx."""
+        for obj in self._hint_parts:
+            obj.delete()
+        self._hint_parts = []
+        key_gap = ui_theme.space("xs", scale)
+        item_gap = ui_theme.space("lg", scale)
+        items = []
+        for key, action in self.HINTS:
+            key_w = ui_theme.chip_width(key, "caption", scale)
+            action_w = ui_theme.text_width(action, "caption", scale)
+            items.append((key, action, key_w, action_w))
+        total = sum(kw + key_gap + aw for _, _, kw, aw in items) + item_gap * (len(items) - 1)
+        x = cx - total / 2.0
+        y = int(10 * scale)  # the mutator chip row sits above this row (see resize)
+        mid_y = y + ui_theme.chip_height(scale) / 2.0
+        for key, action, key_w, action_w in items:
+            self._hint_parts.extend(ui_theme.draw_chip(self.batch, x, y, key, role="caption", scale=scale))
+            self._hint_parts.append(pyglet.text.Label(
+                action,
+                font_name=ui_theme.font_name("caption"),
+                font_size=ui_theme.font_size("caption", scale),
+                x=x + key_w + key_gap,
+                y=mid_y,
+                anchor_x="left",
+                anchor_y="center",
+                color=(*ui_theme.MUTED, 255),
+                batch=self.batch,
+            ))
+            x += key_w + key_gap + action_w + item_gap
+
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
         for button in self.buttons:
             button.is_hovered = button.contains_point(x, y)
             button.sync()
-    
+        self.mutator_row.on_mouse_motion(x, y)
+
     def on_mouse_press(self, x: float, y: float, button: int) -> str | None:
         """Handle mouse clicks. Returns action string or None."""
         if button != pyglet.window.mouse.LEFT:
             return None
-        
+
+        # Mutator chips toggle a run option; they never return an action.
+        if self.mutator_row.on_mouse_press(x, y):
+            return None
+
         for btn in self.buttons:
             if btn.contains_point(x, y):
                 btn.callback()
                 if btn.text == "Start Game":
                     return "start_game"
+                elif btn.text == "Daily Run":
+                    return "daily"
                 elif btn.text == "Guide":
                     return "guide"
                 elif btn.text == "Settings":
                     return "settings"
+                elif btn.text == "Hangar":
+                    return "hangar"
                 elif btn.text == "Quit":
                     return "quit"
         return None
-    
+
     def draw(self):
         """Draw the menu."""
         self.batch.draw()
@@ -472,6 +542,9 @@ class SettingsMenu:
         sfx_volume: float = 0.8,
         reduced_shake: bool = False,
         shake_level: str | None = None,
+        reduced_motion: bool = False,
+        colorblind_palette: bool = False,
+        high_contrast_hud: bool = False,
     ):
         self.screen_width = width
         self.screen_height = height
@@ -522,6 +595,12 @@ class SettingsMenu:
         if shake_level not in config.SHAKE_LEVELS:
             shake_level = "reduced" if reduced_shake else "full"
         self.shake_level = str(shake_level)
+        # Accessibility options (Settings > Accessibility). The game persists them through access_prefs.
+        self.reduced_motion = bool(reduced_motion)
+        self.colorblind_palette = bool(colorblind_palette)
+        self.high_contrast_hud = bool(high_contrast_hud)
+        self._focus = None  # control with keyboard focus; None until an arrow key is pressed
+        self._grab = None  # slider that Left/Right adjust after ENTER; ENTER or ESC releases it
         self.window_size_idx = 0
         self.window_sizes, self.window_size_names = self._build_window_size_options(display_size)
         current_size = (int(width), int(height))
@@ -682,6 +761,23 @@ class SettingsMenu:
         self.shake_button = MenuButton(0, 0, 210, 50, "", self._cycle_shake_level, color=(82, 122, 180), hover_color=(112, 156, 220))
         self._refresh_shake_button_text()
 
+        # Accessibility toggles. Each one reports only its own key, so the owner never has to re-read the window size.
+        self.access_label = pyglet.text.Label(
+            "Accessibility",
+            font_name=UI_FONT_BODY,
+            font_size=16,
+            x=0,
+            y=0,
+            anchor_x="left",
+            anchor_y="center",
+            color=(255, 255, 255, 255),
+            batch=self.batch,
+        )
+        self.motion_button = MenuButton(0, 0, 150, 42, "", self._toggle_reduced_motion, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self.contrast_button = MenuButton(0, 0, 150, 42, "", self._toggle_high_contrast, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self.colorblind_button = MenuButton(0, 0, 150, 42, "", self._toggle_colorblind, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self._refresh_access_button_texts()
+
         self.map_label = pyglet.text.Label(
             "Arena Shape",
             font_name=UI_FONT_BODY,
@@ -722,10 +818,15 @@ class SettingsMenu:
         self._selected_map_highlight.opacity = 60
 
 
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button] + self._access_buttons():
             btn.ensure(self.batch)
         for slider in self._all_sliders():
             slider.ensure(self.batch)
+
+        # Keyboard focus ring: four thin edges, hidden until focus exists. Created last so it draws on top.
+        self._focus_ring = [shapes.Rectangle(0, 0, 1, 1, color=(255, 214, 96), batch=self.batch) for _ in range(4)]
+        for edge in self._focus_ring:
+            edge.opacity = 0
 
         self.resize(width, height)
 
@@ -806,6 +907,7 @@ class SettingsMenu:
         return f"{r:.2f}:1"
 
     def update(self, dt: float):
+        dt = motion.anim_dt(dt)  # animation only: reduced motion stops the orb drift and the pulse
         self._t += dt
         w = self.screen_width
         h = self.screen_height
@@ -965,6 +1067,27 @@ class SettingsMenu:
             btn.y = curr_y - btn_h - r * (btn_h + 10)
             btn.sync()
             
+        # --- Section 4: Accessibility (Right Column, under the window sizes) ---
+        # One heading and one row of three toggles. With five window-size rows (4K or no display info)
+        # the row still ends above the footer's Back button at 980x620.
+        grid_bottom = curr_y - btn_h - (rows - 1) * (btn_h + 10)
+        access_y = grid_bottom - int(18 * scale)
+        _sync_label_style_if_ready(self.access_label, UI_FONT_BODY, max(12, int(15 * scale)))
+        self.access_label.x = col2_x
+        self.access_label.y = access_y
+        access_h = int(btn_h * 0.86)  # a little shorter than the display buttons, so the row keeps clear of Back
+        access_row_y = access_y - int(16 * scale) - access_h
+        access_gap = 10
+        access_w = (col_width - access_gap * 2) // 3
+        access_font = max(11, int(13 * scale))
+        for i, btn in enumerate(self._access_buttons()):
+            btn.width = access_w
+            btn.height = access_h
+            btn.font_size = access_font
+            btn.x = col2_x + i * (access_w + access_gap)
+            btn.y = access_row_y
+            btn.sync()
+
         # --- Footer ---
         self.back_button.width = int(180 * scale)
         self.back_button.height = int(50 * scale)
@@ -1101,7 +1224,7 @@ class SettingsMenu:
 
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button] + self._access_buttons():
             btn.is_hovered = btn.contains_point(x, y)
             btn.sync()
 
@@ -1126,7 +1249,11 @@ class SettingsMenu:
         if self.shake_button.contains_point(x, y):
             self.shake_button.callback()
             return None
-        
+        for btn in self._access_buttons():
+            if btn.contains_point(x, y):
+                btn.callback()
+                return None
+
         for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons:
             if btn.contains_point(x, y):
                 btn.callback()
@@ -1152,6 +1279,163 @@ class SettingsMenu:
             # would also push the menu's last-chosen window size and could undo a manual resize.
             self.on_save({"arena_margin": self.arena_margin})
 
+    # ----- Accessibility toggles -----------------------------------------
+
+    def _access_buttons(self) -> list:
+        return [self.motion_button, self.contrast_button, self.colorblind_button]
+
+    def _refresh_access_button_texts(self) -> None:
+        # Short value-first labels: three toggles share one 126 px row at 980x620.
+        self.motion_button.text = f"Motion: {'Reduced' if self.reduced_motion else 'Full'}"
+        self.contrast_button.text = f"Contrast: {'High' if self.high_contrast_hud else 'Normal'}"
+        self.colorblind_button.text = f"Colorblind: {'On' if self.colorblind_palette else 'Off'}"
+        for btn in self._access_buttons():
+            btn.sync()
+
+    def _toggle_reduced_motion(self):
+        self.reduced_motion = not self.reduced_motion
+        self._refresh_access_button_texts()
+        self.on_save({"reduced_motion": self.reduced_motion})
+
+    def _toggle_high_contrast(self):
+        self.high_contrast_hud = not self.high_contrast_hud
+        self._refresh_access_button_texts()
+        self.on_save({"high_contrast_hud": self.high_contrast_hud})
+
+    def _toggle_colorblind(self):
+        self.colorblind_palette = not self.colorblind_palette
+        self._refresh_access_button_texts()
+        self.on_save({"colorblind_palette": self.colorblind_palette})
+
+    def set_accessibility(self, values: dict) -> None:
+        """Mirror Accessibility values the game has applied. Keys that are not named keep their value."""
+        if "reduced_motion" in values:
+            self.reduced_motion = bool(values["reduced_motion"])
+        if "colorblind_palette" in values:
+            self.colorblind_palette = bool(values["colorblind_palette"])
+        if "high_contrast_hud" in values:
+            self.high_contrast_hud = bool(values["high_contrast_hud"])
+        self._refresh_access_button_texts()
+
+    # ----- Keyboard navigation -------------------------------------------
+    # Arrow keys move a focus ring between controls and ENTER activates the focused one. A focused
+    # slider is "grabbed" by ENTER: Left and Right then change its value, and ENTER or ESC lets go.
+    # Mouse handling is unchanged. The ring only appears once a key has been pressed.
+
+    def _focus_items(self) -> list:
+        """Controls that keyboard focus can reach, in reading order (top-left first)."""
+        return (
+            list(self.difficulty_buttons) + list(self.map_buttons) + [self.fx_button, self.arena_slider]
+            + [self.music_slider, self.sfx_slider] + list(self.size_buttons)
+            + [self.shake_button] + self._access_buttons() + [self.back_button]
+        )
+
+    @staticmethod
+    def _focus_box(item) -> tuple[float, float, float, float]:
+        """(x, y, width, height) of a focusable control. A slider's box also covers the label above its track."""
+        if isinstance(item, MenuSlider):
+            return (item.x - 6.0, item.y - 10.0, item.width + 12.0, 48.0)
+        return (float(item.x), float(item.y), float(item.width), float(item.height))
+
+    @classmethod
+    def _focus_center(cls, item) -> tuple[float, float]:
+        x, y, w, h = cls._focus_box(item)
+        return (x + w / 2.0, y + h / 2.0)
+
+    def _move_focus(self, dx: int, dy: int) -> None:
+        """Move focus to the nearest control in direction (dx, dy). dy +1 is up on screen. No control there: focus stays."""
+        items = self._focus_items()
+        if not items:
+            return
+        if self._focus is None:
+            self._focus = items[0]
+            return
+        cx, cy = self._focus_center(self._focus)
+        best = None
+        best_cost = 0.0
+        for item in items:
+            if item is self._focus:
+                continue
+            ix, iy = self._focus_center(item)
+            along = (ix - cx) * dx + (iy - cy) * dy
+            if along <= 0.5:
+                continue
+            across = abs((ix - cx) * dy) + abs((iy - cy) * dx)
+            cost = along + 2.0 * across
+            if best is None or cost < best_cost:
+                best, best_cost = item, cost
+        if best is not None:
+            self._focus = best
+
+    def _nudge_grab(self, direction: int) -> None:
+        slider = self._grab
+        step = 1.0 if slider is self.arena_slider else 5.0
+        slider.current_val = max(float(slider.min_val), min(float(slider.max_val), float(slider.current_val) + direction * step))
+        slider.callback(slider.current_val)
+        slider.sync()
+
+    def _release_grab(self) -> None:
+        slider = self._grab
+        if slider is None:
+            return
+        self._grab = None
+        if slider is self.arena_slider:
+            # Same as a mouse release: the owner hears the arena size once, when the adjustment ends.
+            self.on_save({"arena_margin": self.arena_margin})
+
+    def _activate_focus(self):
+        """ENTER on the focused control. Returns "back" when Back is chosen, like the mouse path."""
+        item = self._focus
+        if item is None:
+            return None
+        if isinstance(item, MenuSlider):
+            self._grab = None if self._grab is item else item
+            return None
+        if item is self.back_button:
+            self.on_save(self.get_settings())
+            return "back"
+        item.callback()
+        return None
+
+    def is_adjusting(self) -> bool:
+        """True while a slider is grabbed, so ESC should only let go of it and not leave the screen."""
+        return self._grab is not None
+
+    def on_key_press(self, symbol, modifiers=0):
+        """Keyboard navigation: arrows move focus, ENTER activates. Returns "back" when the screen should close."""
+        key = pyglet.window.key
+        if symbol in (key.LEFT, key.RIGHT, key.UP, key.DOWN):
+            if self._grab is not None and symbol in (key.LEFT, key.RIGHT):
+                self._nudge_grab(-1 if symbol == key.LEFT else 1)
+                return None
+            self._release_grab()
+            dx, dy = {key.LEFT: (-1, 0), key.RIGHT: (1, 0), key.UP: (0, 1), key.DOWN: (0, -1)}[symbol]
+            self._move_focus(dx, dy)
+            return None
+        if symbol in (key.ENTER, key.NUM_ENTER):
+            return self._activate_focus()
+        if symbol == key.ESCAPE:
+            self._release_grab()
+        return None
+
+    def _sync_focus_ring(self) -> None:
+        item = self._focus
+        if item is None:
+            for edge in self._focus_ring:
+                edge.opacity = 0
+            return
+        x, y, w, h = self._focus_box(item)
+        pad, t = 4.0, 2.0
+        left_x, bottom_y = x - pad, y - pad
+        width, height = w + pad * 2.0, h + pad * 2.0
+        top_edge, bottom_edge, left_edge, right_edge = self._focus_ring
+        top_edge.x, top_edge.y, top_edge.width, top_edge.height = left_x, bottom_y + height - t, width, t
+        bottom_edge.x, bottom_edge.y, bottom_edge.width, bottom_edge.height = left_x, bottom_y, width, t
+        left_edge.x, left_edge.y, left_edge.width, left_edge.height = left_x, bottom_y, t, height
+        right_edge.x, right_edge.y, right_edge.width, right_edge.height = left_x + width - t, bottom_y, t, height
+        for edge in self._focus_ring:
+            edge.opacity = 255
+
     def get_settings(self) -> dict:
         """Get current settings."""
         fullscreen = self.window_sizes[self.window_size_idx] is None
@@ -1165,6 +1449,9 @@ class SettingsMenu:
             "reduced_shake": bool(self.reduced_shake),
             "music_volume": float(self.music_volume),
             "sfx_volume": float(self.sfx_volume),
+            "reduced_motion": bool(self.reduced_motion),
+            "colorblind_palette": bool(self.colorblind_palette),
+            "high_contrast_hud": bool(self.high_contrast_hud),
         }
 
     def draw(self):
@@ -1198,7 +1485,9 @@ class SettingsMenu:
 
         self._refresh_fx_button_text()
         self._refresh_shake_button_text()
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
+        self._refresh_access_button_texts()
+        self._sync_focus_ring()
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button] + self._access_buttons():
             btn.sync()
         for slider in self._all_sliders():
             slider.sync()
@@ -1225,7 +1514,7 @@ class GuideMenu:
         {"key": "boss_brute", "name": "Boss: Brute", "icon": "BR", "what": "Close-range slams and brawler bursts.", "deal": "Stay mobile and punish post-slam windows.", "lore": "Execution platform stripped to raw kinetic violence."},
         {"key": "boss_abyss_gaze", "name": "Boss: Abyss Gaze", "icon": "AG", "what": "Dark pulse patterns and pressure rings.", "deal": "Keep spacing disciplined; avoid center traps.", "lore": "A deep-scan optic that learned predation."},
         {"key": "boss_womb_core", "name": "Boss: Womb Core", "icon": "WC", "what": "Spawns adds and compresses safe zones.", "deal": "Clear adds fast; save burst for pulse gaps.", "lore": "A growth reactor that treats battle as incubation."},
-    ]
+    ] + guide_info.enemy_entries()
     POWERUP_INFO = [
         {"key": "heal", "name": "Heal (+)", "icon": "+", "what": "Restores HP instantly.", "deal": "Grab when low; avoid wasting near full HP.", "lore": "Nanite med-gel distilled from station triage kits."},
         {"key": "damage", "name": "Damage (!)", "icon": "!", "what": "Permanent run damage increase.", "deal": "Best early pickup for faster clears.", "lore": "Illegal coil tuning for hotter impact loads."},
@@ -1236,22 +1525,24 @@ class GuideMenu:
         {"key": "vortex", "name": "Vortex (@)", "icon": "@", "what": "Temporary damaging aura around you.", "deal": "Play aggressively but keep exits open.", "lore": "Collapsed singularity shard in a containment ring."},
         {"key": "weapon", "name": "Weapon (W)", "icon": "W", "what": "Switches current weapon pattern.", "deal": "Adapt playstyle to the new spread/tempo.", "lore": "Recovered armament cache from dead merc squads."},
         {"key": "ultra", "name": "Ultra (U)", "icon": "U", "what": "Adds an Ultra charge for RMB/Q.", "deal": "Spend on boss spikes or dangerous swarms.", "lore": "A forbidden core spark meant for ship cannons."},
-        {"key": "boost", "name": "Overdrive (B)", "icon": "B", "what": "Restores boost and grants 6s infinite overdrive + shield.", "deal": "Grab to ram through swarms or kite aggressive bosses.", "lore": "Supercharged fusion capacitor designed for orbital interceptors."},
-    ]
+        {"key": "boost", "name": "Overdrive (B)", "icon": "B", "what": f"Restores boost and grants {config.BOOST_OVERDRIVE_SECONDS:g}s infinite overdrive + shield.", "deal": "Ram swarms or kite aggressive bosses.", "lore": "Supercharged fusion capacitor designed for orbital interceptors."},
+        {"key": "drone", "name": "Drone (D)", "icon": "D", "what": f"Rare. A drone orbits you for {DRONE_DURATION:g}s and fires at the nearest enemy.", "deal": f"Fires every {DRONE_FIRE_INTERVAL:g}s within {DRONE_RANGE:g} units.", "lore": "Salvaged escort drone reflashed to fight beside its owner."},
+    ] + guide_info.powerup_entries()
     BASICS_INFO = [
         {"key": "move", "name": "Movement", "icon": "MV", "what": "Use WASD or Arrow keys to move.", "deal": "Stay moving; linear retreats get punished.", "lore": "Mobility is your main defense layer."},
         {"key": "fire", "name": "Primary Fire", "icon": "LMB", "what": "LMB toggles auto-fire; it starts ON each run.", "deal": "Leave it on, then focus on dodging and spacing.", "lore": "Auto-fire replaced hold-to-fire pacing."},
         {"key": "dash", "name": "Dash", "icon": "SP", "what": "Press SPACE to dash through pressure.", "deal": "Save dash for layered patterns, not chip damage.", "lore": "Dash timing decides most boss survivability windows."},
-        {"key": "boost_use", "name": "Boost / Overdrive", "icon": "SHF", "what": "Hold LSHIFT/RSHIFT to boost speed and kinetic ram enemies.", "deal": "Boost ramming shatters weak foes and grants 35% damage reduction.", "lore": "Forward deflection shielding channels kinetic thrust into a battering ram."},
+        {"key": "boost_use", "name": "Boost / Overdrive", "icon": "SHF", "what": "Hold LSHIFT or RSHIFT to boost and ram enemies.", "deal": f"Ramming shatters weak foes; {config.BOOST_DAMAGE_REDUCTION * 100:g}% damage reduction.", "lore": "Forward deflection shielding channels kinetic thrust into a battering ram."},
         {"key": "ultra_use", "name": "Ultra Use", "icon": "U!", "what": "RMB or Q consumes one Ultra charge.", "deal": "Use Ultra during spike phases or add floods.", "lore": "Ultra is burst control, not passive DPS."},
-        {"key": "arsenal", "name": "Arsenal & Crits", "icon": "WPN", "what": "Weapons feature Crits (10% base, 2x dmg) and Piercing.", "deal": "Hyper Railgun pierces lines; Flak Battery cluster-bursts.", "lore": "Mil-spec kinetic accelerators retrofitted with variable-yield munitions."},
+        {"key": "arsenal", "name": "Arsenal & Crits", "icon": "WPN", "what": f"Weapons feature Crits ({config.CRIT_CHANCE_BASE * 100:g}% base, {config.CRIT_MULT_BASE:g}x dmg) and Piercing.", "deal": "Railgun pierces lines; Flak cluster-bursts.", "lore": "Mil-spec kinetic accelerators retrofitted with variable-yield munitions."},
         {"key": "arena", "name": "Arena Control", "icon": "AR", "what": "Fight near edge lanes, avoid center traps.", "deal": "Rotate clockwise/counter-clockwise with intent.", "lore": "Bad pathing is deadlier than low HP."},
-        {"key": "elites", "name": "Elites", "icon": "EL", "what": "Wave 3+ elites: 2.2x HP, one affix each.", "deal": "Volatile: 45 blast in 130 px, hits you too. Shielded: break shield first.", "lore": "Swift moves 30% faster. Affixes are rogue overclocks on standard frames."},
-        {"key": "boss_schedule", "name": "Boss Schedule", "icon": "BS", "what": "A boss arrives every 5th wave (5, 10, 15...).", "deal": "Save dash and ultra for it; clearing the wave opens card picks.", "lore": "Boss kills always drop a weapon plus a heal, shield or laser."},
+        {"key": "elites", "name": "Elites", "icon": "EL", "what": f"Wave {config.ELITE_SPAWN_BASE_WAVE}+ elites: {config.ELITE_HP_MULT:g}x HP, {config.ELITE_SCORE_MULT:g}x score.", "deal": f"Volatile: {config.ELITE_VOLATILE_BLAST_DAMAGE:g} blast in {config.ELITE_VOLATILE_BLAST_RADIUS:g} px, hits you too. Shielded: break shield.", "lore": f"One affix each: Volatile, Swift, Shielded, Splitter, Reflector. Swift moves {(config.ELITE_SWIFT_SPEED_MULT - 1.0) * 100:g}% faster."},
+        {"key": "boss_schedule", "name": "Boss Schedule", "icon": "BS", "what": f"A boss arrives every {guide_info.ordinal(config.BOSS_WAVE_EVERY)} wave ({config.BOSS_WAVE_EVERY:g}, {2 * config.BOSS_WAVE_EVERY:g}, {3 * config.BOSS_WAVE_EVERY:g}...).", "deal": "Save dash and ultra for it; clearing the wave opens card picks.", "lore": "Boss kills always drop a weapon plus a heal, shield or laser."},
         {"key": "loot", "name": "Loot Priority", "icon": "LT", "what": "Powerups and weapon drops shape run tempo.", "deal": "Early damage/fire-rate usually beats greed picks.", "lore": "Boss waves guarantee high-value drops."},
         {"key": "rpg", "name": "Boss Rewards", "icon": "CRD", "what": "Boss kills open temp + permanent card picks.", "deal": "Pick consistency first, then high-risk scaling.", "lore": "Card flow is your long-run progression core."},
         {"key": "pause", "name": "Pause/Menu", "icon": "ESC", "what": "Press ESC to pause or navigate menus.", "deal": "Use pause to reset focus in dense waves.", "lore": "A short reset often saves a run."},
     ]
+    SYSTEMS_INFO = guide_info.systems_entries()
 
     def __init__(self, width: int, height: int):
         self.screen_width = width
@@ -1300,10 +1591,11 @@ class GuideMenu:
         self.btn_enemies = MenuButton(0, 0, 180, 50, "Enemies", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_powerups = MenuButton(0, 0, 180, 50, "Powerups", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_basics = MenuButton(0, 0, 180, 50, "Basics", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
+        self.btn_systems = MenuButton(0, 0, 180, 50, "Systems", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_prev = MenuButton(0, 0, 120, 44, "Prev", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_next = MenuButton(0, 0, 120, 44, "Next", lambda: None, color=(72, 118, 210), hover_color=(108, 154, 244))
         self.btn_back = MenuButton(0, 0, 200, 54, "Back to Menu", lambda: None, color=(110, 110, 150), hover_color=(145, 145, 195))
-        self._buttons = [self.btn_enemies, self.btn_powerups, self.btn_basics, self.btn_prev, self.btn_next, self.btn_back]
+        self._buttons = [self.btn_enemies, self.btn_powerups, self.btn_basics, self.btn_systems, self.btn_prev, self.btn_next, self.btn_back]
         for b in self._buttons:
             b.ensure(self.batch)
 
@@ -1339,11 +1631,22 @@ class GuideMenu:
         )
         self.resize(width, height)
 
+    def _fit_desc(self, label) -> None:
+        """Shrink a row's one-line description (to 8 px at the smallest) until it fits the row width."""
+        size = self._desc_size
+        if int(label.font_size) != size:
+            label.font_size = size
+        while label.content_width > self._desc_max_w and size > 8:
+            size -= 1
+            label.font_size = size
+
     def _entries(self) -> list[dict]:
         if self.tab == "enemies":
             return self.ENEMY_INFO
         if self.tab == "powerups":
             return self.POWERUP_INFO
+        if self.tab == "systems":
+            return self.SYSTEMS_INFO
         return self.BASICS_INFO
 
     def _total_pages(self) -> int:
@@ -1359,12 +1662,13 @@ class GuideMenu:
     def _entry_color(self, e: dict) -> tuple:
         key = str(e.get("key", ""))
         if self.tab == "enemies":
-            return config.ENEMY_COLORS.get(key, (200, 200, 200))
+            return guide_info.ACCENT_COLORS.get(key, config.ENEMY_COLORS.get(key, (200, 200, 200)))
         if self.tab == "powerups":
             return config.POWERUP_COLORS.get(key, (200, 200, 200))
         return (140, 200, 255)
 
     def update(self, dt: float):
+        dt = motion.anim_dt(dt)  # animation only: reduced motion freezes the scanline and the shine
         self._t += dt
         self._panel_shine.opacity = int(8 + 14 * (0.5 + 0.5 * math.sin(self._t * 1.4)))
         self._scanline.y = int(36 + (self.screen_height - 72) * (0.5 + 0.5 * math.sin(self._t * 0.37)))
@@ -1400,29 +1704,23 @@ class GuideMenu:
         self._panel_shine.height = max(6, int(14 * scale))
 
         self.title.x = cx
-        self.title.y = height - int(64 * scale)
+        self.title.y = height - int(48 * scale)  # clear of the panel border (the title's descent crossed it at 64)
         _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(20, int(34 * scale)))
         self.subtitle.x = cx
-        self.subtitle.y = self.title.y - int(30 * scale)
+        self.subtitle.y = self.title.y - int(46 * scale)
         _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
 
         top_y = panel_y + panel_h - int(86 * scale)
-        self.btn_enemies.width = int(190 * scale)
-        self.btn_enemies.height = int(52 * scale)
-        self.btn_enemies.font_size = max(12, int(17 * scale))
-        self.btn_enemies.x = panel_x + int(28 * scale)
-        self.btn_enemies.y = top_y
-
-        self.btn_powerups.width = int(190 * scale)
-        self.btn_powerups.height = int(52 * scale)
-        self.btn_powerups.font_size = max(12, int(17 * scale))
-        self.btn_powerups.x = self.btn_enemies.x + self.btn_enemies.width + int(14 * scale)
-        self.btn_powerups.y = top_y
-        self.btn_basics.width = int(190 * scale)
-        self.btn_basics.height = int(52 * scale)
-        self.btn_basics.font_size = max(12, int(17 * scale))
-        self.btn_basics.x = self.btn_powerups.x + self.btn_powerups.width + int(14 * scale)
-        self.btn_basics.y = top_y
+        tab_w = int(140 * scale)
+        tab_gap = int(12 * scale)
+        tab_x = panel_x + int(28 * scale)
+        for tab_btn in (self.btn_enemies, self.btn_powerups, self.btn_basics, self.btn_systems):
+            tab_btn.width = tab_w
+            tab_btn.height = int(52 * scale)
+            tab_btn.font_size = max(12, int(17 * scale))
+            tab_btn.x = tab_x
+            tab_btn.y = top_y
+            tab_x += tab_w + tab_gap
 
         self.btn_back.width = int(220 * scale)
         self.btn_back.height = int(52 * scale)
@@ -1430,11 +1728,15 @@ class GuideMenu:
         self.btn_back.x = panel_x + panel_w - self.btn_back.width - int(24 * scale)
         self.btn_back.y = top_y
 
-        row_top = top_y - int(26 * scale)
-        row_h = int(88 * scale)
-        row_gap = int(10 * scale)
+        # Six rows must fit between the tab row and the Prev/Next buttons, so each row is three text lines tall.
+        row_top = top_y - int(14 * scale)
+        row_h = int(52 * scale)
+        row_gap = int(6 * scale)
         row_x = panel_x + int(24 * scale)
         row_w = panel_w - int(48 * scale)
+        # Threat/Counter is one line: its font shrinks (see _fit_desc) rather than running past the row edge.
+        self._desc_size = max(9, int(12 * scale))
+        self._desc_max_w = max(60, row_w - int(56 * scale) - int(14 * scale))
         for i, (bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, _) in enumerate(self._rows):
             y = row_top - i * (row_h + row_gap) - row_h
             bg.x = row_x
@@ -1456,15 +1758,15 @@ class GuideMenu:
 
             text_x = row_x + int(56 * scale)
             name.x = text_x
-            name.y = y + row_h - int(22 * scale)
+            name.y = y + row_h - int(14 * scale)
             _sync_label_style_if_ready(name, UI_FONT_BODY, max(11, int(16 * scale)))
 
             desc.x = text_x
-            desc.y = y + row_h - int(45 * scale)
+            desc.y = y + row_h - int(30 * scale)
             _sync_label_style_if_ready(desc, UI_FONT_META, max(9, int(12 * scale)))
 
             lore.x = text_x
-            lore.y = y + row_h - int(66 * scale)
+            lore.y = y + row_h - int(43 * scale)
             _sync_label_style_if_ready(lore, UI_FONT_META, max(8, int(11 * scale)))
 
         self.btn_prev.width = int(118 * scale)
@@ -1507,6 +1809,10 @@ class GuideMenu:
             self.tab = "basics"
             self.page = 0
             return None
+        if self.btn_systems.contains_point(x, y):
+            self.tab = "systems"
+            self.page = 0
+            return None
         total_pages = self._total_pages()
         if self.btn_prev.contains_point(x, y):
             self.page = (self.page - 1) % total_pages
@@ -1526,9 +1832,11 @@ class GuideMenu:
         self.btn_enemies.is_hovered = self.btn_enemies.is_hovered or self.tab == "enemies"
         self.btn_powerups.is_hovered = self.btn_powerups.is_hovered or self.tab == "powerups"
         self.btn_basics.is_hovered = self.btn_basics.is_hovered or self.tab == "basics"
+        self.btn_systems.is_hovered = self.btn_systems.is_hovered or self.tab == "systems"
         self.btn_enemies.sync()
         self.btn_powerups.sync()
         self.btn_basics.sync()
+        self.btn_systems.sync()
         entries = self._page_entries()
         for i, row in enumerate(self._rows):
             bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, phase = row
@@ -1553,8 +1861,13 @@ class GuideMenu:
             icon.color = self._entry_color(e)
             glyph.text = str(e.get("icon", "?"))
             name.text = str(e.get("name", "Unknown"))
-            desc.text = f"Threat: {str(e.get('what', ''))}  |  Counter: {str(e.get('deal', ''))}"
-            lore.text = f"Lore: {str(e.get('lore', ''))}"
+            if self.tab == "systems":
+                desc.text = f"About: {str(e.get('what', ''))}  |  Tip: {str(e.get('deal', ''))}"
+                lore.text = f"Note: {str(e.get('lore', ''))}"
+            else:
+                desc.text = f"Threat: {str(e.get('what', ''))}  |  Counter: {str(e.get('deal', ''))}"
+                lore.text = f"Lore: {str(e.get('lore', ''))}"
+            self._fit_desc(desc)
 
         page_info = f"Page {self.page + 1}/{self._total_pages()}  |  Left/Right or buttons to browse"
         if self.tab == "enemies":
@@ -1563,6 +1876,9 @@ class GuideMenu:
         elif self.tab == "powerups":
             self.subtitle.text = "Powerup effects, timing advice, and field notes."
             self.footer.text = f"{page_info}  |  {len(self.POWERUP_INFO)} entries"
+        elif self.tab == "systems":
+            self.subtitle.text = "Hangar, achievements, mutators, daily runs and arena events."
+            self.footer.text = f"{page_info}  |  {len(self.SYSTEMS_INFO)} entries"
         else:
             self.subtitle.text = "Core controls, movement rules, and run-flow fundamentals."
             self.footer.text = f"{page_info}  |  {len(self.BASICS_INFO)} entries"
@@ -1570,6 +1886,7 @@ class GuideMenu:
         self.btn_enemies.is_hovered = False
         self.btn_powerups.is_hovered = False
         self.btn_basics.is_hovered = False
+        self.btn_systems.is_hovered = False
 
 
 class PauseMenu:
@@ -1659,8 +1976,10 @@ _GO_STAGE_SPAN = {
     "high": (0.56, 0.80),
     "new_high": (0.62, 0.84),
     "stats": (0.68, 0.90),
+    "daily": (0.72, 0.92),
     "buttons": (0.78, 0.96),
     "hint": (0.86, 1.00),
+    "mutators": (0.86, 1.00),
 }
 _GO_COUNT_SPAN = (0.50, 1.00)  # the final score counts up over the second half of the reveal
 _GO_RISE_PX = 14               # labels rise this far (before UI scale) into their resting place
@@ -1756,6 +2075,19 @@ class GameOverMenu:
             batch=self.batch,
         )
 
+        # Daily challenge line: today's best and whether this run set it. Empty outside daily runs.
+        self.daily_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=14,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=_GO_STAT_RGBA,
+            batch=self.batch,
+        )
+
         # One row of run stats: survival time, kills, best combo, leaderboard rank.
         self.stats_labels: list[pyglet.text.Label] = [
             pyglet.text.Label(
@@ -1784,6 +2116,19 @@ class GameOverMenu:
             batch=self.batch,
         )
 
+        # Run mutators and the score multiplier they give, under the control hint.
+        self.mutator_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=13,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(188, 210, 232, 220),
+            batch=self.batch,
+        )
+
         self._scale = 1.0
         self._score_value = 0
         self._shown_score: int | None = None
@@ -1797,7 +2142,9 @@ class GameOverMenu:
             "high": [(self.high_score_label, 220)],
             "new_high": [(self.new_high_label, 255)],
             "stats": [(label, _GO_STAT_RGBA[3]) for label in self.stats_labels],
+            "daily": [(self.daily_label, _GO_STAT_RGBA[3])],
             "hint": [(self.hint_label, 220)],
+            "mutators": [(self.mutator_label, 220)],
         }
         self._reveal_t = float(getattr(config, "GAME_OVER_REVEAL_S", 1.0))
         self._reveal_total = self._reveal_t
@@ -1820,11 +2167,16 @@ class GameOverMenu:
             btn.font_size = font
 
         gap = int(18 * scale)
-        btn_start_y = cy - int(70 * scale)
+        btn_start_y = cy - int(84 * scale)
         ys = [btn_start_y, btn_start_y - (button_h + gap)]
         self._button_base_y = ys
         for btn in self.buttons:
             btn.x = cx - btn.width // 2
+
+        # The daily line sits one row under the run stats, above the buttons.
+        stats_y = height - int(290 * scale)
+        daily_font = max(10, int(14 * scale))
+        daily_y = stats_y - int(1.5 * daily_font) - int(4 * scale)
 
         # Resting y for every stage; set_reveal() adds the rise offset on top of these.
         self._base_y = {
@@ -1833,8 +2185,10 @@ class GameOverMenu:
             "wave": height - int(195 * scale),
             "high": height - int(225 * scale),
             "new_high": height - int(255 * scale),
-            "stats": height - int(290 * scale),
+            "stats": stats_y,
+            "daily": daily_y,
             "hint": ys[1] - int(28 * scale),
+            "mutators": ys[1] - int(54 * scale),
         }
 
         self.title.x = cx
@@ -1852,6 +2206,9 @@ class GameOverMenu:
         self.new_high_label.x = cx
         _sync_label_style_if_ready(self.new_high_label, UI_FONT_HEAD, max(12, int(18 * scale)))
 
+        self.daily_label.x = cx
+        _sync_label_style_if_ready(self.daily_label, UI_FONT_META, daily_font)
+
         col_w = int(200 * scale)
         stat_font = max(10, int(14 * scale))
         for i, label in enumerate(self.stats_labels):
@@ -1860,6 +2217,9 @@ class GameOverMenu:
 
         self.hint_label.x = cx
         _sync_label_style_if_ready(self.hint_label, UI_FONT_META, max(10, int(13 * scale)))
+
+        self.mutator_label.x = cx
+        _sync_label_style_if_ready(self.mutator_label, UI_FONT_META, max(10, int(13 * scale)))
 
         # Re-apply the current reveal so every label and button lands on the new layout.
         self.set_reveal(self._reveal_t, self._reveal_total)
@@ -1878,6 +2238,22 @@ class GameOverMenu:
         self.final_score_label.text = f"Score: {score:,}"
         self.high_score_label.text = f"High Score: {high_score:,}"
         self.new_high_label.text = "★ NEW HIGH SCORE! ★" if is_new_high else ""
+
+    def set_daily(self, result) -> None:
+        """Show the daily line for a finished daily run (a daily.DailyResult). None hides it."""
+        if result is None:
+            self.daily_label.text = ""
+            return
+        if result.new_best:
+            self.daily_label.text = f"DAILY {result.date_iso}: NEW DAILY BEST {result.best_score:,} (wave {result.best_wave})"
+            rgb = _GO_RANK_GOLD
+        else:
+            self.daily_label.text = (
+                f"DAILY {result.date_iso}: today's best {result.best_score:,} (wave {result.best_wave}). "
+                f"This run ({result.run_score:,}) did not beat it"
+            )
+            rgb = _GO_STAT_RGBA[:3]
+        self.daily_label.color = (*rgb, _GO_STAT_RGBA[3])
 
     @staticmethod
     def _rank_text(rank: int, points_to_next: int | None, is_new_high: bool) -> str:
@@ -1908,6 +2284,11 @@ class GameOverMenu:
         gold = int(rank) == 1 and bool(is_new_high)
         rgb = _GO_RANK_GOLD if gold else _GO_STAT_RGBA[:3]
         rank_label.color = (*rgb, rank_label.opacity)
+
+    def set_mutators(self, names, score_mult: float):
+        """Show the run's mutators and the combined score multiplier they give."""
+        listed = ", ".join(str(n) for n in names) if names else "none"
+        self.mutator_label.text = f"Mutators: {listed}   |   score {format_score_mult(score_mult)}"
 
     def set_reveal(self, t: float, total: float | None = None):
         """Drive the staged reveal. t is seconds since the run ended; from total on, everything is shown."""

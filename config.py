@@ -9,6 +9,8 @@ FPS = 60
 ENABLE_OBSTACLES = False
 ENABLE_ADVANCED_FX = True
 ADVANCED_FX_STRENGTH = 0.55
+USE_PLAYER_ART = True  # Pod-robot player character (player_art.py). False draws the legacy ship.
+REDUCE_MOTION = False  # True stops ambient UI motion: title shimmer, bobbing, starfield and orb drift
 
 # Room settings
 ROOM_RADIUS = 400.0
@@ -80,7 +82,24 @@ POWERUP_COLORS = {
     "weapon": (230, 230, 255),
     "ultra": (255, 240, 180),
     "boost": (255, 145, 45),
+    "drone": (90, 255, 225),
+    "ricochet": (60, 255, 200),
+    "homing": (255, 80, 170),
+    "time_slow": (110, 130, 255),
+    "magnet": (170, 255, 70),
 }
+
+# Timed powerups (see powerup.py). Each one refreshes its expiry; picking it up again does not stack.
+RICOCHET_DURATION = 8.0       # player bullets bounce once off the arena edge
+HOMING_DURATION = 6.0         # player bullets steer toward the nearest live enemy
+HOMING_RANGE = 260.0          # world units, measured from the bullet
+HOMING_TURN_RATE = 2.4        # max steering in radians per second, so the curve stays readable
+TIME_SLOW_DURATION = 4.0      # enemies and enemy projectiles run at TIME_SLOW_SCALE; the player does not
+TIME_SLOW_SCALE = 0.5         # the one scalar for enemy time: enemy dt = frame dt * this
+MAGNET_DURATION = 10.0        # pickups are pulled from a wider radius and faster
+MAGNET_RADIUS_MULT = 3.0      # multiplies the pickup magnet radius
+MAGNET_PULL_MULT = 1.5        # multiplies the pickup pull speed
+RICOCHET_BOUNCES = 1          # bounces per bullet while Ricochet runs (shot_mods reads it; the Guide too)
 
 # Boost / Overdrive mechanic (LSHIFT key)
 BOOST_SPEED_MULT = 1.65
@@ -90,6 +109,8 @@ BOOST_RECHARGE_RATE = 22.0
 BOOST_DAMAGE_REDUCTION = 0.35
 BOOST_RAM_DAMAGE = 28
 BOOST_COLOR = (255, 145, 45)
+BOOST_OVERDRIVE_SECONDS = 6.0  # Overdrive powerup: infinite boost and shield top-up duration
+
 
 # Critical hits
 CRIT_CHANCE_BASE = 0.10
@@ -102,6 +123,19 @@ ELITE_SPAWN_CHANCE = 0.14
 ELITE_HP_MULT = 2.2
 ELITE_SCORE_MULT = 2.5
 ELITE_AURA_COLOR = (255, 215, 60)
+ELITE_SWIFT_SPEED_MULT = 1.30        # Swift affix: enemy speed multiplier
+ELITE_VOLATILE_BLAST_RADIUS = 130.0  # Volatile affix: death blast radius in px
+ELITE_VOLATILE_BLAST_DAMAGE = 45     # Volatile affix: damage to enemies inside the blast
+ELITE_SPLIT_COUNT = 2                # Splitter affix: copies left behind on death
+ELITE_SPLIT_HP_FRAC = 0.5            # Splitter affix: each copy's max HP as a fraction of the elite's max HP
+ELITE_REFLECT_COOLDOWN = 3.0         # Reflector affix: seconds between reflected shots
+ELITE_REFLECT_SPEED = 260.0          # Reflector affix: speed of a reflected shot, px per second
+
+# Boss waves. Boss rage starts once per boss, at or below BOSS_RAGE_HP_FRAC of its max HP.
+BOSS_WAVE_EVERY = 5                  # A boss arrives every Nth wave
+BOSS_RAGE_HP_FRAC = 0.35
+BOSS_RAGE_COOLDOWN_MULT = 0.75       # Attack cooldowns are multiplied by this during rage (25 percent shorter)
+BOSS_RAGE_EXTRA_PROJECTILES = 1      # Extra projectiles or pulses per volley during rage
 
 # Particle & Rendering budget (prevents frame drops under heavy load)
 PARTICLE_SOFT_CAP = 450
@@ -146,4 +180,60 @@ ENEMY_COLORS = {
     "boss_brute": (255, 100, 100),
     "boss_abyss_gaze": (185, 220, 255),
     "boss_womb_core": (255, 105, 135),
+}
+
+# Arena events (events.py). Set pieces on non-boss waves. Each one is telegraphed before it deals damage.
+EVENT_MIN_WAVE = 4                  # no events before this wave
+EVENT_WAVE_CHANCE = 1.0 / 3.0       # chance that an eligible (non-boss, wave >= EVENT_MIN_WAVE) wave gets one event
+EVENT_METEOR_IMPACTS = 3            # impact zones per Meteor Shower
+EVENT_METEOR_WARN = 1.5             # a zone is marked this long before it hits
+EVENT_METEOR_STAGGER = 0.7          # gap between zone marks, so the impacts ripple across the arena
+EVENT_METEOR_RADIUS = 38.0          # impact radius (same units as Trap.radius)
+EVENT_METEOR_DAMAGE = 16
+EVENT_METEOR_LIVE = 0.25            # a zone stays live for this long after it hits
+EVENT_FLARE_WARN = 2.0              # the sector shows this long before the beam starts to move
+EVENT_FLARE_SWEEP = 2.6             # seconds for the beam to cross the sector
+EVENT_FLARE_SECTOR_DEG = 110.0      # width of the sector the beam sweeps
+EVENT_FLARE_THICKNESS = 14.0
+EVENT_FLARE_DAMAGE = 18
+EVENT_FLARE_TICK = 0.5              # minimum gap between beam hits on the player
+EVENT_NEBULA_WARN = 1.0             # the cloud shows this long before it becomes active
+EVENT_NEBULA_TTL = 8.0              # seconds the cloud is active; enemies inside gain shield
+EVENT_NEBULA_RADIUS = 110.0
+EVENT_NEBULA_SHIELD = 24            # shield an enemy gains on entering the cloud; the leftover is removed on exit or at the end
+
+# Multi-core job layer (parallel.py). Pool work is opt-in. tools/bench_steer.py measures it: the pool
+# steers slower than the serial loop below ~20 live enemies and faster from ~24 up (1.6x to 2.9x at 32,
+# over two runs).
+# It stays off by default because the game's wave caps keep most fights below that, and because a
+# spawned worker costs seconds of start-up on Windows (warmed on the first playing frame).
+PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a process pool
+PARALLEL_STEER_MIN_ENEMIES = 32     # live enemy count at which the batch path is used
+PARALLEL_STEER_WORKERS = 3          # process-pool size when enabled
+PARALLEL_LOADER_WORKERS = 4         # threads for I/O-bound asset reads
+
+# Accessibility (Settings > Accessibility). Every option defaults to off. The saved user settings
+# (access_prefs.py) set these flags at runtime, so the values here are the defaults. REDUCE_MOTION is
+# defined above with the other display flags (uitheme); access_prefs.py and motion.py read it.
+COLORBLIND_PALETTE = False      # swaps ENEMY_COLORS for COLORBLIND_ENEMY_COLORS (access_prefs.py)
+HIGH_CONTRAST_HUD = False       # a dark plate behind every HUD number, and brighter HUD text
+# Colour-blind enemy palette. Each pair stays at least CIE76 dE 14 apart under deuteranopia and
+# protanopia (Machado 2009, severity 1.0), checked by test_w3_access.py.
+COLORBLIND_ENEMY_COLORS = {
+    "bomber": (62, 230, 235),
+    "chaser": (239, 112, 217),
+    "ranged": (168, 255, 48),
+    "charger": (56, 219, 47),
+    "swarm": (212, 173, 97),
+    "tank": (64, 135, 172),
+    "spitter": (247, 161, 12),
+    "flyer": (30, 234, 175),
+    "engineer": (255, 23, 166),
+    "boss_thunder": (191, 107, 35),
+    "boss_laser": (225, 237, 120),
+    "boss_trapmaster": (84, 163, 128),
+    "boss_swarmqueen": (145, 230, 142),
+    "boss_brute": (104, 193, 255),
+    "boss_abyss_gaze": (123, 137, 249),
+    "boss_womb_core": (238, 42, 104),
 }

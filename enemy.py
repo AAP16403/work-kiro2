@@ -7,6 +7,7 @@ import random
 
 from hazards import Trap, LaserBeam, ThunderLine
 from projectile import Projectile
+import boss_rage
 import config
 from utils import Vec2, perp, cycle_gun
 from enemy_behaviors.base import Behavior
@@ -19,6 +20,7 @@ from enemy_behaviors.spitter import Spitter
 from enemy_behaviors.flyer import Flyer
 from enemy_behaviors.engineer import Engineer
 from enemy_behaviors.bomber import Bomber
+from enemy_steer import Snapshot, SteerBatch, coord_radius, safe_dir as _safe_dir, steer_velocity
 
 _BEHAVIOR_IMPLS = {
     "chaser": Chase(),
@@ -50,17 +52,6 @@ class Enemy:
     elite_affix: str = ""
     shield: int = 0
     hit_flash_timer: float = 0.0
-
-
-def _safe_dir(v: Vec2, fallback: Vec2 | None = None) -> Vec2:
-    n = v.normalized()
-    if n.length_squared() > 1e-9:
-        return n
-    if fallback is not None:
-        fb = fallback.normalized()
-        if fb.length_squared() > 1e-9:
-            return fb
-    return Vec2(1.0, 0.0)
 
 
 def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed: float, mult: float = 0.75) -> Vec2:
@@ -357,7 +348,10 @@ def _holding_telegraph(enemy: Enemy, key: str) -> bool:
 
 
 def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: Vec2) -> None:
-    """Apply role-based formation/cohesion pressure after per-type behavior update."""
+    """Apply role-based formation/cohesion pressure after per-type behavior update.
+
+    The steering math is enemy_steer.steer_velocity, shared with the batch path in parallel.py.
+    """
     if dt <= 0.0:
         return
 
@@ -380,20 +374,9 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, p
     role = role_map.get(id(enemy), _role_for_behavior(key))
 
     # Coordinate with nearby allies only; global coupling causes rubber-band jitter.
-    coord_r = {
-        "ranged": 260.0,
-        "spitter": 230.0,
-        "engineer": 260.0,
-        "tank": 190.0,
-        "charger": 170.0,
-        "chaser": 170.0,
-        "swarm": 180.0,
-        "flyer": 210.0,
-        "bomber": 220.0,
-    }.get(key, 200.0)
-    nearby_all = []
-    nearby_same = []
+    coord_r = coord_radius(key)
     r2 = coord_r * coord_r
+    nearby = []
     for o in enemies:
         if o is enemy:
             continue
@@ -402,110 +385,80 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, p
             continue
         if (o.pos - enemy.pos).length_squared() > r2:
             continue
-        nearby_all.append(o)
-        if ok == key:
-            nearby_same.append(o)
-
-    to_player_vec = player_pos - enemy.pos
-    to_player = _safe_dir(to_player_vec)
-
-    center = Vec2(enemy.pos.x, enemy.pos.y)
-    for a in nearby_all:
-        center = center + a.pos
-    center = center / float(len(nearby_all) + 1)
-    cohesion = _safe_dir(center - enemy.pos, to_player)
-
-    # Local separation keeps allies from stacking (stronger for same-type).
-    separation = Vec2(0.0, 0.0)
-    sep_count = 0
-    for a in nearby_all:
-        dvec = enemy.pos - a.pos
-        d = dvec.length()
-        if d <= 1e-6:
-            continue
-        if d < coord_r * 0.45:
-            wt = 1.0 if a in nearby_same else 0.55
-            separation = separation + dvec.normalized() * (1.0 - d / (coord_r * 0.45)) * wt
-            sep_count += 1
-    if sep_count > 0:
-        separation = _safe_dir(separation / float(sep_count), to_player)
+        nearby.append((o.pos, ok == key))
 
     slot_target = slot_targets.get(id(enemy))
     if slot_target is None:
+        to_player = _safe_dir(player_pos - enemy.pos)
         slot_target = player_pos + to_player * _slot_radius(key)
-    to_slot = _safe_dir(slot_target - enemy.pos, to_player)
 
-    vel_dir = _safe_dir(enemy.vel, to_player)
-
-    # Keep role identity, but ensure forward combat pressure.
-    min_forward = {
-        "ranged": -0.05,
-        "spitter": 0.04,
-        "engineer": -0.08,
-        "tank": 0.06,
-        "charger": 0.2,
-        "chaser": 0.24,
-        "swarm": 0.22,
-        "flyer": 0.13,
-        "bomber": 0.08,
-    }.get(key, 0.08)
-    min_forward *= float(prof["pressure_mult"])
-
-    role_slot_weight = {
-        "front_heavy": 0.62,
-        "front_dive": 0.66,
-        "front": 0.63,
-        "flank": 0.7,
-        "mid_lob": 0.74,
-        "backline": 0.84,
-        "support": 0.86,
-    }.get(role, 0.66)
-
-    role_player_weight = {
-        "front_heavy": 0.66,
-        "front_dive": 0.7,
-        "front": 0.62,
-        "flank": 0.56,
-        "mid_lob": 0.44,
-        "backline": 0.36,
-        "support": 0.24,
-    }.get(role, 0.52)
-
-    desired_dir = _safe_dir(
-        vel_dir * 0.45
-        + to_slot * role_slot_weight
-        + cohesion * 0.36
-        + separation * 0.72
-        + to_player * role_player_weight
-    , to_player)
-
-    # Forward-pressure hysteresis avoids frame-to-frame retreat jitter.
-    fwd = desired_dir.dot(to_player)
-    lock_t = float(enemy.ai.get("forward_lock_t", 0.0))
-    if fwd < min_forward:
-        lock_t = min(0.35, lock_t + dt * 2.6)
-    else:
-        lock_t = max(0.0, lock_t - dt * 2.0)
+    new_vel, lock_t = steer_velocity(
+        key,
+        enemy.pos,
+        enemy.vel,
+        enemy.speed,
+        float(enemy.ai.get("forward_lock_t", 0.0)),
+        slot_target,
+        role,
+        player_pos,
+        prof,
+        dt,
+        nearby,
+    )
+    enemy.vel = new_vel
     enemy.ai["forward_lock_t"] = lock_t
-    if lock_t > 0.0 and fwd < min_forward:
-        desired_dir = _safe_dir(desired_dir + to_player * (0.28 + lock_t * 0.9), to_player)
 
-    desired_speed = enemy.speed * (1.02 if key in ("chaser", "swarm", "charger") else 0.98) * float(prof["pressure_mult"])
-    desired_vel = desired_dir * desired_speed
 
-    # Reynolds-style bounded steering: smooth and continuous velocity changes.
-    steering = desired_vel - enemy.vel
-    max_force = enemy.speed * 3.2 * float(prof["steer_mult"])
-    max_step = max_force * dt
-    sl = steering.length()
-    if sl > max_step and sl > 1e-6:
-        steering = steering * (max_step / sl)
+def steer_snapshot(state, player_pos: Vec2, player_vel: Vec2, dt: float, steered_ids) -> tuple:
+    """Snapshot every non-boss enemy for enemy_steer.steer_chunk, taken after their behaviors ran.
 
-    enemy.vel = enemy.vel + steering
-    max_speed = enemy.speed * 1.28
-    vl = enemy.vel.length()
-    if vl > max_speed and vl > 1e-6:
-        enemy.vel = enemy.vel * (max_speed / vl)
+    Returns ``(batch, owners)``; ``owners[i]`` is the Enemy behind ``batch.snaps[i]``. A unit is
+    steered only when its ``id`` is in ``steered_ids``, it is eligible for coordination, and dt > 0.
+    Formation targets come from the live ``_build_role_formation``, so both paths agree on them.
+    """
+    formation = _build_role_formation(state, player_pos, player_vel)
+    slot_targets = formation["slot_targets"]
+    role_map = formation["roles"]
+    prof = formation["profile"]
+    snaps = []
+    owners = []
+    for e in getattr(state, "enemies", []):
+        key = _behavior_key(e)
+        if key.startswith("boss_"):
+            continue
+        eligible = bool(key) and isinstance(e.behavior, str) and e.behavior in _BEHAVIOR_IMPLS
+        if eligible and _holding_telegraph(e, key):
+            eligible = False
+        target = slot_targets.get(id(e))
+        if target is None:
+            to_player = _safe_dir(player_pos - e.pos)
+            target = player_pos + to_player * _slot_radius(key)
+        snaps.append(
+            Snapshot(
+                x=float(e.pos.x),
+                y=float(e.pos.y),
+                vx=float(e.vel.x),
+                vy=float(e.vel.y),
+                key=key,
+                speed=float(e.speed),
+                seed=float(e.seed),
+                lock_t=float(e.ai.get("forward_lock_t", 0.0)),
+                tx=float(target.x),
+                ty=float(target.y),
+                role=role_map.get(id(e), _role_for_behavior(key)),
+                steer=bool(eligible and dt > 0.0 and id(e) in steered_ids),
+            )
+        )
+        owners.append(e)
+    batch = SteerBatch(
+        snaps=tuple(snaps),
+        px=float(player_pos.x),
+        py=float(player_pos.y),
+        dt=float(dt),
+        pressure_mult=float(prof["pressure_mult"]),
+        steer_mult=float(prof["steer_mult"]),
+    )
+    return batch, owners
 
 
 def _update_boss_thunder(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
@@ -576,7 +529,7 @@ def _update_boss_thunder(enemy: Enemy, player_pos: Vec2, state, dt: float, game,
                 state.thunders.append(ThunderLine(start=start, end=end, damage=th_dmg, thickness=14.0, warn=1.0, ttl=0.16))
 
         if atk_roll > 0.3:
-            ring_cnt = 8 if phase == 0 else 10
+            ring_cnt = boss_rage.volley(enemy, 8 if phase == 0 else 10)
             gun = cycle_gun(enemy, ["plasma", "bullet"])
             _fire_ring(state, enemy.pos, ring_cnt, proj_speed * 0.9, dmg, projectile_type=gun)
             
@@ -586,7 +539,7 @@ def _update_boss_thunder(enemy: Enemy, player_pos: Vec2, state, dt: float, game,
         enemy.ai[state_key] = "stalk"
         cd_base = 2.5 - (state.wave * 0.035) - (phase * 0.2)
         if persona == "aggressive": cd_base *= 0.8
-        enemy.ai[state_timer] = max(1.1, cd_base)
+        enemy.ai[state_timer] = boss_rage.cooldown(enemy, max(1.1, cd_base))
 
 
 def _update_boss_laser(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
@@ -637,10 +590,8 @@ def _update_boss_laser(enemy: Enemy, player_pos: Vec2, state, dt: float, game, p
             enemy.ai["laser_tick"] = tick
         else:
             sweep_offset = math.sin(enemy.t * 2.5) * (28.0 + phase * 8.0)
-            if persona == "aggressive" and phase >= 2:
-                offsets = [sweep_offset, -sweep_offset]
-            else:
-                offsets = [sweep_offset]
+            beams = boss_rage.volley(enemy, 2 if (persona == "aggressive" and phase >= 2) else 1)
+            offsets = [sweep_offset, -sweep_offset, 0.0][:beams]
             for off in offsets:
                 angle = base_angle + off
                 rad = math.radians(angle)
@@ -660,14 +611,14 @@ def _update_boss_laser(enemy: Enemy, player_pos: Vec2, state, dt: float, game, p
                         owner="enemy",
                     )
                 )
-            enemy.ai["laser_tick"] = 0.22 if phase == 0 else 0.18 if phase == 1 else 0.15
+            enemy.ai["laser_tick"] = boss_rage.cooldown(enemy, 0.22 if phase == 0 else 0.18 if phase == 1 else 0.15)
         
         if phase >= 2 and state.rng.random() < 0.01:
              _fire_ring(state, enemy.pos, count=6, speed=170.0, damage=8, projectile_type="plasma")
 
         if l_timer <= 0:
             enemy.ai["laser_state"] = "reposition"
-            enemy.ai["laser_timer"] = 0.7
+            enemy.ai["laser_timer"] = boss_rage.cooldown(enemy, 0.7)
 
 
 def _update_boss_trapmaster(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
@@ -711,11 +662,11 @@ def _update_boss_trapmaster(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
         aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.85)
         if phase == 0:
             if persona != "cautious":
-                _fire_fan(state, enemy.pos, aim, count=4, spread_deg=56.0, speed=proj_speed, damage=dmg, ttl=2.55, projectile_type="spread")
+                _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 4), spread_deg=56.0, speed=proj_speed, damage=dmg, ttl=2.55, projectile_type="spread")
         elif phase == 1:
-            _fire_fan(state, enemy.pos, aim, count=6, spread_deg=76.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="spread")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 6), spread_deg=76.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="spread")
         else:
-            _fire_fan(state, enemy.pos, aim, count=7, spread_deg=88.0, speed=proj_speed, damage=dmg + 2, ttl=2.55, projectile_type="spread")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=88.0, speed=proj_speed, damage=dmg + 2, ttl=2.55, projectile_type="spread")
             if persona in ("aggressive", "trickster"):
                 _fire_fan(state, enemy.pos, perp(aim), count=3, spread_deg=38.0, speed=proj_speed * 0.9, damage=max(1, dmg), ttl=2.3, projectile_type="spread")
 
@@ -724,7 +675,7 @@ def _update_boss_trapmaster(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
             pos = enemy.pos + Vec2(state.rng.uniform(-70, 70), state.rng.uniform(-70, 70))
             state.enemies.append(Enemy(pos=pos, hp=22 + state.wave * 3, speed=52.0 + state.wave * 1.2, behavior="engineer"))
         base_cd = 2.35 - state.wave * 0.012
-        enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=1.05, persona=persona)
+        enemy.attack_cd = boss_rage.cooldown(enemy, _boss_cd(state, base_cd, phase, floor=1.05, persona=persona))
 
 
 def _update_boss_swarmqueen(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
@@ -760,7 +711,7 @@ def _update_boss_swarmqueen(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
             proj_speed = 190.0
             dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)
             aim = _safe_dir(player_pos - enemy.pos)
-            _fire_fan(state, enemy.pos, aim, count=5 + min(phase, 1), spread_deg=56.0, speed=proj_speed, damage=dmg, projectile_type="plasma")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 5 + min(phase, 1)), spread_deg=56.0, speed=proj_speed, damage=dmg, projectile_type="plasma")
 
         else:
             for _ in range(2):
@@ -768,7 +719,7 @@ def _update_boss_swarmqueen(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
                  pos = enemy.pos + Vec2(math.cos(ang), math.sin(ang)) * 60
                  state.enemies.append(Enemy(pos=pos, hp=12, speed=100.0, behavior="swarm"))
 
-        enemy.attack_cd = _boss_cd(state, 2.5, phase, floor=1.2, persona=persona)
+        enemy.attack_cd = boss_rage.cooldown(enemy, _boss_cd(state, 2.5, phase, floor=1.2, persona=persona))
 
 
 def _update_egg_sac(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
@@ -858,7 +809,7 @@ def _update_boss_brute(enemy: Enemy, player_pos: Vec2, state, dt: float, game, p
             enemy.ai["brute_timer"] = 2.0
             
             sw_dmg = _boss_damage(state, base=7.0, wave_scale=0.13, cap=18)
-            _spawn_shockwave(state, enemy.pos, count=12 + phase_boss * 3, speed=240.0, damage=sw_dmg)
+            _spawn_shockwave(state, enemy.pos, count=boss_rage.volley(enemy, 12 + phase_boss * 3), speed=240.0, damage=sw_dmg)
             
         elif b_timer <= 0:
             enemy.ai["brute_state"] = "recover"
@@ -867,12 +818,12 @@ def _update_boss_brute(enemy: Enemy, player_pos: Vec2, state, dt: float, game, p
     elif b_state == "stun":
         if b_timer <= 0:
             enemy.ai["brute_state"] = "chase"
-            enemy.ai["brute_timer"] = 3.0 if phase_boss == 0 else 2.2
+            enemy.ai["brute_timer"] = boss_rage.cooldown(enemy, 3.0 if phase_boss == 0 else 2.2)
 
     elif b_state == "recover":
         if b_timer <= 0:
             enemy.ai["brute_state"] = "chase"
-            enemy.ai["brute_timer"] = 2.5
+            enemy.ai["brute_timer"] = boss_rage.cooldown(enemy, 2.5)
 
 
 def _update_boss_abyss_gaze(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
@@ -902,14 +853,16 @@ def _update_boss_abyss_gaze(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
         aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.72)
 
         if phase == 0:
-            _fire_fan(state, enemy.pos, aim, count=6, spread_deg=72.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type="plasma")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 6), spread_deg=72.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type="plasma")
         elif phase == 1:
-            _fire_fan(state, enemy.pos, aim, count=7, spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="plasma")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="plasma")
             _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.45, start_deg=enemy.t * 30.0, projectile_type="bullet")
         else:
             for off in (-14.0, 0.0, 14.0):
                 a = _rotate(aim, off)
-                _fire_fan(state, enemy.pos, a, count=3, spread_deg=24.0, speed=proj_speed, damage=dmg + 1, ttl=2.35, projectile_type="plasma")
+                # The one extra shot goes to the centre fan of the three.
+                n_fan = boss_rage.volley(enemy, 3) if off == 0.0 else 3
+                _fire_fan(state, enemy.pos, a, count=n_fan, spread_deg=24.0, speed=proj_speed, damage=dmg + 1, ttl=2.35, projectile_type="plasma")
             _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.78, damage=max(1, dmg - 1), ttl=2.4, start_deg=enemy.t * 34.0, projectile_type="bullet")
 
         beam_len = config.ROOM_RADIUS * 2.0
@@ -937,7 +890,7 @@ def _update_boss_abyss_gaze(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
             state.enemies.append(Enemy(pos=pos, hp=16 + state.wave * 2, speed=74.0 + state.wave * 1.8, behavior=add_behavior))
 
         base_cd = 1.8 - state.wave * 0.006
-        enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=1.0, persona=persona)
+        enemy.attack_cd = boss_rage.cooldown(enemy, _boss_cd(state, base_cd, phase, floor=1.0, persona=persona))
 
 
 def _update_boss_womb_core(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
@@ -974,12 +927,12 @@ def _update_boss_womb_core(enemy: Enemy, player_pos: Vec2, state, dt: float, gam
         gun = cycle_gun(enemy, ["spread", "bullet", "plasma"])
 
         if phase == 0:
-            _fire_fan(state, enemy.pos, aim, count=5, spread_deg=68.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type=gun)
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 5), spread_deg=68.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type=gun)
         elif phase == 1:
-            _fire_fan(state, enemy.pos, aim, count=7, spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type=gun)
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type=gun)
             _fire_ring(state, enemy.pos, count=7, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.5, start_deg=enemy.t * 24.0, projectile_type="bullet")
         else:
-            _fire_fan(state, enemy.pos, aim, count=7, spread_deg=86.0, speed=proj_speed, damage=dmg + 1, ttl=2.5, projectile_type=gun)
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=86.0, speed=proj_speed, damage=dmg + 1, ttl=2.5, projectile_type=gun)
             _fire_fan(state, enemy.pos, perp(aim), count=4, spread_deg=34.0, speed=proj_speed * 0.9, damage=dmg, ttl=2.35, projectile_type="spread")
             _fire_ring(state, enemy.pos, count=6, speed=proj_speed * 0.78, damage=max(1, dmg - 1), ttl=2.35, start_deg=enemy.t * 30.0, projectile_type="plasma")
 
@@ -994,11 +947,15 @@ def _update_boss_womb_core(enemy: Enemy, player_pos: Vec2, state, dt: float, gam
                 state.enemies.append(Enemy(pos=pos, hp=14 + state.wave * 2, speed=86.0 + state.wave * 1.6, behavior=add_behavior))
 
         base_cd = 2.25 - state.wave * 0.007
-        enemy.attack_cd = _boss_cd(state, base_cd, phase, floor=1.15, persona=persona)
+        enemy.attack_cd = boss_rage.cooldown(enemy, _boss_cd(state, base_cd, phase, floor=1.15, persona=persona))
 
 
-def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2 | None = None):
-    """Update enemy AI behavior."""
+def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2 | None = None, coordinate: bool = True):
+    """Update enemy AI behavior.
+
+    ``coordinate=False`` skips the formation steering pass. The batch path in parallel.py runs
+    every behavior first and then steers all units from one snapshot.
+    """
     if player_vel is None:
         player_vel = Vec2(0.0, 0.0)
 
@@ -1016,7 +973,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             if behavior_impl is None:
                 return
             _dispatch_behavior_update(behavior_impl, enemy, player_pos, state, dt, game, player_vel)
-            _apply_type_coordination(enemy, player_pos, state, dt, player_vel)
+            if coordinate:
+                _apply_type_coordination(enemy, player_pos, state, dt, player_vel)
             return
 
         _boss_init(enemy)
@@ -1024,7 +982,8 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
         if int(enemy.ai.get("phase", 0)) != new_phase:
             enemy.ai["phase"] = new_phase
             enemy.attack_cd = min(enemy.attack_cd, 0.35)
-        
+        boss_rage.update_rage(enemy, game)
+
         if enemy.behavior == "boss_thunder":
             _update_boss_thunder(enemy, player_pos, state, dt, game, player_vel)
             return

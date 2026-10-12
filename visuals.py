@@ -9,9 +9,16 @@ import pyglet
 from pyglet import shapes
 from pyglet.graphics import Group
 
-from config import ENEMY_COLORS, SCREEN_H
+import config
+from config import ENEMY_COLORS, POWERUP_COLORS, SCREEN_H, SHIELD_MAX
+from drone_art import DroneArt
 from enemy import brute_charge_lane
+from event_visuals import ArenaEventFx
+from player_art import DEFAULT_PALETTE, PlayerArt
+from powerup_art import make_pickup_art, place_pickup_art
+from projectile_art import ProjectileVisual
 from utils import to_iso, Vec2, enemy_behavior_name
+import motion
 
 # Reduce group churn by bucketing depth values.
 DEPTH_BUCKET = 16
@@ -73,7 +80,12 @@ class Visuals:
         self._trap_handles: dict[int, RenderHandle] = {}
         self._laser_handles: dict[int, RenderHandle] = {}
         self._thunder_handles: dict[int, RenderHandle] = {}
+        self._arena_fx: ArenaEventFx | None = None  # created on the first arena event (event_visuals.py)
         self._player_handle: RenderHandle | None = None
+        self._drone_art: DroneArt | None = None
+        self._drone_handle: RenderHandle | None = None
+        self._player_art: PlayerArt | None = None  # set when config.USE_PLAYER_ART built the character
+        self.player_palette = DEFAULT_PALETTE      # skins replace this dict to recolour the character
         self._scene_stars: list[tuple[shapes.Circle, float, float, float]] = []
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
@@ -128,25 +140,27 @@ class Visuals:
         handle.set_depth(order, self.groups)
 
     def sync_scene(self, t: float, shake: Vec2, combat_intensity: float = 0.0) -> None:
+        ta = motion.clock(t)  # reduced motion freezes the pulses and the glow drift
+        drift = motion.factor()  # star drift is multiplied by this, so it stops with reduced motion
         center_x, center_y = to_iso(Vec2(0.0, 0.0), shake)
         ci = max(0.0, min(1.0, float(combat_intensity)))
 
         offsets = ((-220.0, 120.0), (210.0, -60.0), (30.0, 190.0))
         for i, glow in enumerate(self._scene_glows):
             ox, oy = offsets[i]
-            glow.x = center_x + ox + math.sin(t * (0.25 + i * 0.07)) * 30.0
-            glow.y = center_y + oy + math.cos(t * (0.22 + i * 0.09)) * 24.0
-            glow.opacity = int((14 + i * 6) + (16 + i * 4) * (0.5 + 0.5 * math.sin(t * (0.7 + i * 0.2))))
+            glow.x = center_x + ox + math.sin(ta * (0.25 + i * 0.07)) * 30.0
+            glow.y = center_y + oy + math.cos(ta * (0.22 + i * 0.09)) * 24.0
+            glow.opacity = int((14 + i * 6) + (16 + i * 4) * (0.5 + 0.5 * math.sin(ta * (0.7 + i * 0.2))))
 
         for i, ring in enumerate(self._scene_rings):
             ring.x = center_x
             ring.y = center_y
-            ring.radius = (180 + i * 42) + 6.0 * math.sin(t * (0.8 + i * 0.3))
-            ring.opacity = int(16 + 10 * i + (8 + 10 * ci) * (0.5 + 0.5 * math.sin(t * (1.1 + i * 0.15))))
+            ring.radius = (180 + i * 42) + 6.0 * math.sin(ta * (0.8 + i * 0.3))
+            ring.opacity = int(16 + 10 * i + (8 + 10 * ci) * (0.5 + 0.5 * math.sin(ta * (1.1 + i * 0.15))))
 
         for star, vx, vy, phase in self._scene_stars:
-            star.x += vx * (0.22 + ci * 0.6)
-            star.y += vy * (0.22 + ci * 0.6)
+            star.x += vx * (0.22 + ci * 0.6) * drift
+            star.y += vy * (0.22 + ci * 0.6) * drift
             if star.x < -24:
                 star.x = 1944
             elif star.x > 1944:
@@ -155,7 +169,7 @@ class Visuals:
                 star.y = 1104
             elif star.y > 1104:
                 star.y = -24
-            star.opacity = int(14 + 64 * (0.5 + 0.5 * math.sin(t * 1.4 + phase)))
+            star.opacity = int(14 + 64 * (0.5 + 0.5 * math.sin(ta * 1.4 + phase)))
 
         top, bot, left, right = self._vignette
         top.x, top.y, top.width, top.height = 0, 1048, 1920, 32
@@ -169,7 +183,12 @@ class Visuals:
         right.opacity = int(v_op * 0.8)
 
     def make_player(self):
-        """Create player visual."""
+        """Create player visual: PlayerArt when config.USE_PLAYER_ART is set, else the legacy ship."""
+        if config.USE_PLAYER_ART:
+            self._player_art = PlayerArt(self.batch, None)
+            self._player_handle = RenderHandle(*self._player_art.shapes)
+            return
+        self._player_art = None
         sh = shapes.Ellipse(0, 0, 30, 12, color=(0, 0, 0), batch=self.batch)
         sh.opacity = 130
 
@@ -226,6 +245,17 @@ class Visuals:
 
     def sync_player(self, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None):
         """Update player visual position."""
+        # Rebuild if config.USE_PLAYER_ART changed since the last build, so the flag switches paths at runtime.
+        if self._player_handle is None or (self._player_art is not None) != bool(config.USE_PLAYER_ART):
+            if self._player_handle is not None:
+                self._player_handle.delete()
+            self._player_handle = None
+            self.make_player()
+        ta = motion.clock(t)  # visual pulses only; the laser check below keeps the real time
+        if self._player_art is not None:
+            cx, cy = self._player_art.sync(player, shake, t=ta, aim_dir=aim_dir, palette=self.player_palette)
+            self._set_depth(self._player_handle, cy, shake)
+            return
         assert self._player_handle is not None
         (
             sh, glow, glow2, shield_ring2, shield_ring, laser_ring, boost_ring,
@@ -235,7 +265,7 @@ class Visuals:
         sx, sy = to_iso(player.pos, shake)
         if aim_dir is None or aim_dir.length() <= 1e-6:
             aim_dir = Vec2(1, 0)
-        bob = math.sin(t * 6.0) * 1.5
+        bob = math.sin(ta * 6.0) * 1.5
         
         angle = -math.degrees(math.atan2(aim_dir.y, aim_dir.x))
         
@@ -268,7 +298,7 @@ class Visuals:
         by = cy - aim_dir.y * 10
         engine_glow.x, engine_glow.y = bx, by
             
-        engine_pulse = 0.7 + 0.3 * math.sin(t * (30.0 if is_boosting else 15.0))
+        engine_pulse = 0.7 + 0.3 * math.sin(ta * (30.0 if is_boosting else 15.0))
         engine_glow.color = (255, 180, 70) if is_boosting else (100, 220, 255)
         engine_glow.opacity = int(255 * engine_pulse)
 
@@ -286,7 +316,7 @@ class Visuals:
         tx2, ty2 = cx + aim_dir.y * 4 - aim_dir.x * 9, cy - aim_dir.x * 4 - aim_dir.y * 9
 
         if is_dashing or is_boosting:
-            pulse = 0.7 + 0.3 * math.sin(t * 45.0)
+            pulse = 0.7 + 0.3 * math.sin(ta * 45.0)
             jet_len = (26.0 if is_boosting else 22.0) + 12.0 * pulse
             thruster_l.x, thruster_l.y = tx1, ty1
             thruster_l.x2, thruster_l.y2 = tx1 + back.x * jet_len, ty1 + back.y * (jet_len * 0.6)
@@ -299,7 +329,7 @@ class Visuals:
             thruster_r.opacity = int(110 + 100 * pulse)
         else:
             # Active movement idle thruster
-            idle_pulse = 0.5 + 0.5 * math.sin(t * 18.0)
+            idle_pulse = 0.5 + 0.5 * math.sin(ta * 18.0)
             jet_len = 10.0 + 4.0 * idle_pulse
             thruster_l.x, thruster_l.y = tx1, ty1
             thruster_l.x2, thruster_l.y2 = tx1 + back.x * jet_len, ty1 + back.y * (jet_len * 0.6)
@@ -312,7 +342,7 @@ class Visuals:
 
         # Boost overdrive aura
         if is_boosting:
-            bpulse = 0.65 + 0.35 * math.sin(t * 22.0)
+            bpulse = 0.65 + 0.35 * math.sin(ta * 22.0)
             boost_ring.x, boost_ring.y = cx, cy
             boost_ring.radius = 26 + 3.0 * bpulse
             boost_ring.opacity = int(140 + 80 * bpulse)
@@ -321,20 +351,20 @@ class Visuals:
 
         # Shield aura
         if getattr(player, "shield", 0) > 0:
-            pulse = 0.65 + 0.35 * math.sin(t * 6.5)
+            pulse = 0.65 + 0.35 * math.sin(ta * 6.5)
             shield_ring.x, shield_ring.y = cx, cy
             shield_ring2.x, shield_ring2.y = cx, cy
             shield_ring.radius = 18 + 2.0 * pulse
             shield_ring2.radius = 24 + 3.0 * pulse
-            shield_ring.opacity = int(90 + min(120, player.shield) * 1.0 * pulse)
-            shield_ring2.opacity = int(60 + min(120, player.shield) * 0.5 * pulse)
+            shield_ring.opacity = int(90 + min(SHIELD_MAX, player.shield) * 1.0 * pulse)
+            shield_ring2.opacity = int(60 + min(SHIELD_MAX, player.shield) * 0.5 * pulse)
         else:
             shield_ring.opacity = 0
             shield_ring2.opacity = 0
 
         # Laser aura
         if getattr(player, "laser_until", 0.0) > t:
-            pulse = 0.6 + 0.4 * math.sin(t * 10.0)
+            pulse = 0.6 + 0.4 * math.sin(ta * 10.0)
             laser_ring.x, laser_ring.y = cx, cy
             laser_ring.radius = 22 + 3.0 * pulse
             laser_ring.opacity = int(160 * pulse)
@@ -342,6 +372,15 @@ class Visuals:
             laser_ring.opacity = 0
 
         self._set_depth(self._player_handle, cy, shake)
+
+    def sync_drone(self, drone, shake: Vec2, t: float = 0.0) -> None:
+        """Draw the deployed drone companion. Its shapes are created on first use and hidden while no drone is out."""
+        if self._drone_art is None:
+            self._drone_art = DroneArt(self.batch)
+            self._drone_handle = RenderHandle(*self._drone_art.parts)
+        cy = self._drone_art.sync(drone, shake, t)
+        if drone.active:
+            self._set_depth(self._drone_handle, cy, shake)
 
     def ensure_enemy(self, enemy):
         """Ensure enemy visual exists."""
@@ -565,11 +604,12 @@ class Visuals:
 
     def sync_enemy(self, enemy, shake: Vec2):
         """Update enemy visual position."""
+        et = motion.clock(enemy.t)  # every enemy animation reads this, so reduced motion freezes it
         h = self._enemy_handles[id(enemy)]
         behavior = enemy_behavior_name(enemy)
         base = ENEMY_COLORS.get(behavior, (200, 120, 120))
         sx, sy = to_iso(enemy.pos, shake)
-        bob = math.sin(enemy.t * 6.0) * 1.5
+        bob = math.sin(et * 6.0) * 1.5
 
         # Hit flash & elite visual feedback
         is_flashing = float(getattr(enemy, "hit_flash_timer", 0.0)) > 0
@@ -598,17 +638,17 @@ class Visuals:
             elif behavior == "boss_laser":
                 sh, glow, ring, crown, body, eye, iris = h.objs
                 eye.x, eye.y = sx + 6, sy + 8 + bob
-                iris.x, iris.y = sx + 6 + 2.0 * math.sin(enemy.t * 9.0), sy + 8 + bob
+                iris.x, iris.y = sx + 6 + 2.0 * math.sin(et * 9.0), sy + 8 + bob
             elif behavior == "boss_trapmaster":
                 sh, glow, ring, crown, body, gear = h.objs
                 gear.x, gear.y = sx, sy + bob
-                gear.radius = 26 + 1.5 * math.sin(enemy.t * 3.2)
+                gear.radius = 26 + 1.5 * math.sin(et * 3.2)
             elif behavior == "boss_swarmqueen":
                 sh, glow, ring, crown, body, orb1, orb2, orb3 = h.objs
                 r = 20
-                orb1.x, orb1.y = sx + math.cos(enemy.t * 2.2) * r, sy + bob + math.sin(enemy.t * 2.2) * r
-                orb2.x, orb2.y = sx + math.cos(enemy.t * 2.2 + 2.1) * r, sy + bob + math.sin(enemy.t * 2.2 + 2.1) * r
-                orb3.x, orb3.y = sx + math.cos(enemy.t * 2.2 + 4.2) * r, sy + bob + math.sin(enemy.t * 2.2 + 4.2) * r
+                orb1.x, orb1.y = sx + math.cos(et * 2.2) * r, sy + bob + math.sin(et * 2.2) * r
+                orb2.x, orb2.y = sx + math.cos(et * 2.2 + 2.1) * r, sy + bob + math.sin(et * 2.2 + 2.1) * r
+                orb3.x, orb3.y = sx + math.cos(et * 2.2 + 4.2) * r, sy + bob + math.sin(et * 2.2 + 4.2) * r
             elif behavior == "boss_brute":
                 sh, glow, ring, crown, body, horn, scar, lane = h.objs
                 horn.x, horn.y = sx, sy + bob + 26
@@ -622,7 +662,7 @@ class Visuals:
                     lane_dir, lane_len = lane_geom
                     lx, ly = to_iso(enemy.pos + lane_dir * lane_len, shake)
                     lane.x, lane.y, lane.x2, lane.y2 = sx, sy, lx, ly
-                    lane.opacity = int(145 + 55 * math.sin(enemy.t * 10.0))
+                    lane.opacity = int(145 + 55 * math.sin(et * 10.0))
             else:
                 sh, glow, ring, crown, body = h.objs
 
@@ -630,7 +670,7 @@ class Visuals:
             ring.x, ring.y = sx, sy + bob
             crown.x, crown.y = sx, sy + bob
             body.x, body.y = sx, sy + bob
-            crown.radius = 24 + 2.0 * (0.5 + 0.5 * math.sin(enemy.t * 4.0))
+            crown.radius = 24 + 2.0 * (0.5 + 0.5 * math.sin(et * 4.0))
 
             self._set_depth(h, sy, shake)
             return
@@ -643,7 +683,7 @@ class Visuals:
             fuse_trail.x, fuse_trail.y = sx, sy + bob
             exploding = bool(getattr(enemy, "ai", {}).get("bomber_exploding", False))
             if exploding:
-                pulse = 0.5 + 0.5 * math.sin(enemy.t * 30)
+                pulse = 0.5 + 0.5 * math.sin(et * 30)
                 core.radius = 8 + 4 * pulse
                 core.opacity = 255
                 fuse_speed = 18.0
@@ -653,9 +693,9 @@ class Visuals:
                 fuse_speed = 4.0
             # Fuse spark orbits the body
             fr = 16
-            fuse.x = sx + math.cos(enemy.t * fuse_speed) * fr
-            fuse.y = sy + bob + math.sin(enemy.t * fuse_speed) * fr
-            fuse.opacity = 160 + int(95 * (0.5 + 0.5 * math.sin(enemy.t * 12.0)))
+            fuse.x = sx + math.cos(et * fuse_speed) * fr
+            fuse.y = sy + bob + math.sin(et * fuse_speed) * fr
+            fuse.opacity = 160 + int(95 * (0.5 + 0.5 * math.sin(et * 12.0)))
             self._set_depth(h, sy, shake)
             return
 
@@ -669,8 +709,8 @@ class Visuals:
             tool2.x, tool2.y, tool2.x2, tool2.y2 = sx + 10, sy + 6 + bob, sx + 16, sy + 12 + bob
             # Rotating gear arc
             gear.x, gear.y = sx - 12, sy + 2 + bob
-            gear.radius = 17 + 1.5 * math.sin(enemy.t * 5.0)
-            gear.opacity = 40 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 3.0)))
+            gear.radius = 17 + 1.5 * math.sin(et * 5.0)
+            gear.opacity = 40 + int(30 * (0.5 + 0.5 * math.sin(et * 3.0)))
             self._set_depth(h, sy, shake)
             return
 
@@ -679,10 +719,10 @@ class Visuals:
             sh.x, sh.y = sx, sy - 18
             
             # Heartbeat pulse
-            pulse = 0.8 + 0.2 * math.sin(enemy.t * 8.0)
+            pulse = 0.8 + 0.2 * math.sin(et * 8.0)
             if hasattr(enemy, "ai") and enemy.ai.get("hatch_timer", 0) < 1.0:
                  # Fast pulse before hatching
-                 pulse = 0.8 + 0.3 * math.sin(enemy.t * 18.0)
+                 pulse = 0.8 + 0.3 * math.sin(et * 18.0)
             
             body.x, body.y = sx, sy + bob
             body.radius = max(0.1, 15 * pulse)
@@ -694,7 +734,7 @@ class Visuals:
             vein2.radius = max(0.1, 10 * pulse)
 
             core.x, core.y = sx, sy + bob
-            core.radius = max(0.1, 6 * pulse + 2 * math.sin(enemy.t * 12.0))
+            core.radius = max(0.1, 6 * pulse + 2 * math.sin(et * 12.0))
             
             self._set_depth(h, sy, shake)
             return
@@ -708,8 +748,8 @@ class Visuals:
             eye.x, eye.y = sx + 6, sy + 2 + bob * 0.4
             # Rotating shield ring
             shield_ring.x, shield_ring.y = sx, sy + bob * 0.4
-            shield_ring.radius = 22 + 1.0 * math.sin(enemy.t * 2.0)
-            shield_ring.opacity = 50 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 1.5)))
+            shield_ring.radius = 22 + 1.0 * math.sin(et * 2.0)
+            shield_ring.opacity = 50 + int(30 * (0.5 + 0.5 * math.sin(et * 1.5)))
             self._set_depth(h, sy, shake)
             return
 
@@ -722,12 +762,12 @@ class Visuals:
             eye.x, eye.y = sx + 1, sy + 2 + bob
             # Scope crosshairs rotate slowly
             sr = 20
-            sa = enemy.t * 1.2
+            sa = et * 1.2
             scope_h.x, scope_h.y = sx + 18 - math.cos(sa) * sr, sy + 2 + bob
             scope_h.x2, scope_h.y2 = sx + 18 + math.cos(sa) * sr, sy + 2 + bob
             scope_v.x, scope_v.y = sx + 18, sy + 2 + bob - math.sin(sa) * sr
             scope_v.x2, scope_v.y2 = sx + 18, sy + 2 + bob + math.sin(sa) * sr
-            scope_h.opacity = 60 + int(40 * (0.5 + 0.5 * math.sin(enemy.t * 3.0)))
+            scope_h.opacity = 60 + int(40 * (0.5 + 0.5 * math.sin(et * 3.0)))
             scope_v.opacity = scope_h.opacity
             self._set_depth(h, sy, shake)
             return
@@ -763,7 +803,7 @@ class Visuals:
             sh, body, wing1, wing2, tail, eye, jet = h.objs
             sh.x, sh.y = sx, sy - 17
             body.x, body.y = sx, sy + bob
-            flap = 6 + 4 * math.sin(enemy.t * 10.0)
+            flap = 6 + 4 * math.sin(et * 10.0)
             wing1.x, wing1.y = sx, sy + bob + 6
             wing1.x2, wing1.y2 = sx + 22, sy + bob + flap
             wing1.x3, wing1.y3 = sx + 10, sy + bob - 2
@@ -775,7 +815,7 @@ class Visuals:
             # Jet trail behind
             jet.x, jet.y = sx - 4, sy + bob - 4
             jet.x2, jet.y2 = sx - 18, sy + bob - 16
-            jet.opacity = 50 + int(40 * (0.5 + 0.5 * math.sin(enemy.t * 8.0)))
+            jet.opacity = 50 + int(40 * (0.5 + 0.5 * math.sin(et * 8.0)))
             self._set_depth(h, sy, shake)
             return
 
@@ -790,8 +830,8 @@ class Visuals:
             mouth.x3, mouth.y3 = sx + 18, sy - 4 + bob
             # Pulsing acid glow
             acid_glow.x, acid_glow.y = sx, sy + bob
-            acid_glow.radius = 14 + 3 * math.sin(enemy.t * 4.0)
-            acid_glow.opacity = 18 + int(14 * (0.5 + 0.5 * math.sin(enemy.t * 5.0)))
+            acid_glow.radius = 14 + 3 * math.sin(et * 4.0)
+            acid_glow.opacity = 18 + int(14 * (0.5 + 0.5 * math.sin(et * 5.0)))
             self._set_depth(h, sy, shake)
             return
 
@@ -800,17 +840,17 @@ class Visuals:
             sh.x, sh.y = sx, sy - 18
             body.x, body.y = sx, sy + bob
             r = 8
-            dot1.x, dot1.y = sx + math.cos(enemy.t * 6.0) * r, sy + bob + math.sin(enemy.t * 6.0) * r
-            dot2.x, dot2.y = sx + math.cos(enemy.t * 6.0 + 2.1) * r, sy + bob + math.sin(enemy.t * 6.0 + 2.1) * r
-            dot3.x, dot3.y = sx + math.cos(enemy.t * 6.0 + 4.2) * r, sy + bob + math.sin(enemy.t * 6.0 + 4.2) * r
+            dot1.x, dot1.y = sx + math.cos(et * 6.0) * r, sy + bob + math.sin(et * 6.0) * r
+            dot2.x, dot2.y = sx + math.cos(et * 6.0 + 2.1) * r, sy + bob + math.sin(et * 6.0 + 2.1) * r
+            dot3.x, dot3.y = sx + math.cos(et * 6.0 + 4.2) * r, sy + bob + math.sin(et * 6.0 + 4.2) * r
             # Flickering antenna
-            jitter = math.sin(enemy.t * 20.0) * 3.0
+            jitter = math.sin(et * 20.0) * 3.0
             ant1.x, ant1.y = sx - 3, sy + bob + 8
             ant1.x2, ant1.y2 = sx - 5 + jitter, sy + bob + 15
             ant2.x, ant2.y = sx + 3, sy + bob + 8
             ant2.x2, ant2.y2 = sx + 5 - jitter, sy + bob + 15
-            ant1.opacity = 70 + int(50 * (0.5 + 0.5 * math.sin(enemy.t * 14.0)))
-            ant2.opacity = 70 + int(50 * (0.5 + 0.5 * math.sin(enemy.t * 14.0 + 1.5)))
+            ant1.opacity = 70 + int(50 * (0.5 + 0.5 * math.sin(et * 14.0)))
+            ant2.opacity = 70 + int(50 * (0.5 + 0.5 * math.sin(et * 14.0 + 1.5)))
             self._set_depth(h, sy, shake)
             return
 
@@ -820,10 +860,10 @@ class Visuals:
             body.x, body.y = sx, sy + bob
             # Pulsing aura ring
             aura.x, aura.y = sx, sy + bob
-            aura.radius = 16 + 4 * math.sin(enemy.t * 3.5)
-            aura.opacity = 30 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 2.5)))
+            aura.radius = 16 + 4 * math.sin(et * 3.5)
+            aura.opacity = 30 + int(30 * (0.5 + 0.5 * math.sin(et * 2.5)))
             # Rotating spikes
-            t_rot = enemy.t * 1.8
+            t_rot = et * 1.8
             for i, spike in enumerate((spike1, spike2, spike3)):
                 a = t_rot + i * (math.tau / 3)
                 sr = 18
@@ -855,105 +895,16 @@ class Visuals:
             h.delete()
 
     def ensure_projectile(self, proj):
-        """Ensure projectile visual exists."""
+        """Ensure projectile visual exists. The look comes from projectile_art, keyed by weapon."""
         if id(proj) in self._proj_handles:
             return
-        
-        # Different visuals for different projectile types
-        projectile_type = getattr(proj, 'projectile_type', 'bullet')
-        is_enemy = str(getattr(proj, "owner", "player")) == "enemy"
-        is_crit = bool(getattr(proj, "is_crit", False))
-        simple_dot = projectile_type in ("bullet", "spread") and not is_crit
-        
-        if is_crit:
-            sh = shapes.Circle(0, 0, 5, color=(255, 205, 50), batch=self.batch, group=self._projectile_group)
-            core = shapes.Circle(0, 0, 3, color=(255, 255, 240), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "bomb":
-            # Bomb: heavy orange core with dark casing.
-            sh = shapes.Circle(0, 0, 7, color=(120, 70, 45), batch=self.batch, group=self._projectile_group)
-            core = shapes.Circle(0, 0, 4, color=(255, 145, 90), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "railgun":
-            # Railgun: high-velocity electric slug with glowing sheath
-            sh = shapes.Circle(0, 0, 6, color=(60, 180, 255), batch=self.batch, group=self._projectile_group)
-            core = shapes.Circle(0, 0, 3, color=(230, 255, 255), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "flak":
-            # Flak: cluster fragmentation shell
-            sh = shapes.Circle(0, 0, 5, color=(255, 130, 40), batch=self.batch, group=self._projectile_group)
-            core = shapes.Circle(0, 0, 2.5, color=(255, 235, 160), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "missile":
-            # Larger missile
-            if is_enemy:
-                sh = shapes.Circle(0, 0, 6, color=(170, 60, 60), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 3, color=(255, 120, 120), batch=self.batch, group=self._projectile_group)
-            else:
-                sh = shapes.Circle(0, 0, 6, color=(200, 100, 50), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 3, color=(255, 150, 100), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "plasma":
-            # Plasma projectile
-            if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 90, 180), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 180, 220), batch=self.batch, group=self._projectile_group)
-            else:
-                sh = shapes.Circle(0, 0, 4, color=(150, 100, 255), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(200, 150, 255), batch=self.batch, group=self._projectile_group)
-        elif projectile_type == "spread":
-            # Spread pellets
-            if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 110, 90), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch, group=self._projectile_group)
-            else:
-                sh = shapes.Circle(0, 0, 4, color=(255, 200, 100), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
-        else:  # bullet or default
-            # Default bullet
-            if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 90, 90), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch, group=self._projectile_group)
-            else:
-                sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch, group=self._projectile_group)
-                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
-
-        if simple_dot:
-            # Tight dot (no trailing streak) to avoid visual noise.
-            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
-            flare.opacity = 90 if is_enemy else 130
-            handle = RenderHandle(sh, core, flare)
-        else:
-            # Streaked projectile for heavier/kinetic types.
-            trail_color = (255, 220, 80) if is_crit else sh.color
-            trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=trail_color, batch=self.batch, group=self._projectile_group)
-            trail.opacity = 95 if is_enemy else (150 if is_crit else 125)
-            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
-            flare.opacity = 150 if is_crit else 120
-            handle = RenderHandle(trail, sh, core, flare)
-
         # Every shape is created in the unified projectile group, so projectiles never join
         # the depth groups and never pay a batch migration after creation.
-        self._proj_handles[id(proj)] = handle
+        self._proj_handles[id(proj)] = ProjectileVisual(self.batch, self._projectile_group, proj)
 
     def sync_projectile(self, proj, shake: Vec2):
-        """Update projectile visual position."""
-        h = self._proj_handles[id(proj)]
-        if len(h.objs) == 3:
-            sh, core, flare = h.objs
-            trail = None
-        else:
-            trail, sh, core, flare = h.objs
-        sx, sy = to_iso(proj.pos, shake)
-        v = getattr(proj, "vel", Vec2(0.0, 0.0))
-        v2 = Vec2(v.x, v.y)
-        speed = v2.length()
-        if trail is not None:
-            if speed <= 1e-6:
-                v2 = Vec2(1.0, 0.0)
-                speed = 1.0
-            vd = v2.normalized()
-            trail_len = (18.0 if getattr(proj, "projectile_type", "") == "railgun" else 8.0) + min(22.0, speed * 0.035)
-            trail.x, trail.y = sx, sy
-            trail.x2, trail.y2 = sx - vd.x * trail_len, sy - vd.y * trail_len * 0.65
-        sh.x, sh.y = sx, sy
-        core.x, core.y = sx, sy
-        flare.x, flare.y = sx, sy
+        """Update projectile visual position and animation."""
+        self._proj_handles[id(proj)].sync(proj, shake)
 
     def drop_projectile(self, proj):
         """Remove projectile visual."""
@@ -978,6 +929,11 @@ class Visuals:
             "weapon": ((220, 230, 255), "W", 14),    # Weapon pickup
             "ultra": ((255, 230, 170), "U", 14),     # Ultra ability charge
             "boost": ((255, 145, 45), "B", 14),      # Overdrive Boost
+            "drone": ((90, 255, 225), "D", 14),      # Rare drone companion (teal)
+            "ricochet": (POWERUP_COLORS["ricochet"], "<>", 14),
+            "homing": (POWERUP_COLORS["homing"], "H", 14),
+            "time_slow": (POWERUP_COLORS["time_slow"], "~", 14),
+            "magnet": (POWERUP_COLORS["magnet"], "M", 14),
         }.get(p.kind, ((200, 200, 200), "?", 12))
 
         # Large, glowing center orb
@@ -1006,18 +962,22 @@ class Visuals:
             batch=self.batch,
             color=(255, 255, 255, 255),
         )
-        self._power_handles[id(p)] = RenderHandle(ring2, ring1, orb, core, label)
+        art_shapes, art_offsets = make_pickup_art(p.kind, self.batch, color, size)
+        handle = RenderHandle(ring2, ring1, orb, core, label, *art_shapes)
+        handle.art_offsets = art_offsets
+        self._power_handles[id(p)] = handle
 
     def sync_powerup(self, p, shake: Vec2):
         """Update powerup visual position."""
         h = self._power_handles[id(p)]
-        ring2, ring1, orb, core, label = h.objs
+        ring2, ring1, orb, core, label = h.objs[:5]
         sx, sy = to_iso(p.pos, shake)
         ring2.x, ring2.y = sx, sy
         ring1.x, ring1.y = sx, sy
         orb.x, orb.y = sx, sy
         core.x, core.y = sx, sy
         label.x, label.y = sx, sy
+        place_pickup_art(h.objs[5:], h.art_offsets, sx, sy)
         self._set_depth(h, sy, shake)
 
     def drop_powerup(self, p):
@@ -1116,14 +1076,17 @@ class Visuals:
         if id(tr) in self._trap_handles:
             return
         kind = getattr(tr, "kind", "")
-        if kind in ("slam", "slam_warn", "womb_warn"):
+        if kind in ("slam", "slam_warn", "womb_warn", "meteor"):
             # Ring-style hazard. Womb warnings reuse it in a violet tint, so they never read as slam red.
+            # Meteor zones (arena events) use amber, so they never read as slam red either.
             if kind == "womb_warn":
                 tint, core_tint = (150, 110, 255), (235, 215, 255)
+            elif kind == "meteor":
+                tint, core_tint = (255, 150, 60), (255, 240, 200)
             else:
                 tint, core_tint = (255, 80, 80), (255, 220, 200)
             base = shapes.Circle(0, 0, tr.radius, color=tint, batch=self.batch)
-            base.opacity = 40 if kind in ("slam_warn", "womb_warn") else 65
+            base.opacity = 40 if kind in ("slam_warn", "womb_warn", "meteor") else 65
             ring = shapes.Arc(0, 0, tr.radius * 1.05, segments=48, thickness=5, color=(255, 255, 255), batch=self.batch)
             ring.opacity = 170
             core = shapes.Circle(0, 0, max(10, tr.radius * 0.2), color=core_tint, batch=self.batch)
@@ -1141,16 +1104,21 @@ class Visuals:
     def sync_trap(self, tr, shake: Vec2):
         h = self._trap_handles[id(tr)]
         kind = getattr(tr, "kind", "")
-        if kind in ("slam", "slam_warn", "womb_warn"):
+        if kind in ("slam", "slam_warn", "womb_warn", "meteor"):
             base, ring, core = h.objs
             sx, sy = to_iso(tr.pos, shake)
             base.x, base.y = sx, sy
             ring.x, ring.y = sx, sy
             core.x, core.y = sx, sy
-            pulse = 0.6 + 0.4 * math.sin(tr.t * 16.0)
+            pulse = 0.6 + 0.4 * math.sin(motion.clock(tr.t) * 16.0)
             ring.opacity = int(110 + 110 * pulse)
             if kind in ("slam_warn", "womb_warn"):
                 base.opacity = int(40 + 60 * pulse)
+            elif kind == "meteor":
+                # A marked zone is faint with a dim ring. A live zone is solid with a bright ring, so the moment it hits reads.
+                live = tr.t >= tr.armed_delay
+                base.opacity = 190 if live else int(36 + 40 * pulse)
+                ring.opacity = int(210 + 45 * pulse) if live else int(80 + 50 * pulse)
             self._set_depth(h, sy, shake)
             return
 
@@ -1241,11 +1209,20 @@ class Visuals:
             outer.opacity = 110
             core.opacity = 50
         else:
-            outer.opacity = int(140 + 70 * (0.5 + 0.5 * math.sin(th.t * 40.0)))
-            core.opacity = int(200 + 40 * (0.5 + 0.5 * math.sin(th.t * 55.0)))
+            outer.opacity = int(140 + 70 * (0.5 + 0.5 * math.sin(motion.clock(th.t) * 40.0)))
+            core.opacity = int(200 + 40 * (0.5 + 0.5 * math.sin(motion.clock(th.t) * 55.0)))
         self._set_depth(h, max(y1, y2), shake)
 
     def drop_thunder(self, th):
         h = self._thunder_handles.pop(id(th), None)
         if h:
             h.delete()
+
+    def sync_arena_event(self, ev, shake: Vec2) -> None:
+        if self._arena_fx is None:
+            self._arena_fx = ArenaEventFx(self.batch, self.groups)
+        self._arena_fx.sync(ev, shake)
+
+    def drop_arena_event(self, ev) -> None:
+        if self._arena_fx is not None:
+            self._arena_fx.drop(ev)

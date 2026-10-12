@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import pyglet
 from pyglet import shapes
 
-from config import ULTRA_MAX_CHARGES_HARD_CAP
+from config import SHIELD_MAX, ULTRA_MAX_CHARGES_HARD_CAP
 from menu import (
     _ui_scale,
     UI_FONT_HEAD,
@@ -18,6 +18,7 @@ from menu import (
     UI_FONT_META,
     _sync_label_style_if_ready,
 )
+import ui_theme
 
 if TYPE_CHECKING:
     from player import Player
@@ -75,7 +76,7 @@ PERM_REWARD_NAMES: dict[str, str] = {
 }
 
 # Floors and caps shared by apply_perm_reward and the no-op filter in roll_boss_rewards.
-_SHIELD_CAP = 120
+_SHIELD_CAP = SHIELD_MAX  # same cap as pickups, the HUD bar and powerup.py
 _DASH_CD_FLOOR = 0.6
 _FIRE_RATE_FLOOR = 0.12
 
@@ -362,6 +363,7 @@ class _RewardCard:
         self.lift = 0.0  # smoothed hover amount, 0..1
         self.focus = 0.0  # smoothed keyboard-selection amount, 0..1
         self.enter = 1.0  # entrance progress, set by the menu each frame
+        self.active = False  # False: hidden, not laid out and not selectable
         self.accent = CATEGORY_COLORS["BOON"]
 
         self._glow_outer = shapes.Rectangle(0, 0, 1, 1, color=self.accent, batch=batch)
@@ -417,11 +419,26 @@ class _RewardCard:
             color=(*self.accent, 255),
             batch=batch,
         )
+        self._parts = (
+            self._glow_outer, self._glow_inner, self._border, self._body, self._shine, self._stripe,
+            self._badge, self._badge_text, self.title, self.desc, self.tag,
+        )
+        self.set_active(False)
+
+    def set_active(self, active: bool) -> None:
+        """Show or hide the whole card. A hidden card is not drawn, hit-tested or selectable."""
+        self.active = bool(active)
+        if not self.active:
+            self.enabled = False
+            self.hovered = False
+            self.selected = False
+        for part in self._parts:
+            part.visible = self.active
 
     def set_option(self, opt: dict, stage: str) -> None:
         key = str(opt.get("key", "")).strip()
         self.enabled = bool(key)
-        self.title.text = str(opt.get("title", "--"))
+        self.title.text = str(opt.get("title", ""))
         self.desc.text = str(opt.get("desc", ""))
         if key:
             category = REWARD_CATEGORY.get(key, "BOON")
@@ -452,6 +469,8 @@ class _RewardCard:
         self.focus = _approach(self.focus, 1.0 if (self.selected and self.enabled) else 0.0, dt)
 
     def place(self, x: float, y: float, w: float, h: float, s: float, panel_alpha: float, panel_dy: float) -> None:
+        if not self.active:
+            return
         hot = max(self.lift, self.focus)
         live = 1.0 if self.enabled else 0.55
         a = max(0.0, min(1.0, panel_alpha * self.enter)) * live
@@ -520,6 +539,8 @@ class BossRewardMenu:
     Mouse: clicking a card picks it. Keyboard: 1-3 highlight a card and
     ENTER or SPACE confirms it (same path as a click). ``on_mouse_press`` and
     ``on_key_press`` return "done" when the whole flow completes.
+    A step with fewer than three options shows only those cards, centred. A step
+    with none shows an empty note, and ENTER or a click moves on.
     """
 
     def __init__(self, width: int, height: int, on_pick_temp, on_pick_perm):
@@ -542,41 +563,41 @@ class BossRewardMenu:
 
         self.eyebrow = pyglet.text.Label(
             "P L O U T O  //  BOSS REWARD",
-            font_name=UI_FONT_META,
-            font_size=11,
+            font_name=ui_theme.font_name("eyebrow"),
+            font_size=ui_theme.font_size("eyebrow", 1.0),
             x=width // 2,
             y=height // 2,
             anchor_x="center",
             anchor_y="center",
-            color=(120, 150, 190, 255),
+            color=(*ui_theme.mix_rgb(ui_theme.BACKGROUND, ui_theme.ACCENT, 0.7), 255),
             batch=self.batch,
         )
         self.title = pyglet.text.Label(
             "BOSS DEFEATED",
-            font_name=UI_FONT_HEAD,
-            font_size=30,
+            font_name=ui_theme.font_name("heading"),
+            font_size=ui_theme.font_size("heading", 1.0),
             x=width // 2,
             y=height // 2,
             anchor_x="center",
             anchor_y="center",
-            color=(230, 240, 255, 255),
+            color=(*ui_theme.TEXT, 255),
             batch=self.batch,
         )
         self.subtitle = pyglet.text.Label(
             "",
-            font_name=UI_FONT_BODY,
-            font_size=15,
+            font_name=ui_theme.font_name("subhead"),
+            font_size=ui_theme.font_size("subhead", 1.0),
             x=width // 2,
             y=height // 2,
             anchor_x="center",
             anchor_y="center",
-            color=(170, 185, 210, 255),
+            color=(*ui_theme.MUTED, 255),
             batch=self.batch,
         )
         self.section = pyglet.text.Label(
             "",
-            font_name=UI_FONT_HEAD,
-            font_size=12,
+            font_name=ui_theme.font_name("section"),
+            font_size=ui_theme.font_size("section", 1.0),
             x=0,
             y=0,
             anchor_x="left",
@@ -586,13 +607,13 @@ class BossRewardMenu:
         )
         self.section_note = pyglet.text.Label(
             "",
-            font_name=UI_FONT_BODY,
-            font_size=13,
+            font_name=ui_theme.font_name("note"),
+            font_size=ui_theme.font_size("note", 1.0),
             x=0,
             y=0,
             anchor_x="right",
             anchor_y="center",
-            color=(150, 166, 194, 255),
+            color=(*ui_theme.MUTED, 255),
             batch=self.batch,
         )
         self.tip = pyglet.text.Label(
@@ -606,6 +627,19 @@ class BossRewardMenu:
             color=(145, 160, 190, 255),
             batch=self.batch,
         )
+
+        self._empty = pyglet.text.Label(
+            "Nothing to pick this time",
+            font_name=UI_FONT_BODY,
+            font_size=16,
+            x=width // 2,
+            y=height // 2,
+            anchor_x="center",
+            anchor_y="center",
+            color=(150, 166, 194, 255),
+            batch=self.batch,
+        )
+        self._empty.visible = False
 
         self._cards: list[_RewardCard] = [_RewardCard(i, self.batch) for i in range(3)]
 
@@ -625,15 +659,19 @@ class BossRewardMenu:
         self._panel_h = 1
         self._card_x = 0.0
         self._card_top = 0.0
+        self._card_region_top = 0.0
+        self._avail_h = 1.0
         self._card_w = 1.0
         self._card_h = 1.0
         self._card_gap = 0.0
         self._sync_stage_labels()
         self.resize(width, height)
+        self._sync_buttons()
 
     def begin(self, temp_options: list[dict], perm_options: list[dict]) -> None:
-        self._temp_opts = list(temp_options or [])[:3]
-        self._perm_opts = list(perm_options or [])[:3]
+        # Only real options become cards: fewer than three means fewer cards, never placeholders.
+        self._temp_opts = [o for o in list(temp_options or []) if str(o.get("key", "")).strip()][:3]
+        self._perm_opts = [o for o in list(perm_options or []) if str(o.get("key", "")).strip()][:3]
         self._stage = "temp"
         self._reset_pointer_state()
         self._panel_clock = 0.0
@@ -660,14 +698,37 @@ class BossRewardMenu:
         self.section.color = (*accent, 255)
         self._section_rule.color = accent
         self.subtitle.text = "Step 1: temporary card (lasts 2-3 waves)   >   Step 2: permanent boost (lasts the run)"
-        self.tip.text = "1-3 choose  |  ENTER confirm"
+        self.tip.text = self._tip_text()
+
+    def _current_options(self) -> list[dict]:
+        return self._temp_opts if self._stage == "temp" else self._perm_opts
+
+    def _visible_count(self) -> int:
+        """How many cards the current step shows: one per real option, at most three."""
+        return min(len(self._cards), len(self._current_options()))
+
+    def _tip_text(self) -> str:
+        if self._visible_count() == 0:
+            return "ENTER or click to continue"
+        return "1-3 choose  |  ENTER confirm"
 
     def _sync_buttons(self) -> None:
-        options = self._temp_opts if self._stage == "temp" else self._perm_opts
-        while len(options) < 3:
-            options.append({"key": "", "title": "--", "desc": ""})
-        for i in range(3):
-            self._cards[i].set_option(options[i], self._stage)
+        options = self._current_options()
+        for i, card in enumerate(self._cards):
+            if i < len(options):
+                card.set_option(options[i], self._stage)
+                card.set_active(True)
+            else:
+                card.set_active(False)
+        self._empty.visible = not options
+        self.tip.text = self._tip_text()
+        self._layout_cards()
+
+    def _layout_cards(self) -> None:
+        """Stack the visible cards and centre that stack vertically in the card region."""
+        n = self._visible_count()
+        block_h = n * self._card_h + max(0, n - 1) * self._card_gap
+        self._card_top = self._card_region_top - max(0.0, (self._avail_h - block_h) / 2.0)
 
     def _card_rect(self, i: int) -> tuple[float, float, float, float]:
         """Resting rectangle (x, y, w, h) of card i, ignoring entrance and hover motion."""
@@ -675,7 +736,7 @@ class BossRewardMenu:
         return (self._card_x, y, self._card_w, self._card_h)
 
     def _hit_index(self, x: float, y: float) -> int | None:
-        for i in range(len(self._cards)):
+        for i in range(self._visible_count()):
             bx, by, bw, bh = self._card_rect(i)
             if bx <= x <= bx + bw and by <= y <= by + bh:
                 return i
@@ -699,24 +760,27 @@ class BossRewardMenu:
         self._panel_y = cy - panel_h // 2
 
         # Header block on top, footer hint at the bottom, card stack centred between them.
+        # Card height is sized for three slots so one or two cards keep the same size.
         header_h = 146.0 * s
         footer_h = 46.0 * s
         gap = 14.0 * s
         avail = max(1.0, panel_h - header_h - footer_h)
         bh = max(54.0 * s, min(88.0 * s, (avail - 2 * gap) / 3.0))
-        block_h = 3 * bh + 2 * gap
         bw = min(int(panel_w * 0.84), int(680 * s))
         self._card_w = float(bw)
         self._card_h = bh
         self._card_gap = gap
         self._card_x = cx - bw // 2
-        self._card_top = self._panel_y + panel_h - header_h - max(0.0, (avail - block_h) / 2.0)
+        self._card_region_top = self._panel_y + panel_h - header_h
+        self._avail_h = avail
+        self._layout_cards()
 
-        _sync_label_style_if_ready(self.eyebrow, UI_FONT_META, max(9, int(11 * s)))
-        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(18, int(30 * s)))
-        _sync_label_style_if_ready(self.subtitle, UI_FONT_BODY, max(11, int(15 * s)))
-        _sync_label_style_if_ready(self.section, UI_FONT_HEAD, max(9, int(12 * s)))
-        _sync_label_style_if_ready(self.section_note, UI_FONT_BODY, max(10, int(13 * s)))
+        _sync_label_style_if_ready(self._empty, UI_FONT_BODY, max(11, int(16 * s)))
+        _sync_label_style_if_ready(self.eyebrow, ui_theme.font_name("eyebrow"), ui_theme.font_size("eyebrow", s))
+        _sync_label_style_if_ready(self.title, ui_theme.font_name("heading"), ui_theme.font_size("heading", s))
+        _sync_label_style_if_ready(self.subtitle, ui_theme.font_name("subhead"), ui_theme.font_size("subhead", s))
+        _sync_label_style_if_ready(self.section, ui_theme.font_name("section"), ui_theme.font_size("section", s))
+        _sync_label_style_if_ready(self.section_note, ui_theme.font_name("note"), ui_theme.font_size("note", s))
         _sync_label_style_if_ready(self.tip, UI_FONT_META, max(9, int(12 * s)))
         for card in self._cards:
             card.set_metrics(s, bw)
@@ -757,7 +821,7 @@ class BossRewardMenu:
         self._panel_shine.height = max(6, int(14 * s))
         self._panel_shine.opacity = int(16 * pa)
 
-        _put_label(self.eyebrow, cx, top - 34 * s, pa)
+        _put_label(self.eyebrow, cx, top - 30 * s, pa)
         _put_label(self.title, cx, top - 56 * s, pa)
         _put_label(self.subtitle, cx, top - 88 * s, pa)
         sec_y = top - 116 * s
@@ -769,6 +833,7 @@ class BossRewardMenu:
         self._section_rule.height = max(2, int(2 * s))
         self._section_rule.opacity = int(140 * pa)
         _put_label(self.tip, cx, py + dy + 22 * s, pa)
+        _put_label(self._empty, cx, self._card_region_top - self._avail_h / 2.0 + dy, pa)
 
         for i, card in enumerate(self._cards):
             card.enter = _ease_out((self._card_clock - i * _CARD_STAGGER_T) / _CARD_FADE_T)
@@ -784,6 +849,8 @@ class BossRewardMenu:
     def on_mouse_press(self, x: float, y: float, button: int) -> str | None:
         if button != pyglet.window.mouse.LEFT:
             return None
+        if self._visible_count() == 0:
+            return self._continue_empty()
         hit = self._hit_index(x, y)
         if hit is None:
             return None
@@ -795,20 +862,32 @@ class BossRewardMenu:
         index_for = {k._1: 0, k._2: 1, k._3: 2, k.NUM_1: 0, k.NUM_2: 1, k.NUM_3: 2}
         if symbol in index_for:
             i = index_for[symbol]
-            options = self._temp_opts if self._stage == "temp" else self._perm_opts
-            if i < len(options) and str(options[i].get("key", "")).strip():
+            if i < self._visible_count():
                 self._selected = i
                 for j, card in enumerate(self._cards):
                     card.selected = j == i
             return None
         if symbol in (k.ENTER, k.NUM_ENTER, k.SPACE):
+            if self._visible_count() == 0:
+                return self._continue_empty()
             if self._selected is None:
                 return None
             return self._choose(self._selected)
         return None
 
+    def _continue_empty(self) -> str | None:
+        """Leave a step that has no options. The temporary step hands over to the permanent one."""
+        if self._stage == "temp":
+            self._stage = "perm"
+            self._reset_pointer_state()
+            self._card_clock = 0.0
+            self._sync_stage_labels()
+            self._sync_buttons()
+            return None
+        return "done"
+
     def _choose(self, i: int) -> str | None:
-        options = self._temp_opts if self._stage == "temp" else self._perm_opts
+        options = self._current_options()
         if i >= len(options):
             return None
         chosen = options[i]

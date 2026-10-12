@@ -37,3 +37,9 @@ android/.kivy/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local meta-progress save (progress.py)
+progress.json
+
+# Run recordings written with --record (replay.py)
+replays/

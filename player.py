@@ -28,6 +28,12 @@ class Player:
     vortex_until: float = 0.0
     vortex_radius: float = 70.0
     vortex_dps: float = 38.0
+    drone_until: float = 0.0
+    # Timed powerups: run-clock expiry times (0.0 = inactive). See powerup.py.
+    ricochet_until: float = 0.0
+    homing_until: float = 0.0
+    time_slow_until: float = 0.0
+    magnet_until: float = 0.0
     ultra_charges: int = 0
     ultra_max_charges: int = ULTRA_MAX_CHARGES
     ultra_cd_until: float = 0.0
@@ -51,6 +57,8 @@ class Player:
     crit_chance_bonus: float = 0.0
     crit_mult_bonus: float = 0.0
     damage_flash_timer: float = 0.0
+    # Current steering velocity. Stock movement snaps to input; Drift eases it (see mutators.steer_velocity).
+    move_vel: Vec2 = field(default_factory=lambda: Vec2(0.0, 0.0))
 
 
 # ---------------------------------------------------------------------------

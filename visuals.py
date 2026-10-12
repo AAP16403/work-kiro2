@@ -119,8 +119,11 @@ class Visuals:
             vg.opacity = 0
             self._vignette.append(vg)
 
-    def _set_depth(self, handle: RenderHandle, y: float) -> None:
-        order = int((SCREEN_H + 1000 - y) / DEPTH_BUCKET)
+    def _set_depth(self, handle: RenderHandle, y: float, shake: Vec2) -> None:
+        # ``y`` is the shaken screen y. Remove the frame's shake offset first so depth
+        # follows the world position; otherwise a shaking screen keeps moving handles
+        # across bucket boundaries and every crossing migrates them between batch groups.
+        order = int((SCREEN_H + 1000 - (y - shake.y)) / DEPTH_BUCKET)
         handle.set_depth(order, self.groups)
 
     def sync_scene(self, t: float, shake: Vec2, combat_intensity: float = 0.0) -> None:
@@ -337,7 +340,7 @@ class Visuals:
         else:
             laser_ring.opacity = 0
 
-        self._set_depth(self._player_handle, cy)
+        self._set_depth(self._player_handle, cy, shake)
 
     def ensure_enemy(self, enemy):
         """Ensure enemy visual exists."""
@@ -617,7 +620,7 @@ class Visuals:
             body.x, body.y = sx, sy + bob
             crown.radius = 24 + 2.0 * (0.5 + 0.5 * math.sin(enemy.t * 4.0))
 
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "bomber":
@@ -641,7 +644,7 @@ class Visuals:
             fuse.x = sx + math.cos(enemy.t * fuse_speed) * fr
             fuse.y = sy + bob + math.sin(enemy.t * fuse_speed) * fr
             fuse.opacity = 160 + int(95 * (0.5 + 0.5 * math.sin(enemy.t * 12.0)))
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "engineer":
@@ -656,7 +659,7 @@ class Visuals:
             gear.x, gear.y = sx - 12, sy + 2 + bob
             gear.radius = 17 + 1.5 * math.sin(enemy.t * 5.0)
             gear.opacity = 40 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 3.0)))
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "egg_sac":
@@ -681,7 +684,7 @@ class Visuals:
             core.x, core.y = sx, sy + bob
             core.radius = max(0.1, 6 * pulse + 2 * math.sin(enemy.t * 12.0))
             
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "tank":
@@ -695,7 +698,7 @@ class Visuals:
             shield_ring.x, shield_ring.y = sx, sy + bob * 0.4
             shield_ring.radius = 22 + 1.0 * math.sin(enemy.t * 2.0)
             shield_ring.opacity = 50 + int(30 * (0.5 + 0.5 * math.sin(enemy.t * 1.5)))
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "ranged":
@@ -714,7 +717,7 @@ class Visuals:
             scope_v.x2, scope_v.y2 = sx + 18, sy + 2 + bob + math.sin(sa) * sr
             scope_h.opacity = 60 + int(40 * (0.5 + 0.5 * math.sin(enemy.t * 3.0)))
             scope_v.opacity = scope_h.opacity
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "charger":
@@ -741,7 +744,7 @@ class Visuals:
             else:
                 trail1.opacity = 0
                 trail2.opacity = 0
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "flyer":
@@ -761,7 +764,7 @@ class Visuals:
             jet.x, jet.y = sx - 4, sy + bob - 4
             jet.x2, jet.y2 = sx - 18, sy + bob - 16
             jet.opacity = 50 + int(40 * (0.5 + 0.5 * math.sin(enemy.t * 8.0)))
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "spitter":
@@ -777,7 +780,7 @@ class Visuals:
             acid_glow.x, acid_glow.y = sx, sy + bob
             acid_glow.radius = 14 + 3 * math.sin(enemy.t * 4.0)
             acid_glow.opacity = 18 + int(14 * (0.5 + 0.5 * math.sin(enemy.t * 5.0)))
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "swarm":
@@ -796,7 +799,7 @@ class Visuals:
             ant2.x2, ant2.y2 = sx + 5 - jitter, sy + bob + 15
             ant1.opacity = 70 + int(50 * (0.5 + 0.5 * math.sin(enemy.t * 14.0)))
             ant2.opacity = 70 + int(50 * (0.5 + 0.5 * math.sin(enemy.t * 14.0 + 1.5)))
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if behavior == "chaser":
@@ -822,7 +825,7 @@ class Visuals:
                 spike.x3, spike.y3 = sx + math.cos(base_a2) * br, sy + bob + math.sin(base_a2) * br
             eye1.x, eye1.y = sx - 3, sy + bob + 2
             eye2.x, eye2.y = sx + 3, sy + bob + 2
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         sh, body, shine, eye1, eye2 = h.objs
@@ -831,7 +834,7 @@ class Visuals:
         shine.x, shine.y = sx - 3, sy + 3
         eye1.x, eye1.y = sx - 4, sy + 1
         eye2.x, eye2.y = sx + 2, sy + 1
-        self._set_depth(h, sy)
+        self._set_depth(h, sy, shake)
 
     def drop_enemy(self, enemy):
         """Remove enemy visual."""
@@ -851,70 +854,69 @@ class Visuals:
         simple_dot = projectile_type in ("bullet", "spread") and not is_crit
         
         if is_crit:
-            sh = shapes.Circle(0, 0, 5, color=(255, 205, 50), batch=self.batch)
-            core = shapes.Circle(0, 0, 3, color=(255, 255, 240), batch=self.batch)
+            sh = shapes.Circle(0, 0, 5, color=(255, 205, 50), batch=self.batch, group=self._projectile_group)
+            core = shapes.Circle(0, 0, 3, color=(255, 255, 240), batch=self.batch, group=self._projectile_group)
         elif projectile_type == "bomb":
             # Bomb: heavy orange core with dark casing.
-            sh = shapes.Circle(0, 0, 7, color=(120, 70, 45), batch=self.batch)
-            core = shapes.Circle(0, 0, 4, color=(255, 145, 90), batch=self.batch)
+            sh = shapes.Circle(0, 0, 7, color=(120, 70, 45), batch=self.batch, group=self._projectile_group)
+            core = shapes.Circle(0, 0, 4, color=(255, 145, 90), batch=self.batch, group=self._projectile_group)
         elif projectile_type == "railgun":
             # Railgun: high-velocity electric slug with glowing sheath
-            sh = shapes.Circle(0, 0, 6, color=(60, 180, 255), batch=self.batch)
-            core = shapes.Circle(0, 0, 3, color=(230, 255, 255), batch=self.batch)
+            sh = shapes.Circle(0, 0, 6, color=(60, 180, 255), batch=self.batch, group=self._projectile_group)
+            core = shapes.Circle(0, 0, 3, color=(230, 255, 255), batch=self.batch, group=self._projectile_group)
         elif projectile_type == "flak":
             # Flak: cluster fragmentation shell
-            sh = shapes.Circle(0, 0, 5, color=(255, 130, 40), batch=self.batch)
-            core = shapes.Circle(0, 0, 2.5, color=(255, 235, 160), batch=self.batch)
+            sh = shapes.Circle(0, 0, 5, color=(255, 130, 40), batch=self.batch, group=self._projectile_group)
+            core = shapes.Circle(0, 0, 2.5, color=(255, 235, 160), batch=self.batch, group=self._projectile_group)
         elif projectile_type == "missile":
             # Larger missile
             if is_enemy:
-                sh = shapes.Circle(0, 0, 6, color=(170, 60, 60), batch=self.batch)
-                core = shapes.Circle(0, 0, 3, color=(255, 120, 120), batch=self.batch)
+                sh = shapes.Circle(0, 0, 6, color=(170, 60, 60), batch=self.batch, group=self._projectile_group)
+                core = shapes.Circle(0, 0, 3, color=(255, 120, 120), batch=self.batch, group=self._projectile_group)
             else:
-                sh = shapes.Circle(0, 0, 6, color=(200, 100, 50), batch=self.batch)
-                core = shapes.Circle(0, 0, 3, color=(255, 150, 100), batch=self.batch)
+                sh = shapes.Circle(0, 0, 6, color=(200, 100, 50), batch=self.batch, group=self._projectile_group)
+                core = shapes.Circle(0, 0, 3, color=(255, 150, 100), batch=self.batch, group=self._projectile_group)
         elif projectile_type == "plasma":
             # Plasma projectile
             if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 90, 180), batch=self.batch)
-                core = shapes.Circle(0, 0, 2, color=(255, 180, 220), batch=self.batch)
+                sh = shapes.Circle(0, 0, 4, color=(255, 90, 180), batch=self.batch, group=self._projectile_group)
+                core = shapes.Circle(0, 0, 2, color=(255, 180, 220), batch=self.batch, group=self._projectile_group)
             else:
-                sh = shapes.Circle(0, 0, 4, color=(150, 100, 255), batch=self.batch)
-                core = shapes.Circle(0, 0, 2, color=(200, 150, 255), batch=self.batch)
+                sh = shapes.Circle(0, 0, 4, color=(150, 100, 255), batch=self.batch, group=self._projectile_group)
+                core = shapes.Circle(0, 0, 2, color=(200, 150, 255), batch=self.batch, group=self._projectile_group)
         elif projectile_type == "spread":
             # Spread pellets
             if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 110, 90), batch=self.batch)
-                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch)
+                sh = shapes.Circle(0, 0, 4, color=(255, 110, 90), batch=self.batch, group=self._projectile_group)
+                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch, group=self._projectile_group)
             else:
-                sh = shapes.Circle(0, 0, 4, color=(255, 200, 100), batch=self.batch)
-                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
+                sh = shapes.Circle(0, 0, 4, color=(255, 200, 100), batch=self.batch, group=self._projectile_group)
+                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
         else:  # bullet or default
             # Default bullet
             if is_enemy:
-                sh = shapes.Circle(0, 0, 4, color=(255, 90, 90), batch=self.batch)
-                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch)
+                sh = shapes.Circle(0, 0, 4, color=(255, 90, 90), batch=self.batch, group=self._projectile_group)
+                core = shapes.Circle(0, 0, 2, color=(255, 220, 220), batch=self.batch, group=self._projectile_group)
             else:
-                sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch)
-                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch)
+                sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch, group=self._projectile_group)
+                core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
 
         if simple_dot:
             # Tight dot (no trailing streak) to avoid visual noise.
-            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch)
+            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
             flare.opacity = 90 if is_enemy else 130
             handle = RenderHandle(sh, core, flare)
         else:
             # Streaked projectile for heavier/kinetic types.
             trail_color = (255, 220, 80) if is_crit else sh.color
-            trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=trail_color, batch=self.batch)
+            trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=trail_color, batch=self.batch, group=self._projectile_group)
             trail.opacity = 95 if is_enemy else (150 if is_crit else 125)
-            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch)
+            flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
             flare.opacity = 150 if is_crit else 120
             handle = RenderHandle(trail, sh, core, flare)
 
-        # Performance optimization: projectiles all render in a unified foreground group
-        # avoiding constant depth-group churn in pyglet batch!
-        handle.set_group(self._projectile_group)
+        # Every shape is created in the unified projectile group, so projectiles never join
+        # the depth groups and never pay a batch migration after creation.
         self._proj_handles[id(proj)] = handle
 
     def sync_projectile(self, proj, shake: Vec2):
@@ -1004,7 +1006,7 @@ class Visuals:
         orb.x, orb.y = sx, sy
         core.x, core.y = sx, sy
         label.x, label.y = sx, sy
-        self._set_depth(h, sy)
+        self._set_depth(h, sy, shake)
 
     def drop_powerup(self, p):
         """Remove powerup visual."""
@@ -1073,7 +1075,7 @@ class Visuals:
             shard2.x, shard2.y = sx + r * 0.25, sy + 2
             shard2.x2, shard2.y2 = sx + r * 0.9, sy + r * 1.25
             shard2.x3, shard2.y3 = sx + r * 0.55, sy + 2
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         if kind == "crate":
@@ -1082,7 +1084,7 @@ class Visuals:
             base.x, base.y = sx, sy + 4
             border.x, border.y = sx, sy + 4
             strap.x, strap.y, strap.x2, strap.y2 = sx - r * 0.9, sy + 4, sx + r * 0.9, sy + 4
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         shadow, base, top, ring = h.objs
@@ -1091,7 +1093,7 @@ class Visuals:
         top.x, top.y = sx, sy + 12
         ring.x, ring.y = sx, sy + 2
         ring.radius = r * (1.02 + 0.03 * math.sin(sy * 0.02))
-        self._set_depth(h, sy)
+        self._set_depth(h, sy, shake)
 
     def drop_obstacle(self, ob):
         h = self._obstacle_handles.pop(id(ob), None)
@@ -1130,7 +1132,7 @@ class Visuals:
             ring.opacity = int(110 + 110 * pulse)
             if getattr(tr, "kind", "") == "slam_warn":
                 base.opacity = int(40 + 60 * pulse)
-            self._set_depth(h, sy)
+            self._set_depth(h, sy, shake)
             return
 
         base, core, spike, spike2 = h.objs
@@ -1151,7 +1153,7 @@ class Visuals:
             core.opacity = 200
             spike.opacity = 220
             spike2.opacity = 220
-        self._set_depth(h, sy)
+        self._set_depth(h, sy, shake)
 
     def drop_trap(self, tr):
         h = self._trap_handles.pop(id(tr), None)
@@ -1182,7 +1184,7 @@ class Visuals:
         else:
             line.opacity = 200
             core.opacity = 180
-        self._set_depth(h, max(y1, y2))
+        self._set_depth(h, max(y1, y2), shake)
 
     def drop_laser(self, lb):
         h = self._laser_handles.pop(id(lb), None)
@@ -1213,7 +1215,7 @@ class Visuals:
         else:
             outer.opacity = int(140 + 70 * (0.5 + 0.5 * math.sin(th.t * 40.0)))
             core.opacity = int(200 + 40 * (0.5 + 0.5 * math.sin(th.t * 55.0)))
-        self._set_depth(h, max(y1, y2))
+        self._set_depth(h, max(y1, y2), shake)
 
     def drop_thunder(self, th):
         h = self._thunder_handles.pop(id(th), None)

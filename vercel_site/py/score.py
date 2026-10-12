@@ -57,6 +57,10 @@ class ScoreTracker:
         self.difficulty: str = difficulty
         self.kills: int = 0
         self.best_combo: float = 1.0
+        # Set by submit_score: 1-based board position (0 = off the board) and the
+        # points still needed to pass the entry directly above (None if #1 or off-board).
+        self.last_rank: int = 0
+        self.last_points_to_next: int | None = None
 
     # ------------------------------------------------------------------
     # Events
@@ -140,9 +144,15 @@ class ScoreTracker:
             pass
 
     def submit_score(self, wave: int) -> bool:
-        """Submit the current run score.  Returns True if it's a new high score."""
+        """Submit the current run score and place it on the board.
+
+        Returns True only for a strict new best.  A run that merely ties the current
+        top score (including a 0-point first run) is not a new high score.  Also sets
+        ``last_rank`` and ``last_points_to_next`` for the Game Over screen.
+        """
         data = self.load_high_scores()
         entries = data.get(self.difficulty, [])
+        prev_best = max((int(e.get("score", 0)) for e in entries), default=0)
 
         entry = {
             "score": self.score,
@@ -152,13 +162,25 @@ class ScoreTracker:
             "date": _time.strftime("%Y-%m-%d %H:%M"),
         }
         entries.append(entry)
+        # Stable sort: an equal score lands below the older entry, so a tie never takes #1.
         entries.sort(key=lambda e: e["score"], reverse=True)
         entries = entries[:MAX_HIGH_SCORES]
         data[self.difficulty] = entries
         self.save_high_scores(data)
 
-        # New high score if this entry is #1
-        return entries[0]["score"] == self.score
+        # Locate this run by identity (equal scores compare equal, so value lookup is ambiguous).
+        self.last_rank = 0
+        self.last_points_to_next = None
+        for index, e in enumerate(entries):
+            if e is entry:
+                self.last_rank = index + 1
+                break
+        if self.last_rank > 1:
+            above_score = int(entries[self.last_rank - 2]["score"])
+            # +1 so a tie reads as one point to beat the entry above.
+            self.last_points_to_next = above_score - self.score + 1
+
+        return self.score > prev_best
 
     def get_high_score(self) -> int:
         """Return the current top high score for this difficulty."""

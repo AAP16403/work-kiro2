@@ -36,6 +36,9 @@ WAVE_COOLDOWN = 2.0
 MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter
 WEAPON_WAVE_UPGRADE_CHANCE = 0.5  # Chance per wave clear to roll a weapon; it is equipped only if it outranks the current one
 
+# Game Over: the staged reveal runs this long, and input (click or key) unlocks when it ends.
+GAME_OVER_REVEAL_S = 1.0
+
 # Ultra ability (special powerup -> right click)
 ULTRA_MAX_CHARGES = 2  # Starting charge capacity; permanent Ultra rewards raise it per run
 ULTRA_MAX_CHARGES_HARD_CAP = 4  # Upper bound for run-scaled Ultra charge capacity

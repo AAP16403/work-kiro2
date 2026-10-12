@@ -51,6 +51,7 @@ class MenuButton:
     font_size: int = 16
     text_color: tuple = (255, 255, 255, 255)
     is_hovered: bool = False
+    alpha: float = 1.0  # 0..1 fade multiplier used by staged reveals
 
     _batch: object = field(init=False, default=None, repr=False)
     _shadow: object = field(init=False, default=None, repr=False)
@@ -93,32 +94,36 @@ class MenuButton:
         border_pad = max(2, int(self.height * 0.06))
         shine_h = max(3, int(self.height * 0.14))
 
+        fade = max(0.0, min(1.0, float(self.alpha)))
+
         self._shadow.x = self.x + shadow_off
         self._shadow.y = self.y - shadow_off
         self._shadow.width = self.width
         self._shadow.height = self.height
+        self._shadow.opacity = int(72 * fade)
 
         self._border.x = self.x - border_pad
         self._border.y = self.y - border_pad
         self._border.width = self.width + border_pad * 2
         self._border.height = self.height + border_pad * 2
-        self._border.opacity = 86 if self.is_hovered else 32
+        self._border.opacity = int((86 if self.is_hovered else 32) * fade)
 
         self._bg.x = self.x
         self._bg.y = self.y
         self._bg.width = self.width
         self._bg.height = self.height
         self._bg.color = color
-        self._bg.opacity = 245 if self.is_hovered else 214
+        self._bg.opacity = int((245 if self.is_hovered else 214) * fade)
 
         self._shine.x = self.x + 2
         self._shine.y = self.y + self.height - shine_h - 2
         self._shine.width = max(1, self.width - 4)
         self._shine.height = shine_h
-        self._shine.opacity = 70 if self.is_hovered else 24
+        self._shine.opacity = int((70 if self.is_hovered else 24) * fade)
 
         self._label.text = self.text
         _sync_label_style_if_ready(self._label, self.font_name, int(self.font_size))
+        self._label.opacity = int((self.text_color[3] if len(self.text_color) > 3 else 255) * fade)
         self._label.x = self.x + self.width // 2
         self._label.y = self.y + self.height // 2
 
@@ -1626,9 +1631,41 @@ class PauseMenu:
         self.batch.draw()
 
 
+# Game Over reveal, as fractions of the reveal length (config.GAME_OVER_REVEAL_S).
+# The frozen scene shows first; the overlay ramps in, then each element fades and rises in on its own span.
+_GO_OVERLAY_SPAN = (0.30, 0.60)
+_GO_STAGE_SPAN = {
+    "title": (0.30, 0.55),
+    "final": (0.40, 0.65),
+    "wave": (0.50, 0.75),
+    "high": (0.56, 0.80),
+    "new_high": (0.62, 0.84),
+    "stats": (0.68, 0.90),
+    "buttons": (0.78, 0.96),
+    "hint": (0.86, 1.00),
+}
+_GO_COUNT_SPAN = (0.50, 1.00)  # the final score counts up over the second half of the reveal
+_GO_RISE_PX = 14               # labels rise this far (before UI scale) into their resting place
+_GO_STAT_RGBA = (188, 210, 232, 235)
+_GO_RANK_GOLD = (255, 216, 100)
+
+
+def _ease_out_cubic(x: float) -> float:
+    x = max(0.0, min(1.0, x))
+    return 1.0 - (1.0 - x) ** 3
+
+
+def _reveal_progress(p: float, span: tuple[float, float]) -> float:
+    """Eased 0..1 progress of reveal fraction p through a (start, end) span."""
+    start, end = span
+    if end <= start:
+        return 1.0 if p >= end else 0.0
+    return _ease_out_cubic((p - start) / (end - start))
+
+
 class GameOverMenu:
-    """Game Over screen."""
-    
+    """Game Over screen: run summary, staged reveal, and retry / main menu buttons."""
+
     def __init__(self, width: int, height: int):
         self.batch = pyglet.graphics.Batch()
         self.overlay = shapes.Rectangle(0, 0, width, height, color=(22, 5, 10), batch=self.batch)
@@ -1700,33 +1737,61 @@ class GameOverMenu:
             color=(255, 200, 60, 255),
             batch=self.batch,
         )
+
+        # One row of run stats: survival time, kills, best combo, leaderboard rank.
+        self.stats_labels: list[pyglet.text.Label] = [
+            pyglet.text.Label(
+                "",
+                font_name=UI_FONT_META,
+                font_size=14,
+                x=0,
+                y=0,
+                anchor_x="center",
+                anchor_y="center",
+                color=_GO_STAT_RGBA,
+                batch=self.batch,
+            )
+            for _ in range(4)
+        ]
+
+        self.hint_label = pyglet.text.Label(
+            "ENTER retry  |  ESC main menu",
+            font_name=UI_FONT_META,
+            font_size=14,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(168, 186, 206, 220),
+            batch=self.batch,
+        )
+
+        self._scale = 1.0
+        self._score_value = 0
+        self._shown_score: int | None = None
+        self._button_base_y: list[int] = [0, 0]
+        self._base_y: dict[str, int] = {}
+        # Full alpha per reveal stage. Buttons animate through MenuButton.alpha instead.
+        self._reveal_targets: dict[str, list[tuple[pyglet.text.Label, int]]] = {
+            "title": [(self.title, 255)],
+            "final": [(self.final_score_label, 255)],
+            "wave": [(self.score_label, 255)],
+            "high": [(self.high_score_label, 220)],
+            "new_high": [(self.new_high_label, 255)],
+            "stats": [(label, _GO_STAT_RGBA[3]) for label in self.stats_labels],
+            "hint": [(self.hint_label, 220)],
+        }
+        self._reveal_t = float(getattr(config, "GAME_OVER_REVEAL_S", 1.0))
+        self._reveal_total = self._reveal_t
         self.resize(width, height)
 
     def resize(self, width: int, height: int):
         cx = width // 2
         cy = height // 2
         scale = min(_ui_scale(width, height), 1.6)
+        self._scale = scale
         self.overlay.width = width
         self.overlay.height = height
-        self.title.x = cx
-        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(24, int(46 * scale)))
-        self.title.y = height - int(95 * scale)
-
-        self.final_score_label.x = cx
-        _sync_label_style_if_ready(self.final_score_label, UI_FONT_HEAD, max(16, int(30 * scale)))
-        self.final_score_label.y = height - int(155 * scale)
-
-        self.score_label.x = cx
-        _sync_label_style_if_ready(self.score_label, UI_FONT_BODY, max(12, int(18 * scale)))
-        self.score_label.y = height - int(195 * scale)
-
-        self.high_score_label.x = cx
-        _sync_label_style_if_ready(self.high_score_label, UI_FONT_META, max(10, int(14 * scale)))
-        self.high_score_label.y = height - int(225 * scale)
-
-        self.new_high_label.x = cx
-        _sync_label_style_if_ready(self.new_high_label, UI_FONT_HEAD, max(12, int(18 * scale)))
-        self.new_high_label.y = height - int(255 * scale)
 
         button_w = int(260 * scale)
         button_h = int(62 * scale)
@@ -1737,11 +1802,50 @@ class GameOverMenu:
             btn.font_size = font
 
         gap = int(18 * scale)
-        btn_start_y = cy - int(10 * scale)
+        btn_start_y = cy - int(70 * scale)
         ys = [btn_start_y, btn_start_y - (button_h + gap)]
-        for btn, y in zip(self.buttons, ys):
+        self._button_base_y = ys
+        for btn in self.buttons:
             btn.x = cx - btn.width // 2
-            btn.y = y
+
+        # Resting y for every stage; set_reveal() adds the rise offset on top of these.
+        self._base_y = {
+            "title": height - int(95 * scale),
+            "final": height - int(155 * scale),
+            "wave": height - int(195 * scale),
+            "high": height - int(225 * scale),
+            "new_high": height - int(255 * scale),
+            "stats": height - int(290 * scale),
+            "hint": ys[1] - int(28 * scale),
+        }
+
+        self.title.x = cx
+        _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(24, int(46 * scale)))
+
+        self.final_score_label.x = cx
+        _sync_label_style_if_ready(self.final_score_label, UI_FONT_HEAD, max(16, int(30 * scale)))
+
+        self.score_label.x = cx
+        _sync_label_style_if_ready(self.score_label, UI_FONT_BODY, max(12, int(18 * scale)))
+
+        self.high_score_label.x = cx
+        _sync_label_style_if_ready(self.high_score_label, UI_FONT_META, max(10, int(14 * scale)))
+
+        self.new_high_label.x = cx
+        _sync_label_style_if_ready(self.new_high_label, UI_FONT_HEAD, max(12, int(18 * scale)))
+
+        col_w = int(200 * scale)
+        stat_font = max(10, int(14 * scale))
+        for i, label in enumerate(self.stats_labels):
+            label.x = cx + int((i - 1.5) * col_w)
+            _sync_label_style_if_ready(label, UI_FONT_META, stat_font)
+
+        self.hint_label.x = cx
+        _sync_label_style_if_ready(self.hint_label, UI_FONT_META, max(10, int(13 * scale)))
+
+        # Re-apply the current reveal so every label and button lands on the new layout.
+        self.set_reveal(self._reveal_t, self._reveal_total)
+        for btn in self.buttons:
             btn.sync()
 
     def set_wave(self, wave: int):
@@ -1751,9 +1855,72 @@ class GameOverMenu:
     def set_results(self, wave: int, score: int, high_score: int, is_new_high: bool):
         """Set game-over data with score info."""
         self.score_label.text = f"You reached Wave {wave}"
+        self._score_value = int(score)
+        self._shown_score = int(score)
         self.final_score_label.text = f"Score: {score:,}"
         self.high_score_label.text = f"High Score: {high_score:,}"
-        self.new_high_label.text = "\u2605 NEW HIGH SCORE! \u2605" if is_new_high else ""
+        self.new_high_label.text = "★ NEW HIGH SCORE! ★" if is_new_high else ""
+
+    @staticmethod
+    def _rank_text(rank: int, points_to_next: int | None, is_new_high: bool) -> str:
+        if rank <= 0:
+            return "Off the board"
+        if rank == 1:
+            # A 0-point first run tops an empty board without beating anything, so it is not "NEW".
+            return "NEW #1" if is_new_high else "#1"
+        pts = 1 if points_to_next is None else max(1, int(points_to_next))
+        return f"{pts:,} to beat #{rank - 1}"
+
+    def set_run_stats(
+        self,
+        survived: float,
+        kills: int,
+        best_combo: float,
+        rank: int = 0,
+        points_to_next: int | None = None,
+        is_new_high: bool = False,
+    ):
+        """Fill the run summary row: time survived, kills, best combo and leaderboard rank."""
+        minutes, seconds = divmod(max(0, int(survived)), 60)
+        self.stats_labels[0].text = f"SURVIVED: {minutes}:{seconds:02d}"
+        self.stats_labels[1].text = f"KILLS: {max(0, int(kills)):,}"
+        self.stats_labels[2].text = f"BEST COMBO: {float(best_combo):.1f}x"
+        rank_label = self.stats_labels[3]
+        rank_label.text = f"RANK: {self._rank_text(int(rank), points_to_next, bool(is_new_high))}"
+        gold = int(rank) == 1 and bool(is_new_high)
+        rgb = _GO_RANK_GOLD if gold else _GO_STAT_RGBA[:3]
+        rank_label.color = (*rgb, rank_label.opacity)
+
+    def set_reveal(self, t: float, total: float | None = None):
+        """Drive the staged reveal. t is seconds since the run ended; from total on, everything is shown."""
+        if total is None:
+            total = float(getattr(config, "GAME_OVER_REVEAL_S", 1.0))
+        self._reveal_t = float(t)
+        self._reveal_total = max(1e-6, float(total))
+        p = max(0.0, min(1.0, self._reveal_t / self._reveal_total))
+        rise = int(_GO_RISE_PX * self._scale)
+
+        self.overlay.opacity = int(216 * _reveal_progress(p, _GO_OVERLAY_SPAN))
+
+        for key, targets in self._reveal_targets.items():
+            a = _reveal_progress(p, _GO_STAGE_SPAN[key])
+            y = self._base_y.get(key, 0) - int((1.0 - a) * rise)
+            if key == "new_high" and self.new_high_label.text:
+                y += int(round(4.0 * math.sin(self._reveal_t * 6.0)))
+            for label, full_alpha in targets:
+                label.y = y
+                label.opacity = int(full_alpha * a)
+
+        # Count the final score up; assign text only when the displayed integer changes.
+        shown = int(round(self._score_value * _reveal_progress(p, _GO_COUNT_SPAN)))
+        if shown != self._shown_score:
+            self._shown_score = shown
+            self.final_score_label.text = f"Score: {shown:,}"
+
+        btn_a = _reveal_progress(p, _GO_STAGE_SPAN["buttons"])
+        for btn, base_y in zip(self.buttons, self._button_base_y):
+            btn.alpha = btn_a
+            btn.y = base_y - int((1.0 - btn_a) * rise)
 
     def on_mouse_motion(self, x: float, y: float):
         for button in self.buttons:

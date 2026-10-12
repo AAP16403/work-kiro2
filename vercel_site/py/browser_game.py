@@ -152,6 +152,7 @@ class BrowserGame:
         self.final_wave = 0
         self.high_score = 0
         self.is_new_high = False
+        self.run_summary = ""
 
         self._active_temp_rewards: list[dict] = []
         self._run_permanent_rewards: list[str] = []
@@ -705,7 +706,26 @@ class BrowserGame:
         self.final_score = int(self.score.score)
         self.is_new_high = self.score.submit_score(self.final_wave)
         self.high_score = self.score.get_high_score()
+        self.run_summary = self._format_run_summary(float(self.state.time))
         self.state_name = STATE_GAME_OVER
+
+    def _format_run_summary(self, survived: float) -> str:
+        """One-line run summary for the Game Over panel (mirrors the desktop stats row)."""
+        minutes, seconds = divmod(max(0, int(survived)), 60)
+        rank = int(getattr(self.score, "last_rank", 0))
+        if rank <= 0:
+            rank_text = "Off the board"
+        elif rank == 1:
+            # A 0-point first run tops an empty board without beating anything, so it is not "NEW".
+            rank_text = "NEW #1" if self.is_new_high else "#1"
+        else:
+            pts = getattr(self.score, "last_points_to_next", None)
+            pts = 1 if pts is None else max(1, int(pts))
+            rank_text = f"{pts:,} to beat #{rank - 1}"
+        return (
+            f"Survived {minutes}:{seconds:02d}  |  Kills {int(self.score.kills):,}  |  "
+            f"Combo {float(self.score.best_combo):.1f}x  |  Rank: {rank_text}"
+        )
 
     def _update_playing(self, dt: float) -> None:
         if not self.state or not self.player:
@@ -2541,6 +2561,11 @@ class BrowserGame:
             ctx.font = f"800 {int(24 * scale)}px Orbitron, sans-serif"
             pulse_y = 4 * math.sin(self.background_t * 6.0)
             ctx.fillText("\u2605  NEW HIGH SCORE  \u2605", cx, py + 260 * scale + pulse_y)
+
+        if self.run_summary:
+            ctx.fillStyle = "rgba(188, 210, 232, 0.92)"
+            ctx.font = f"600 {int(15 * scale)}px Rajdhani, sans-serif"
+            ctx.fillText(self.run_summary, cx, py + 287 * scale)
 
         ctx.textAlign = "start"
         for button in self.game_over_buttons:

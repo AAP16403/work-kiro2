@@ -25,6 +25,7 @@ from weapons import get_weapon_for_wave, get_effective_fire_rate
 from particles import ParticleSystem
 from audio import AudioManager, load_audio_settings, save_audio_settings
 import shake_prefs
+import access_prefs
 from popups import DamagePopups
 from menu import (
     Menu,
@@ -94,6 +95,8 @@ class Game(pyglet.window.Window):
 
         shake_level = shake_prefs.load_shake_level(default="full")
         config.SHAKE_SCALE = shake_prefs.shake_scale_for_level(shake_level)
+        # Accessibility options: saved values become the runtime flags before any menu or HUD is built.
+        access = access_prefs.apply(access_prefs.load_access_settings())
 
         self.settings = {
             "difficulty": "normal",
@@ -107,6 +110,7 @@ class Game(pyglet.window.Window):
             "music_volume": music_vol,
             "sfx_volume": sfx_vol,
         }
+        self.settings.update(access)
         self._windowed_size = (self.width, self.height)
 
         # Menu system
@@ -121,6 +125,9 @@ class Game(pyglet.window.Window):
             map_type=self.settings.get("map_type", MAP_CIRCLE),
             music_volume=music_vol,
             sfx_volume=sfx_vol,
+            reduced_motion=access[access_prefs.REDUCED_MOTION_KEY],
+            colorblind_palette=access[access_prefs.COLORBLIND_KEY],
+            high_contrast_hud=access[access_prefs.HIGH_CONTRAST_KEY],
         )
         self.guide_menu = GuideMenu(self.width, self.height)
         self.pause_menu = PauseMenu(self.width, self.height)
@@ -643,12 +650,27 @@ class Game(pyglet.window.Window):
             return "reduced" if self._coerce_bool(reduced, default=False) else "full"
         return None
 
+    def _apply_accessibility(self, value: dict) -> None:
+        """Apply the Accessibility options named in a settings dict. Saves them when one changed, and mirrors them into the menu and the HUD."""
+        named = {key: value[key] for key in access_prefs.ACCESS_KEYS if key in value}
+        before = access_prefs.current()
+        after = access_prefs.apply(named)
+        self.settings.update(after)
+        if after != before:
+            access_prefs.save_access_settings(after)
+        if getattr(self, "settings_menu", None):
+            self.settings_menu.set_accessibility(after)
+        if getattr(self, "hud", None):
+            self.hud.set_high_contrast(after[access_prefs.HIGH_CONTRAST_KEY])
+
     def _on_settings_change(self, value):
         """Callback for settings changes."""
         if not isinstance(value, dict):
             return
         previous_shake_level = shake_prefs.normalize_shake_level(self.settings.get("shake_level"))
         self.settings.update(value)
+        if any(key in value for key in access_prefs.ACCESS_KEYS):
+            self._apply_accessibility(value)
         if "music_volume" in value or "sfx_volume" in value:
             self.audio.set_volumes(music=value.get("music_volume"), sfx=value.get("sfx_volume"))
         advanced_fx = value.get("advanced_fx")

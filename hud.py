@@ -24,6 +24,11 @@ from hud_widgets import (
 )
 
 
+CONTRAST_LIFT = 0.45      # high contrast: each HUD text channel moves this far toward white
+CONTRAST_PLATE_COLOR = (6, 10, 18)
+CONTRAST_PLATE_ALPHA = 215  # opacity of the dark plate behind each HUD number in high contrast
+CONTRAST_PLATE_PAD = 4      # reference pixels between a number and its plate's edge
+
 BANNER_IN_S = 0.25        # ease-out slide/scale-in
 BANNER_OUT_S = 0.45       # fade-out at the end of a banner
 BOSS_LAG_HOLD_S = 0.10    # damage trail waits this long before it starts shrinking
@@ -109,6 +114,11 @@ class HUD:
         self.batch = pyglet.graphics.Batch()
         # Panel backgrounds live in their own batch, drawn first, so bars, chips and text sit on top.
         self._frame_batch = pyglet.graphics.Batch()
+        # Order inside self.batch: panels (order 0), number plates (1), text (2). Labels default to the text group.
+        self._plate_group = pyglet.graphics.Group(order=1)
+        self._text_group = pyglet.graphics.Group(order=2)
+        self._contrast = bool(getattr(config, "HIGH_CONTRAST_HUD", False))
+        self._label_base = {}  # id(label) -> (label, base RGBA), so high contrast can be toggled at any time
 
         # ── Health / Shield / Boost bars (bottom-left panel; panel shapes come from layout) ──
         self.hp_bar_bg = shapes.Rectangle(0, 0, 1, 1, color=(42, 45, 55), batch=self.batch)
@@ -147,6 +157,17 @@ class HUD:
         # Achievement toasts: a FIFO that shows one toast at a time, under the score panel
         self.toasts = ToastQueue()
         self.toast_view = ToastView(self.batch, self._label, frame_batch=self._frame_batch)
+        # High-contrast plates: one dark plate behind each HUD number, sized to its text in _sync_number_plates().
+        number_labels = [
+            self.hp_value_label, self.shield_value_label, self.boost_value_label,
+            self.wave_label, self.meta_label, self.status_label, self.score_value_label, self.combo_label,
+            *self.weapon_chip.labels(),
+        ]
+        self._number_pairs = []
+        for lbl in number_labels:
+            plate = shapes.Rectangle(0, 0, 1, 1, color=CONTRAST_PLATE_COLOR, batch=self.batch, group=self._plate_group)
+            plate.opacity = 0
+            self._number_pairs.append((lbl, plate))
 
         # ── Banner (center-screen; own batch so it draws over the HUD) ──
         self._banner_batch = pyglet.graphics.Batch()
@@ -172,6 +193,8 @@ class HUD:
             "", font_name=UI_FONT_BODY, font_size=16, x=0, y=0, anchor_x="center", anchor_y="baseline",
             color=(196, 210, 230, 230), batch=self._banner_batch, group=self._banner_g_txt,
         )
+        self._paint(self.banner_title, (238, 245, 255, 255))
+        self._paint(self.banner_sub, (196, 210, 230, 230))
 
         # ── Boss health bar (top-center, under the status bar) ──────
         self._boss_batch = pyglet.graphics.Batch()
@@ -209,6 +232,9 @@ class HUD:
             "", UI_FONT_BODY, 13, ax="right", ay="baseline", color=(255, 236, 220, 255),
             batch=self._boss_batch, group=self._boss_g_txt,
         )
+        boss_plate = shapes.Rectangle(0, 0, 1, 1, color=CONTRAST_PLATE_COLOR, batch=self._boss_batch, group=self._boss_g_bar)
+        boss_plate.opacity = 0
+        self._number_pairs.append((self.boss_pct_label, boss_plate))
 
         self.layout(width, height)
 
@@ -221,11 +247,76 @@ class HUD:
         """Create a label that is resized with the HUD scale in layout()."""
         lbl = pyglet.text.Label(
             text, font_name=font, font_size=size, x=0, y=0,
-            anchor_x=ax, anchor_y=ay, color=color,
-            batch=batch if batch is not None else self.batch, group=group,
+            anchor_x=ax, anchor_y=ay, color=self._tone(color),
+            batch=batch if batch is not None else self.batch,
+            group=group if group is not None else self._text_group,
         )
+        self._label_base[id(lbl)] = (lbl, self._base_rgba(color))
         self._scaled_labels.append((lbl, size))
         return lbl
+
+    @staticmethod
+    def _base_rgba(color) -> tuple:
+        vals = tuple(int(c) for c in color)
+        return vals + (255,) if len(vals) == 3 else vals
+
+    def _tone(self, color) -> tuple:
+        """The colour a label is drawn in. High contrast moves each channel toward white and makes the text opaque."""
+        rgba = self._base_rgba(color)
+        if not self._contrast:
+            return rgba
+        r, g, b = (int(round(c + (255 - c) * CONTRAST_LIFT)) for c in rgba[:3])
+        return (r, g, b, 255)
+
+    def _paint(self, label, color) -> None:
+        """Set a label's base colour and draw it toned. Every colour change goes through here, so high contrast stays in force."""
+        base = self._base_rgba(color)
+        self._label_base[id(label)] = (label, base)
+        label.color = self._tone(base)
+
+    def set_high_contrast(self, on: bool) -> None:
+        """Turn the high-contrast HUD on or off. Applies at once to every label, plate and banner."""
+        self._contrast = bool(on)
+        for label, base in self._label_base.values():
+            label.color = self._tone(base)
+
+    @property
+    def high_contrast(self) -> bool:
+        return self._contrast
+
+    def _sync_number_plates(self) -> None:
+        """Size and place a dark plate behind every HUD number while high contrast is on. Hidden otherwise.
+
+        The plate covers the glyphs (cap height above the baseline), not the full line box, so it does not
+        stretch past the panel it sits in. Pyglet font sizes are points; the window draws them at 96 dpi.
+        """
+        pad_x = self._sz(CONTRAST_PLATE_PAD)
+        for label, plate in self._number_pairs:
+            if not self._contrast or not str(label.text or "").strip():
+                plate.opacity = 0
+                continue
+            w = float(label.content_width)
+            h = float(label.content_height)
+            em = float(label.font_size) * (96.0 / 72.0)
+            cap = 0.72 * em
+            descent = 0.22 * em
+            pad_y = 0.25 * em
+            ax = label.anchor_x
+            ay = label.anchor_y
+            if ay == "baseline":
+                baseline = label.y
+            elif ay == "bottom":
+                baseline = label.y + descent
+            elif ay == "center":
+                baseline = label.y - h / 2.0 + descent
+            else:
+                baseline = label.y - h + descent
+            left = label.x - (w if ax == "right" else w / 2.0 if ax == "center" else 0.0)
+            plate.x = left - pad_x
+            plate.y = baseline - pad_y
+            plate.width = w + pad_x * 2
+            plate.height = cap + pad_y * 2
+            plate.opacity = CONTRAST_PLATE_ALPHA
 
     def _sz(self, value: float) -> int:
         """Scale a reference (980x620) pixel value to the current window."""
@@ -738,11 +829,11 @@ class HUD:
         if has_inf:
             self.boost_bar.color = (255, 235, 90)
             _set_text(self.boost_value_label, "INF")
-            self.boost_value_label.color = (255, 245, 120, 255)
+            self._paint(self.boost_value_label, (255, 245, 120, 255))
         else:
             self.boost_bar.color = (255, 155, 50) if getattr(player, "is_boosting", False) else (205, 120, 40)
             _set_text(self.boost_value_label, f"{int(boost_now)}%")
-            self.boost_value_label.color = (255, 210, 130, 255)
+            self._paint(self.boost_value_label, (255, 210, 130, 255))
 
         # Weapon chip: name (with pierce), swatch from projectile_art, and the crit chance
         wp = getattr(player, "current_weapon", None)
@@ -784,7 +875,7 @@ class HUD:
                 # Gold-orange pulsing as combo rises
                 intensity = min(1.0, (score.combo - 1.0) / (6.0 - 1.0))
                 g = int(200 - 80 * intensity)
-                self.combo_label.color = (255, g, 80, 230)
+                self._paint(self.combo_label, (255, g, 80, 230))
             else:
                 _set_text(self.combo_label, "")
         else:
@@ -792,6 +883,7 @@ class HUD:
             _set_text(self.combo_label, "")
 
     def draw(self) -> None:
+        self._sync_number_plates()
         self._frame_batch.draw()
         self.batch.draw()
         if self._boss_active:

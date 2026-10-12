@@ -354,6 +354,10 @@ class WeaponChip:
     def crit_text(self) -> str:
         return self._crit.text
 
+    def labels(self) -> tuple:
+        """The chip's name and crit labels, so the HUD can give their numbers a contrast plate."""
+        return (self._name, self._crit)
+
     @property
     def swatch_color(self) -> tuple:
         return (self._swatch.color[0], self._swatch.color[1], self._swatch.color[2])

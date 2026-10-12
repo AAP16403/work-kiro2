@@ -210,3 +210,29 @@ PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a pr
 PARALLEL_STEER_MIN_ENEMIES = 32     # live enemy count at which the batch path is used
 PARALLEL_STEER_WORKERS = 3          # process-pool size when enabled
 PARALLEL_LOADER_WORKERS = 4         # threads for I/O-bound asset reads
+
+# Accessibility (Settings > Accessibility). Every option defaults to off. The saved user settings
+# (access_prefs.py) set these flags at runtime, so the values here are the defaults. REDUCE_MOTION is
+# defined above with the other display flags (uitheme); access_prefs.py and motion.py read it.
+COLORBLIND_PALETTE = False      # swaps ENEMY_COLORS for COLORBLIND_ENEMY_COLORS (access_prefs.py)
+HIGH_CONTRAST_HUD = False       # a dark plate behind every HUD number, and brighter HUD text
+# Colour-blind enemy palette. Each pair stays at least CIE76 dE 14 apart under deuteranopia and
+# protanopia (Machado 2009, severity 1.0), checked by test_w3_access.py.
+COLORBLIND_ENEMY_COLORS = {
+    "bomber": (62, 230, 235),
+    "chaser": (239, 112, 217),
+    "ranged": (168, 255, 48),
+    "charger": (56, 219, 47),
+    "swarm": (212, 173, 97),
+    "tank": (64, 135, 172),
+    "spitter": (247, 161, 12),
+    "flyer": (30, 234, 175),
+    "engineer": (255, 23, 166),
+    "boss_thunder": (191, 107, 35),
+    "boss_laser": (225, 237, 120),
+    "boss_trapmaster": (84, 163, 128),
+    "boss_swarmqueen": (145, 230, 142),
+    "boss_brute": (104, 193, 255),
+    "boss_abyss_gaze": (123, 137, 249),
+    "boss_womb_core": (238, 42, 104),
+}

@@ -8,6 +8,7 @@ import pyglet
 from config import ENEMY_COLORS, POWERUP_COLORS
 import config
 import daily
+import motion
 from utils import (
     Vec2,
     clamp_to_map,
@@ -52,7 +53,8 @@ def add_shake(s, amount: float, limit: float | None = None) -> None:
     as ramming. It stops that source from pushing the shake past ``limit``, but it never lowers
     shake that is already higher, so bigger impacts still stack on top.
     """
-    impulse = float(amount) * float(config.SHAKE_SCALE)
+    # Reduced motion (motion.py) turns every impulse into nothing, whatever the Screen Shake level.
+    impulse = float(amount) * float(config.SHAKE_SCALE) * motion.factor()
     if impulse <= 0.0:
         return
     current = float(s.shake)
@@ -157,7 +159,14 @@ class SettingsState(State):
         self.game.settings_menu.on_mouse_release(x, y, button)
 
     def on_key_press(self, symbol, modifiers):
-        if symbol == pyglet.window.key.ESCAPE:
+        menu = self.game.settings_menu
+        if symbol == pyglet.window.key.ESCAPE and not menu.is_adjusting():
+            self.game.fsm.set_state(GameStateName.MENU)
+            return
+        # Arrow keys move focus, ENTER activates it (see SettingsMenu.on_key_press).
+        action = menu.on_key_press(symbol, modifiers)
+        if action == "back":
+            self.game._persist_audio_settings()
             self.game.fsm.set_state(GameStateName.MENU)
 
     def update(self, dt: float):
@@ -860,7 +869,7 @@ class PlayingState(State):
 
         s = game.state
         shake = Vec2(0.0, 0.0)
-        if s.shake > 0:
+        if s.shake > 0 and motion.factor() > 0.0:
             amplitude = min(float(s.shake), float(config.SHAKE_CAP))
             shake = Vec2(_SHAKE_RNG.uniform(-1, 1), _SHAKE_RNG.uniform(-1, 1)) * amplitude
 

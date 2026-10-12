@@ -48,7 +48,7 @@ from player import Player, perform_dash
 from fsm import StateMachine
 from advanced_fx import AdvancedFX
 from score import ScoreTracker
-from hud import HUD
+from hud import HUD, current_skin_name
 from states import (
     MenuState,
     SettingsState,
@@ -276,6 +276,7 @@ class Game(pyglet.window.Window):
 
         self.score = ScoreTracker(difficulty=difficulty)
         self.hud = HUD(self.width, self.height)
+        self.hud.set_skin_name(current_skin_name())
 
 
 

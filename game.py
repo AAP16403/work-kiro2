@@ -50,6 +50,8 @@ from player import Player, perform_dash
 from fsm import StateMachine
 from advanced_fx import AdvancedFX
 from score import ScoreTracker
+from achievements import RunStats
+import progress as meta_progress
 from hud import HUD, current_skin_name
 from states import (
     MenuState,
@@ -287,6 +289,7 @@ class Game(pyglet.window.Window):
         self._hitstop = 0.0
 
         self.score = ScoreTracker(difficulty=difficulty)
+        self.run_stats = RunStats()
         self.hud = HUD(self.width, self.height)
         self.hud.set_skin_name(current_skin_name())
 
@@ -427,6 +430,9 @@ class Game(pyglet.window.Window):
         mult = getattr(self, "_incoming_damage_mult", 1.0) * getattr(self, "_temp_incoming_damage_mult", 1.0)
         if mult != 1.0:
             amount = max(1, int(round(amount * mult)))
+        run = getattr(self, "run_stats", None)
+        if run is not None:
+            run.on_player_hit(amount)  # every landed hit counts, even one the shield fully absorbs
         if self.player.shield > 0:
             absorbed = min(self.player.shield, amount)
             self.player.shield -= absorbed
@@ -760,6 +766,25 @@ class Game(pyglet.window.Window):
         self.popups = None
         self._hitstop = 0.0
 
+    def _finish_meta_run(self):
+        """End this run's meta stats and save progress.json once. Returns the summary, or None.
+
+        Safe to call more than once: only the first call for a run writes, so death, pause-quit
+        and window close can all call it.
+        """
+        run = getattr(self, "run_stats", None)
+        if run is None or run.finished or not self.state:
+            return None
+        score_obj = getattr(self, "score", None)
+        run.finish(
+            score=int(score_obj.score) if score_obj else 0,
+            wave=int(self.state.wave),
+            survived=float(self.state.time),
+            best_combo=float(score_obj.best_combo) if score_obj else None,
+        )
+        self.last_run_summary = meta_progress.end_run(run)
+        return self.last_run_summary
+
     def on_mouse_motion(self, x, y, dx, dy):
         self.mouse_xy = (x, y)
         self.fsm.on_mouse_motion(x, y, dx, dy)
@@ -784,6 +809,7 @@ class Game(pyglet.window.Window):
 
     def on_close(self):
         """Handle window close event."""
+        self._finish_meta_run()  # a run still in progress is saved rather than lost
         self._schedule_app_close()
         return True
 

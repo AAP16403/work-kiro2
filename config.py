@@ -13,6 +13,7 @@ ADVANCED_FX_STRENGTH = 0.55
 # already run with it off, and the source run draws about 3x slower with it on. Set True to debug GL.
 PYGLET_DEBUG_GL = False
 USE_PLAYER_ART = True  # Pod-robot player character (player_art.py). False draws the legacy ship.
+REDUCE_MOTION = False  # True stops ambient UI motion: title shimmer, bobbing, starfield and orb drift
 
 # Room settings
 ROOM_RADIUS = 400.0

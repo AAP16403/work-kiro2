@@ -22,6 +22,7 @@ from hud_widgets import (
     token,
     weapon_swatch,
 )
+from ui_theme import set_panel_alpha
 
 
 BANNER_IN_S = 0.25        # ease-out slide/scale-in
@@ -234,14 +235,12 @@ class HUD:
         if shadow:
             offset = self._sz(3)
             shadow_shapes = draw_panel(self._frame_batch, x + offset, y - offset, w, h, color=token("BG"))
+            set_panel_alpha(shadow_shapes, PANEL_SHADOW_ALPHA)
         edge_shapes = draw_panel(self._frame_batch, x - edge, y - edge, w + 2 * edge, h + 2 * edge, color=token("ACCENT"))
+        set_panel_alpha(edge_shapes, PANEL_EDGE_ALPHA)
         fill_shapes = draw_panel(self._frame_batch, x, y, w, h, color=token("PANEL"))
-        for shp in shadow_shapes:
-            shp.opacity = PANEL_SHADOW_ALPHA
-        for shp in edge_shapes:
-            shp.opacity = PANEL_EDGE_ALPHA
-        for shp in fill_shapes:
-            shp.opacity = PANEL_FILL_ALPHA
+        set_panel_alpha(fill_shapes, PANEL_FILL_ALPHA)
+        # Keep this order: test_w2_hudv2 reads the last entry of each panel's list.
         self._frames[key] = shadow_shapes + edge_shapes + fill_shapes
 
     # ------------------------------------------------------------------

@@ -75,12 +75,6 @@ def weapon_swatch(weapon) -> tuple:
     return tuple(style.head)[:3]
 
 
-def set_opacity(shape_list, value: int) -> None:
-    for shp in shape_list:
-        if shp.opacity != value:
-            shp.opacity = value
-
-
 # ----------------------------------------------------------------------
 # Ultra charge gauge fraction
 # ----------------------------------------------------------------------
@@ -276,7 +270,7 @@ class Chip:
         for shp in self._frame:
             shp.delete()
         self._frame = draw_panel(self._frame_batch, x, y, w, h, color=self._fill or token("BG", self._theme), theme=self._theme)
-        set_opacity(self._frame, 235)
+        _ui_theme.set_panel_alpha(self._frame, 235)
         self._geom = (x, y, w, h, pad)
         self._label.x = round(x + pad)
         self._label.y = round(y + h / 2.0)
@@ -338,7 +332,7 @@ class WeaponChip:
         for shp in self._frame:
             shp.delete()
         self._frame = draw_panel(self._frame_batch, x, y, w, h, color=token("BG", self._theme), theme=self._theme)
-        set_opacity(self._frame, 235)
+        _ui_theme.set_panel_alpha(self._frame, 235)
         sw = max(1.0, float(swatch))
         self._swatch.x = x + pad
         self._swatch.y = y + (h - sw) / 2.0
@@ -448,7 +442,9 @@ class ToastView:
         if a == self._applied:
             return
         self._applied = a
-        set_opacity(self._frame, int(round(235 * a)))
+        value = int(round(235 * a))
+        for i in range(0, len(self._frame), 3):  # _frame holds [edge, body, shine] groups from draw_panel
+            _ui_theme.set_panel_alpha(self._frame[i:i + 3], value)
         for lbl in (self._title, self._sub, self._count):
             lbl.opacity = int(round(255 * a))
 

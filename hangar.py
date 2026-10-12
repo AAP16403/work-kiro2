@@ -52,6 +52,19 @@ def _px(base: int, s: float) -> int:
     return max(8, int(base * s))
 
 
+def _name_size(name: str, font: str, base_px: int, max_w: float) -> int:
+    """The largest size at or below base_px at which ``name`` fits max_w, never below 9 px."""
+    size = base_px
+    while size > 9:
+        probe = pyglet.text.Label(name, font_name=font, font_size=size)
+        width = float(probe.content_width)
+        probe.delete()
+        if width <= max_w:
+            break
+        size -= 1
+    return size
+
+
 def _status_chip(batch, x: float, y: float, w: float, h: float, text: str, color, scale: float) -> list:
     """Fixed-size status tag: a ui_theme panel filled with the status colour, and one centred caption."""
     parts = draw_panel(batch, x, y, w, h, fill=color, border_pad=1.0)
@@ -360,29 +373,38 @@ class HangarMenu:
 
         self._content.extend(draw_panel(batch, x, y, w, h, fill=PANEL))
 
+        # Two columns. The name and status chip stack on the left. The character plate takes the right
+        # column from just above the unlock line to the card top. The unlock line runs full width
+        # underneath, so the plate, the labels and the text never share a box at any card size.
+        plate_w = int(w * 0.25)
+        plate_x = x + w - pad - plate_w
+        gap = int(8 * s)
+        left_w = plate_x - gap - (x + pad)
+        plate_bottom = y + int(54 * s)  # clears the two-line unlock text, which is bottom-anchored at y + 10 * s
+        plate_top = y + h - pad
+        plate_h = plate_top - plate_bottom
+
         name_color = MUTED if state == "locked" else TEXT
         name_top = y + h - pad
-        self._content.append(self._label(batch, skin.name, x + pad, name_top, _px(16, s), name_color,
-                                         font=UI_FONT_HEAD, anchor_x="left", anchor_y="top", width=w - 2 * pad))
+        name_px = _name_size(skin.name, UI_FONT_HEAD, _px(16, s), left_w)
+        self._content.append(self._label(batch, skin.name, x + pad, name_top, name_px, name_color,
+                                         font=UI_FONT_HEAD, anchor_x="left", anchor_y="top", width=left_w))
 
         chip_text, chip_color = {
             "selected": ("SELECTED", ACCENT),
             "unlocked": ("UNLOCKED", SUCCESS),
             "locked": ("LOCKED", DANGER),
         }[state]
-        chip_w = int(96 * s)
+        chip_w = min(int(96 * s), left_w)
         chip_h = int(20 * s)
         chip_y = name_top - int(26 * s) - chip_h
         self._content.extend(_status_chip(batch, x + pad, chip_y, chip_w, chip_h, chip_text, chip_color, s))
 
-        plate_top = chip_y - int(8 * s)
-        plate_bottom = y + int(46 * s)
-        plate_h = plate_top - plate_bottom
-        self._content.extend(draw_panel(batch, x + pad, plate_bottom, w - 2 * pad, plate_h, fill=BG))
+        self._content.extend(draw_panel(batch, plate_x, plate_bottom, plate_w, plate_h, fill=BG))
 
         # Preview: the dummy player sits at world origin, so shake carries it to the plate centre.
         ox, oy = to_iso(Vec2(0.0, 0.0), Vec2(0.0, 0.0))
-        centre_x = x + w / 2.0
+        centre_x = plate_x + plate_w / 2.0
         centre_y = plate_bottom + plate_h / 2.0
         self._art_shakes[sid] = Vec2(centre_x - ox, centre_y - oy)
         self._sync_art(sid)

@@ -57,6 +57,12 @@ def describe_unlock(skin, achievement_names: Optional[dict] = None) -> str:
     rule = getattr(skin, "unlock", None)
     if not rule:
         return "Open from the start"
+    if not isinstance(rule, dict) and hasattr(rule, "kind"):
+        # A skins.UnlockRule. skins.unlock_hint already names the target and resolves achievement names.
+        if rule.kind == "default":
+            return "Open from the start"
+        from skins import unlock_hint
+        return f"Unlock: {unlock_hint(skin)}"
     if not isinstance(rule, dict):
         return f"Unlock: {rule}"
     text = rule.get("text") or rule.get("label") or rule.get("description")

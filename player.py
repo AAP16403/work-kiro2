@@ -28,6 +28,11 @@ class Player:
     vortex_until: float = 0.0
     vortex_radius: float = 70.0
     vortex_dps: float = 38.0
+    # Timed powerups: run-clock expiry times (0.0 = inactive). See powerup.py.
+    ricochet_until: float = 0.0
+    homing_until: float = 0.0
+    time_slow_until: float = 0.0
+    magnet_until: float = 0.0
     ultra_charges: int = 0
     ultra_max_charges: int = ULTRA_MAX_CHARGES
     ultra_cd_until: float = 0.0

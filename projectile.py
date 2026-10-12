@@ -24,6 +24,7 @@ class Projectile:
     pierce: int = 0
     is_crit: bool = False
     cluster_on_death: bool = False
+    bounces: int = 0  # Ricochet bounces taken off the arena edge; a bullet gets one
 
     def update(self, dt: float) -> bool:
         """Update projectile position and TTL. Returns False if expired."""

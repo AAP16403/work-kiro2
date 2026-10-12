@@ -20,7 +20,11 @@ from utils import (
 from physics import resolve_circle_obstacles
 from level import spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death, get_difficulty_mods
 from enemy import update_enemy
-from powerup import apply_powerup
+from powerup import (
+    apply_powerup, enemy_time_scale, expire_timed_effects, format_timed_powerups_hud,
+    is_rare_powerup, pickup_magnet_mods, powerup_popup_name,
+)
+import shot_mods
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
 from fsm import State
@@ -361,6 +365,9 @@ class PlayingState(State):
         s.time += dt
         if game.player.invincibility_timer > 0:
             game.player.invincibility_timer -= dt
+        # Timed powerups: drop the expired ones, then take the single enemy time scale for this tick.
+        expire_timed_effects(game.player, s.time)
+        enemy_dt = dt * enemy_time_scale(game.player, s.time)
 
         # Boost handling (LSHIFT or RSHIFT)
         k = pyglet.window.key
@@ -412,8 +419,8 @@ class PlayingState(State):
 
         player_radius = game._player_radius()
         for tr in list(getattr(s, "traps", [])):
-            tr.t += dt
-            tr.ttl -= dt
+            tr.t += enemy_dt
+            tr.ttl -= enemy_dt
             if tr.ttl <= 0:
                 s.traps.remove(tr)
                 game.visuals.drop_trap(tr)
@@ -426,7 +433,7 @@ class PlayingState(State):
                     game.visuals.drop_trap(tr)
 
         for th in list(getattr(s, "thunders", [])):
-            th.t += dt
+            th.t += enemy_dt
             if th.t >= th.warn and not th.hit_done:
                 hit_r = th.thickness * 0.6 + player_radius * 0.35
                 if point_segment_distance_sq(game.player.pos, th.start, th.end) <= hit_r * hit_r:
@@ -523,7 +530,7 @@ class PlayingState(State):
         for e in list(s.enemies):
             if e not in s.enemies or e.hp <= 0 or getattr(e, "_is_dead", False):
                 continue
-            update_enemy(e, game.player.pos, s, dt, game, player_vel=player_vel)
+            update_enemy(e, game.player.pos, s, enemy_dt, game, player_vel=player_vel)
             behavior_name = enemy_behavior_name(e)
             e._behavior_name = behavior_name
             e._radius = game.balance.enemy_radius(behavior_name)
@@ -578,7 +585,16 @@ class PlayingState(State):
         obstacles = s.obstacles if (config.ENABLE_OBSTACLES and getattr(s, "obstacles", None)) else None
 
         for p in list(s.projectiles):
-            p.update(dt)
+            if p.owner == "player":
+                shot_mods.steer_homing(p, s.enemies, game.player, s.time, dt)
+            p.update(dt if p.owner == "player" else enemy_dt)
+            if p.owner == "player":
+                ricochet = shot_mods.ricochet_step(p, game.player, s.time, s.map_type, config.ROOM_RADIUS)
+                if ricochet == "bounced":
+                    game.particle_system.add_hit_particles(p.prev_pos, config.POWERUP_COLORS["ricochet"])
+                elif ricochet == "spent":
+                    self._remove_projectile(game, s, p)
+                    continue
             if obstacles:
                 pr = projectile_radius(p)
                 prev = p.prev_pos or p.pos
@@ -663,15 +679,16 @@ class PlayingState(State):
                     game._damage_player(p.damage)
                     self._remove_projectile(game, s, p)
 
+        magnet_radius_mult, magnet_pull_mult = pickup_magnet_mods(game.player, s.time)
         for pu in list(s.powerups):
             dpu2 = dist_sq(pu.pos, game.player.pos)
             kind = getattr(pu, "kind", "")
-            magnet_r = game.balance.pickup_magnet_radius(kind, game._pickup_magnet_bonus)
+            magnet_r = game.balance.pickup_magnet_radius(kind, game._pickup_magnet_bonus) * magnet_radius_mult
             magnet_r2 = float(magnet_r) * float(magnet_r)
             if 1e-12 < dpu2 < magnet_r2:
                 dpu = math.sqrt(dpu2)
                 pull = (game.player.pos - pu.pos).normalized()
-                pull_speed = game.balance.pickup_pull_speed(magnet_r, dpu)
+                pull_speed = game.balance.pickup_pull_speed(magnet_r, dpu) * magnet_pull_mult
                 pu.pos = pu.pos + pull * pull_speed * dt
                 dpu2 = dist_sq(pu.pos, game.player.pos)
 
@@ -679,12 +696,12 @@ class PlayingState(State):
             if dpu2 < float(pickup_r) * float(pickup_r):
                 color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
                 game.particle_system.add_powerup_collection(pu.pos, color)
-                rare = kind in ("ultra", "weapon", "vortex", "laser")
+                rare = is_rare_powerup(kind)
                 game.audio.play("pickup_rare" if rare else "pickup", volume=0.7, pitch_jitter=0.03)
                 if rare:
                     game.particle_system.add_pickup_ring(pu.pos, color)
                 if game.popups:
-                    game.popups.spawn(pu.pos, kind.upper(), color=color)
+                    game.popups.spawn(pu.pos, powerup_popup_name(kind), color=color)
                 apply_powerup(game.player, pu, s.time)
                 s.powerups.remove(pu)
                 game.visuals.drop_powerup(pu)
@@ -750,7 +767,7 @@ class PlayingState(State):
             game.room.update(dt)
 
         for lb in list(getattr(s, "lasers", [])):
-            lb.t += dt
+            lb.t += (enemy_dt if lb.owner == "enemy" else dt)
             if lb.owner == "enemy" and lb.t >= lb.warn and not lb.hit_done:
                 hit_r = lb.thickness * 0.55 + player_radius * 0.35
                 if point_segment_distance_sq(game.player.pos, lb.start, lb.end) <= hit_r * hit_r:
@@ -820,6 +837,7 @@ class PlayingState(State):
         laser_txt = f"Laser {laser_left:.0f}s" if laser_left > 0 else ""
         vortex_left = max(0.0, game.player.vortex_until - game.state.time)
         vortex_txt = f"Vortex {vortex_left:.0f}s" if vortex_left > 0 else ""
+        timed_txt = format_timed_powerups_hud(game.player, game.state.time)
         ultra_charges = int(getattr(game.player, "ultra_charges", 0))
         ultra_cd = max(0.0, float(getattr(game.player, "ultra_cd_until", 0.0)) - game.state.time)
         ultra_txt = ""
@@ -850,12 +868,13 @@ class PlayingState(State):
             (1, ultra_txt),
             (2, laser_txt),
             (2, vortex_txt),
+            (2, timed_txt),
             (3, temp_txt),
             (4, dash_txt),
             (5, boost_txt),
             (6, perm_txt),
             # Auto-fire is a mid-fight state the player needs to read, so it outlasts the dash, boost and
-            # permanent-reward text. Only boss, ultra, laser, vortex and temp rewards outrank it.
+            # permanent-reward text. Only boss, ultra, laser, vortex, timed powerups and temp rewards outrank it.
             (3, auto_txt),
         ]
 

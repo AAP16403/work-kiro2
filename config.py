@@ -12,6 +12,7 @@ ADVANCED_FX_STRENGTH = 0.55
 # pyglet's debug_gl checks every GL call with a glGetError round trip. Off by default: frozen builds
 # already run with it off, and the source run draws about 3x slower with it on. Set True to debug GL.
 PYGLET_DEBUG_GL = False
+USE_PLAYER_ART = True  # Pod-robot player character (player_art.py). False draws the legacy ship.
 
 # Room settings
 ROOM_RADIUS = 400.0

@@ -840,6 +840,7 @@ class PlayingState(State):
             game.visuals.ensure_thunder(th)
             game.visuals.sync_thunder(th, shake)
 
+        game.visuals.sync_fx(game.state, game.player, shake, t=s.time, aim_dir=aim_dir)
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:

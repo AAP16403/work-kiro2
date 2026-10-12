@@ -161,6 +161,12 @@ def get(skin_id) -> Skin | None:
     return SKINS.get(skin_id)
 
 
+def palette_for(skin_id) -> dict:
+    """The colour palette for a skin id, or the default skin's for an unknown id. A copy, so callers cannot edit the catalogue."""
+    skin = get(skin_id) or get(DEFAULT_SKIN_ID)
+    return dict(skin.palette)
+
+
 def unlock_rule_met(skin: Skin, progress: dict) -> bool:
     """True when the skin's unlock rule holds for ``progress`` right now."""
     rule = skin.unlock

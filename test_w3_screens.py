@@ -216,7 +216,8 @@ def test_end_to_end_capture_one_size_writes_pngs_and_json(g):
         after = digest(REAL_HIGH_SCORES) if os.path.exists(REAL_HIGH_SCORES) else None
         assert before == after, "the capture must not change the real high_scores.json"
         assert report["errors"] == [], f"capture errors: {report['errors']}"
-        assert len(report["screens"]) == 13, f"expected 13 screens at 980x620, got {len(report['screens'])}"
+        specs, _skipped = screens.screen_specs(g)  # every screen the tool plans, so the count follows the Guide's pages
+        assert len(report["screens"]) == len(specs), f"expected {len(specs)} screens at 980x620, got {len(report['screens'])}"
         for entry in report["screens"]:
             png = os.path.join(out_dir, entry["png"])
             assert os.path.getsize(png) > 0, f"empty PNG {png}"

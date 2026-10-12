@@ -23,7 +23,7 @@ from menu import MenuButton, UI_FONT_BODY, UI_FONT_HEAD, UI_FONT_META, _sync_lab
 from player import Player
 from player_art import PlayerArt
 from progress import load_progress, save_progress
-from ui_theme import ACCENT, BG, DANGER, MUTED, PANEL, SUCCESS, TEXT, draw_chip, draw_panel, font_size
+from ui_theme import ACCENT, BG, DANGER, MUTED, PANEL, SUCCESS, TEXT, draw_panel, draw_tag, font_size
 from utils import Vec2, to_iso
 
 
@@ -355,7 +355,7 @@ class HangarMenu:
         chip_w = int(96 * s)
         chip_h = int(20 * s)
         chip_y = name_top - int(26 * s) - chip_h
-        self._content.extend(draw_chip(batch, x + pad, chip_y, chip_w, chip_h, chip_text, chip_color))
+        self._content.extend(draw_tag(batch, x + pad, chip_y, chip_w, chip_h, chip_text, chip_color))
 
         plate_top = chip_y - int(8 * s)
         plate_bottom = y + int(46 * s)
@@ -409,7 +409,7 @@ class HangarMenu:
                                              anchor_x="left", anchor_y="top", width=text_w, multiline=True))
             right_edge = ax + aw - pad
             chip_text, chip_color = ("EARNED", SUCCESS) if is_earned else ("LOCKED", MUTED)
-            self._content.extend(draw_chip(batch, right_edge - chip_w, row_y + row_h - int(10 * s) - chip_h,
+            self._content.extend(draw_tag(batch, right_edge - chip_w, row_y + row_h - int(10 * s) - chip_h,
                                            chip_w, chip_h, chip_text, chip_color))
             if is_earned:
                 when = earned.get(ach.id)

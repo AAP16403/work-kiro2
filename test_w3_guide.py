@@ -22,8 +22,7 @@ from game import Game
 from menu import GuideMenu
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-PAGE_SIZE = 6
-TABS = ("enemies", "powerups", "basics", "systems")
+TABS =("enemies", "powerups", "basics", "systems")
 
 # Names the wave 1 and 2 contract makes public. Every one needs a Guide entry.
 CONTRACT_POWERUP_KINDS = [
@@ -279,7 +278,7 @@ def test_tabs_page_with_the_page_controls(g):
         menu.page = 0
         entries = _tab_entries(menu, tab)
         total = menu._total_pages()
-        assert total == max(1, math.ceil(len(entries) / PAGE_SIZE)), (tab, total, len(entries))
+        assert total == max(1, math.ceil(len(entries) / menu.rows_per_page)), (tab, total, len(entries), menu.rows_per_page)
         seen = []
         for _ in range(total):
             seen.extend(e["key"] for e in menu._page_entries())
@@ -323,14 +322,16 @@ def test_rows_clear_tabs_controls_and_title(g):
         menu = GuideMenu(width, height)
         tab_bottom = menu.btn_enemies.y
         controls_top = max(b.y + b.height for b in (menu.btn_prev, menu.btn_next))
-        row_top = max(bg.y + bg.height for bg, *_ in menu._rows)
-        row_bottom = min(bg.y for bg, *_ in menu._rows)
+        # Only the rows a page shows: rows past rows_per_page are hidden and sit below the nav strip on purpose.
+        shown = menu._rows[: menu.rows_per_page]
+        row_top = max(bg.y + bg.height for bg, *_ in shown)
+        row_bottom = min(bg.y for bg, *_ in shown)
         assert row_top <= tab_bottom - 4, f"rows start above the tab row at {width}x{height}: {row_top} > {tab_bottom}"
-        assert row_bottom >= controls_top + 6, f"six rows run into Prev/Next at {width}x{height}: {row_bottom} < {controls_top}"
+        assert row_bottom >= controls_top + 6, f"visible rows run into Prev/Next at {width}x{height}: {row_bottom} < {controls_top}"
         panel_top = menu._panel.y + menu._panel.height
         title_bottom = menu.title.y - menu.title.content_height / 2
         assert title_bottom >= panel_top + 2, f"title crosses the panel border at {width}x{height}: {title_bottom} < {panel_top}"
-    print("[PASS] test_rows_clear_tabs_controls_and_title passed (six rows fit between tabs and Prev/Next; title clears the border)")
+    print("[PASS] test_rows_clear_tabs_controls_and_title passed (the visible rows fit between tabs and Prev/Next; title clears the border)")
 
 
 def _row_overflows(menu):

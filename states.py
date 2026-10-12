@@ -107,9 +107,14 @@ _SHOT_SFX = {
 }
 
 
-def _draw_playing_scene(game) -> None:
+def _draw_playing_scene(game, hud: bool = True) -> None:
+    """Draw the arena behind a screen. hud=False leaves the HUD panels out (Game Over: its title sits over them)."""
     if GameStateName.PLAYING.value in game.fsm._states:
-        game.fsm._states[GameStateName.PLAYING.value].draw()
+        game._scene_without_hud = not hud
+        try:
+            game.fsm._states[GameStateName.PLAYING.value].draw()
+        finally:
+            game._scene_without_hud = False
 
 class MenuState(State):
     def enter(self):
@@ -1034,7 +1039,8 @@ class PlayingState(State):
             crit_chance_bonus=game._effective_crit_chance(),
             status_segments=status_segments,
         )
-        game.hud.draw()
+        if not getattr(game, "_scene_without_hud", False):
+            game.hud.draw()
 
         if game._pause_hint:
             game._pause_hint.draw()
@@ -1194,6 +1200,6 @@ class GameOverState(State):
         self.game.game_over_menu.on_mouse_motion(x, y)
 
     def draw(self):
-        _draw_playing_scene(self.game)
+        _draw_playing_scene(self.game, hud=False)
         self.game.game_over_menu.set_reveal(float(self.game._render_time) - self._t0)
         self.game.game_over_menu.draw()

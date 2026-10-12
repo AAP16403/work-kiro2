@@ -237,14 +237,14 @@ def test_guide_basics_teaches_fire_elites_and_boss_schedule(g):
 
     menu = GuideMenu(980, 620)
     menu.tab = "basics"
-    # Six 52 px rows fit between the tab row and the Prev/Next strip at 980x620 (wave-3 layout, chosen at
-    # integration over wave 1's three 88 px rows), so 12 entries take two pages of six.
+    # Only three 88 px rows (three text lines each) fit above the nav strip at 980x620. Six 52 px rows were
+    # tried at integration and overlapped their text, so 12 entries take four pages of three.
     per_page = menu.rows_per_page
-    assert per_page == 6, f"six rows fit above the nav strip at 980x620, got {per_page}"
-    assert menu._total_pages() == 2, f"12 Basics entries at {per_page} per page should give 2 pages, got {menu._total_pages()}"
+    assert per_page == 3, f"three rows fit above the nav strip at 980x620, got {per_page}"
+    assert menu._total_pages() == 4, f"12 Basics entries at {per_page} per page should give 4 pages, got {menu._total_pages()}"
     menu.page = 1
     assert len(menu._page_entries()) == per_page, "second Basics page should be full"
-    print("[PASS] test_guide_basics_teaches_fire_elites_and_boss_schedule passed (12 entries over 2 pages of 6)")
+    print("[PASS] test_guide_basics_teaches_fire_elites_and_boss_schedule passed (12 entries over 4 pages of 3)")
 
 
 def run_all():

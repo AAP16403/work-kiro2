@@ -1729,10 +1729,13 @@ class GuideMenu:
         self.btn_back.x = panel_x + panel_w - self.btn_back.width - int(24 * scale)
         self.btn_back.y = top_y
 
-        # Six rows must fit between the tab row and the Prev/Next buttons, so each row is three text lines tall.
-        row_top = top_y - int(14 * scale)
-        row_h = int(52 * scale)
-        row_gap = int(6 * scale)
+        # Three 88 px rows (three text lines each) fit above the nav strip at 980x620 with no overlap. The count is
+        # computed from the space left, so no row is placed below the window or under the controls; the rest move to later pages.
+        row_top = top_y - int(26 * scale)
+        row_h = int(88 * scale)
+        row_gap = int(10 * scale)
+        nav_top = panel_y + int(74 * scale)
+        self.rows_per_page = max(1, min(len(self._rows), (row_top - nav_top + row_gap) // (row_h + row_gap)))
         row_x = panel_x + int(24 * scale)
         row_w = panel_w - int(48 * scale)
         # Threat/Counter is one line: its font shrinks (see _fit_desc) rather than running past the row edge.
@@ -1759,15 +1762,15 @@ class GuideMenu:
 
             text_x = row_x + int(56 * scale)
             name.x = text_x
-            name.y = y + row_h - int(14 * scale)
+            name.y = y + row_h - int(14 * scale)  # three lines in the 88 px row: name, threat, lore with no line-box overlap
             _sync_label_style_if_ready(name, UI_FONT_BODY, max(11, int(16 * scale)))
 
             desc.x = text_x
-            desc.y = y + row_h - int(30 * scale)
+            desc.y = y + row_h - int(39 * scale)
             _sync_label_style_if_ready(desc, UI_FONT_META, max(9, int(12 * scale)))
 
             lore.x = text_x
-            lore.y = y + row_h - int(43 * scale)
+            lore.y = y + row_h - int(61 * scale)
             _sync_label_style_if_ready(lore, UI_FONT_META, max(8, int(11 * scale)))
 
         self.btn_prev.width = int(118 * scale)

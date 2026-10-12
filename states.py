@@ -34,6 +34,26 @@ from rpg import format_temp_hud, format_perm_hud
 _SHAKE_RNG = random.Random()
 
 
+def add_shake(s, amount: float, limit: float | None = None) -> None:
+    """Stack screen shake onto state ``s``: scaled by the reduced-shake setting, capped at SHAKE_CAP.
+
+    ``limit`` is an optional ceiling for this one contribution, used by sustained sources such
+    as ramming. It stops that source from pushing the shake past ``limit``, but it never lowers
+    shake that is already higher, so bigger impacts still stack on top.
+    """
+    impulse = float(amount) * float(config.SHAKE_SCALE)
+    if impulse <= 0.0:
+        return
+    current = float(s.shake)
+    cap = float(config.SHAKE_CAP)
+    if limit is not None:
+        ceiling = min(cap, float(limit) * float(config.SHAKE_SCALE))
+        if current >= ceiling:
+            return
+        cap = ceiling
+    s.shake = min(cap, current + impulse)
+
+
 class GameStateName(str, Enum):
     MENU = "MenuState"
     SETTINGS = "SettingsState"
@@ -200,7 +220,7 @@ class PlayingState(State):
     def _spawn_cluster_shrapnel(game, s, p, ignore_entity_id: int | None = None) -> None:
         if game.particle_system:
             game.particle_system.add_flak_burst(p.pos)
-        s.shake = max(s.shake, 5.0)
+        add_shake(s, 5.0)
         base_dmg = max(1, int(round(p.damage * 0.45)))
         for angle_deg in (0.0, 90.0, 180.0, 270.0):
             ang = math.radians(angle_deg + s.rng.uniform(-20.0, 20.0))
@@ -254,8 +274,8 @@ class PlayingState(State):
         if game.particle_system:
             game.particle_system.add_death_explosion(p.pos, (255, 145, 90), "bomber")
         if dist_sq(p.pos, game.player.pos) <= blast_r2:
+            # Shake comes from _damage_player, scaled by the damage that actually lands.
             game._damage_player(blast_dmg)
-            s.shake = max(s.shake, 12.0)
 
     @staticmethod
     def _kill_enemy(game, s, e, death_particles: bool = True) -> None:
@@ -294,7 +314,7 @@ class PlayingState(State):
             v_dmg = 45
             if game.particle_system:
                 game.particle_system.add_death_explosion(e.pos, (255, 100, 30), "bomber")
-            s.shake = max(s.shake, 14.0)
+            add_shake(s, 14.0)
             for other in list(s.enemies):
                 if other not in s.enemies or other.hp <= 0 or getattr(other, "_is_dead", False):
                     continue
@@ -353,6 +373,10 @@ class PlayingState(State):
             else:
                 game.hud.show_banner(f"WAVE {int(s.wave):02d}", f"{str(s.difficulty).upper()}  -  {len(s.enemies)} hostiles", duration=2.0)
 
+        # Weapon-style hits this frame. They sum here and reach the shake once, after the
+        # hit loops (see the flush before the decay), so many hits in one frame stay bounded.
+        hit_shake = 0.0
+
         if s.time < game.player.vortex_until:
             game.particle_system.add_vortex_swirl(game.player.pos, s.time, game.player.vortex_radius)
             vortex_r2 = float(game.player.vortex_radius) * float(game.player.vortex_radius)
@@ -366,7 +390,7 @@ class PlayingState(State):
                     e._vortex_acc = acc - dmg
                     if dmg > 0:
                         PlayingState._damage_enemy(game, s, e, dmg)
-                        s.shake = max(s.shake, 2.5)
+                        hit_shake += float(config.SHAKE_HIT_IMPULSE)
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e, death_particles=False)
 
@@ -382,7 +406,6 @@ class PlayingState(State):
                 hit_r = float(tr.radius) + float(player_radius)
                 if dist_sq(tr.pos, game.player.pos) <= hit_r * hit_r:
                     game._damage_player(tr.damage)
-                    s.shake = max(s.shake, 10.0)
                     s.traps.remove(tr)
                     game.visuals.drop_trap(tr)
 
@@ -393,7 +416,6 @@ class PlayingState(State):
                 if point_segment_distance_sq(game.player.pos, th.start, th.end) <= hit_r * hit_r:
                     th.hit_done = True
                     game._damage_player(th.damage)
-                    s.shake = max(s.shake, 14.0)
                     game.particle_system.add_laser_beam(th.start, th.end, color=th.color)
             if th.t >= th.warn + th.ttl:
                 s.thunders.remove(th)
@@ -461,7 +483,7 @@ class PlayingState(State):
                     hit_r = (beam.thickness * 0.5) + game._enemy_radius(e)
                     if point_segment_distance_sq(e.pos, muzzle, end) <= hit_r * hit_r:
                         PlayingState._damage_enemy(game, s, e, dmg)
-                        s.shake = max(s.shake, 4.0)
+                        hit_shake += float(config.SHAKE_HIT_IMPULSE)
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e, death_particles=False)
             else:
@@ -499,7 +521,8 @@ class PlayingState(State):
                 if game.player.is_boosting:
                     ram_dmg = int(getattr(config, "BOOST_RAM_DAMAGE", 28))
                     PlayingState._damage_enemy(game, s, e, ram_dmg, is_crit=True)
-                    s.shake = max(s.shake, 8.0)
+                    # Ramming can touch every frame, so this source holds at 8 instead of stacking.
+                    add_shake(s, 8.0, limit=8.0)
                     diff = e.pos - game.player.pos
                     cur_d = math.sqrt(d_sq)
                     if cur_d > 1e-4:
@@ -527,14 +550,12 @@ class PlayingState(State):
                     if game.player.invincibility_timer <= 0:
                         game._damage_player(game.balance.enemy_contact_damage)
                         game.player.invincibility_timer = max(game.player.invincibility_timer, 0.6)
-                    s.shake = max(s.shake, 9.0)
                     cur_d = math.sqrt(d_sq)
                     push_dir = (game.player.pos - e.pos) / cur_d if cur_d > 1e-4 else Vec2(1.0, 0.0)
                     game.player.pos = clamp_to_map(game.player.pos + push_dir * 40.0, config.ROOM_RADIUS * 0.90, s.map_type)
                 else:
                     game._damage_player(game.balance.enemy_contact_damage)
                     self._kill_enemy(game, s, e, death_particles=False)
-                    s.shake = 9.0
 
         psd2 = point_segment_distance_sq
         projectile_radius = game._projectile_radius
@@ -587,7 +608,7 @@ class PlayingState(State):
                         hit_entities.add(id(e))
                         is_crit = getattr(p, "is_crit", False)
                         PlayingState._damage_enemy(game, s, e, p.damage, is_crit=is_crit)
-                        s.shake = max(s.shake, 6.0 if is_crit else 4.0)
+                        hit_shake += float(config.SHAKE_CRIT_IMPULSE if is_crit else config.SHAKE_HIT_IMPULSE)
 
                         behavior_name = getattr(e, "_behavior_name", enemy_behavior_name(e))
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
@@ -597,7 +618,7 @@ class PlayingState(State):
                             self._kill_enemy(game, s, e)
                             if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
                                 game._damage_player(game.balance.tank_death_blast_damage)
-                                s.shake = 15.0
+                                add_shake(s, 15.0)
 
                         pierce = getattr(p, "pierce", 0)
                         if pierce > 0:
@@ -624,7 +645,6 @@ class PlayingState(State):
                         self._remove_projectile(game, s, p)
                 elif self._segment_hits_circle(psd2, game.player.pos, p_prev, p.pos, hit_r2):
                     game._damage_player(p.damage)
-                    s.shake = max(s.shake, 6.0)
                     self._remove_projectile(game, s, p)
 
         for pu in list(s.powerups):
@@ -688,8 +708,11 @@ class PlayingState(State):
             if getattr(game, 'score', None):
                 game.score.on_wave_clear(cleared_wave)
 
+        if hit_shake > 0.0:
+            add_shake(s, min(float(config.SHAKE_HIT_FRAME_MAX), hit_shake), limit=float(config.SHAKE_HIT_CEILING))
+
         if s.shake > 0:
-            s.shake = max(0.0, s.shake - dt * 20)
+            s.shake = max(0.0, s.shake - dt * float(config.SHAKE_DECAY))
 
         game.particle_system.update(dt)
         if getattr(game, 'score', None):
@@ -717,7 +740,6 @@ class PlayingState(State):
                 if point_segment_distance_sq(game.player.pos, lb.start, lb.end) <= hit_r * hit_r:
                     lb.hit_done = True
                     game._damage_player(lb.damage)
-                    s.shake = max(s.shake, 10.0)
                     game.particle_system.add_laser_beam(lb.start, lb.end, color=lb.color)
             if lb.t >= lb.warn + lb.ttl:
                 s.lasers.remove(lb)
@@ -734,7 +756,8 @@ class PlayingState(State):
         s = game.state
         shake = Vec2(0.0, 0.0)
         if s.shake > 0:
-            shake = Vec2(_SHAKE_RNG.uniform(-1, 1), _SHAKE_RNG.uniform(-1, 1)) * s.shake
+            amplitude = min(float(s.shake), float(config.SHAKE_CAP))
+            shake = Vec2(_SHAKE_RNG.uniform(-1, 1), _SHAKE_RNG.uniform(-1, 1)) * amplitude
 
         game.visuals.sync_scene(s.time, shake, combat_intensity=float(getattr(game.room, "combat_intensity", 0.0)))
 

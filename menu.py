@@ -465,6 +465,7 @@ class SettingsMenu:
         map_type: str = MAP_CIRCLE,
         music_volume: float = 0.5,
         sfx_volume: float = 0.8,
+        reduced_shake: bool = False,
     ):
         self.screen_width = width
         self.screen_height = height
@@ -512,6 +513,7 @@ class SettingsMenu:
         self.arena_margin = float(getattr(config, "ARENA_MARGIN", 0.97))
         self.arena_pct = float(round(self.arena_margin * 100.0))
         self.advanced_fx = bool(getattr(config, "ENABLE_ADVANCED_FX", True) if advanced_fx_enabled is None else advanced_fx_enabled)
+        self.reduced_shake = bool(reduced_shake)
         self.window_size_idx = 0
         self.window_sizes, self.window_size_names = self._build_window_size_options(display_size)
         current_size = (int(width), int(height))
@@ -657,6 +659,21 @@ class SettingsMenu:
         self.fx_button = MenuButton(0, 0, 210, 50, "", self._toggle_advanced_fx, color=(82, 122, 180), hover_color=(112, 156, 220))
         self._refresh_fx_button_text()
 
+        # Reduced screen shake (default off). Persisted by the game through shake_prefs.
+        self.shake_label = pyglet.text.Label(
+            "Screen Shake",
+            font_name=UI_FONT_BODY,
+            font_size=16,
+            x=0,
+            y=0,
+            anchor_x="right",
+            anchor_y="center",
+            color=(255, 255, 255, 255),
+            batch=self.batch,
+        )
+        self.shake_button = MenuButton(0, 0, 210, 50, "", self._toggle_reduced_shake, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self._refresh_shake_button_text()
+
         self.map_label = pyglet.text.Label(
             "Arena Shape",
             font_name=UI_FONT_BODY,
@@ -697,7 +714,7 @@ class SettingsMenu:
         self._selected_map_highlight.opacity = 60
 
 
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
             btn.ensure(self.batch)
         for slider in self._all_sliders():
             slider.ensure(self.batch)
@@ -948,6 +965,19 @@ class SettingsMenu:
         self.back_button.y = panel_y + int(30 * scale)
         self.back_button.sync()
         
+        # Screen shake toggle sits on the footer's right edge, level with Back. The window-size
+        # grid can run five rows deep on a large display, so a spot under it could hit Back.
+        shake_w = int(col_width * 0.4)
+        self.shake_button.width = shake_w
+        self.shake_button.height = btn_h
+        self.shake_button.font_size = btn_font
+        self.shake_button.x = panel_x + panel_w - content_pad_x - shake_w
+        self.shake_button.y = self.back_button.y + (self.back_button.height - btn_h) // 2
+        self.shake_button.sync()
+        _sync_label_style_if_ready(self.shake_label, UI_FONT_BODY, max(12, int(18 * scale)))
+        self.shake_label.x = self.shake_button.x - int(14 * scale)
+        self.shake_label.y = self.shake_button.y + btn_h // 2
+
         self.menu_note.x = cx
         self.menu_note.y = panel_y + int(12 * scale)
         _sync_label_style_if_ready(self.menu_note, UI_FONT_META, max(10, int(12 * scale)))
@@ -1017,6 +1047,15 @@ class SettingsMenu:
         self._refresh_fx_button_text()
         self.on_save(self.get_settings())
 
+    def _refresh_shake_button_text(self):
+        self.shake_button.text = f"Reduced: {'On' if self.reduced_shake else 'Off'}"
+        self.shake_button.sync()
+
+    def _toggle_reduced_shake(self):
+        self.reduced_shake = not self.reduced_shake
+        self._refresh_shake_button_text()
+        self.on_save(self.get_settings())
+
     def _set_music_volume(self, v: float):
         """Store music volume (slider 0..100) as 0..1 and notify the owner."""
         self.music_volume = float(v) / 100.0
@@ -1040,7 +1079,7 @@ class SettingsMenu:
 
     def on_mouse_motion(self, x: float, y: float):
         """Handle mouse motion for button hover."""
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
             btn.is_hovered = btn.contains_point(x, y)
             btn.sync()
 
@@ -1061,6 +1100,9 @@ class SettingsMenu:
             return "back"
         if self.fx_button.contains_point(x, y):
             self.fx_button.callback()
+            return None
+        if self.shake_button.contains_point(x, y):
+            self.shake_button.callback()
             return None
         
         for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons:
@@ -1097,6 +1139,7 @@ class SettingsMenu:
             "fullscreen": fullscreen,
             "arena_margin": float(self.arena_margin),
             "advanced_fx": bool(self.advanced_fx),
+            "reduced_shake": bool(self.reduced_shake),
             "music_volume": float(self.music_volume),
             "sfx_volume": float(self.sfx_volume),
         }
@@ -1131,7 +1174,8 @@ class SettingsMenu:
             self._selected_map_highlight.height = selected_map.height + 4
 
         self._refresh_fx_button_text()
-        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.back_button]:
+        self._refresh_shake_button_text()
+        for btn in self.difficulty_buttons + self.size_buttons + self.map_buttons + [self.fx_button, self.shake_button, self.back_button]:
             btn.sync()
         for slider in self._all_sliders():
             slider.sync()

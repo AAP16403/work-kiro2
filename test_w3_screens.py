@@ -184,7 +184,17 @@ def test_screen_list_covers_required_screens(g):
     for required in ("title", "settings", "combat", "pause", "reward", "game_over"):
         assert required in names, f"missing screen {required}: {names}"
     guide = [n for n in names if n.startswith("guide_")]
-    assert len(guide) == 7, f"expected 7 guide pages (enemies 3, powerups 2, basics 2), got {guide}"
+    # Every page the Guide reports on every tab, read from the menu itself, so a new page or
+    # a new tab (the Systems tab) cannot be left out of the captures.
+    menu = g.guide_menu
+    expected = []
+    for tab in ("enemies", "powerups", "basics", "systems"):
+        saved = menu.tab
+        menu.tab = tab
+        pages = int(menu._total_pages())
+        menu.tab = saved
+        expected += [f"guide_{tab}_{page + 1}" for page in range(pages)]
+    assert guide == expected, f"guide pages captured {guide} != pages the Guide has {expected}"
     if hasattr(screens.GameStateName, "HANGAR"):
         assert "hangar" in names, "the Hangar must be captured when the build defines it"
         assert skipped == [], f"nothing should be skipped when the Hangar exists: {skipped}"

@@ -67,7 +67,7 @@ from states import GameStateName  # noqa: E402
 
 SIZES = ((980, 620), (1920, 1080))
 OVERLAP_EPS = 1.0
-GUIDE_TABS = ("enemies", "powerups", "basics")
+GUIDE_TABS = ("enemies", "powerups", "basics", "systems")
 SEED = 1729
 FRAME = 1.0 / 60.0
 SETTLE_FRAMES = 30

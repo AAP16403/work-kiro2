@@ -344,6 +344,18 @@ def _build_role_formation(state, player_pos: Vec2, player_vel: Vec2) -> dict:
     return out
 
 
+def _holding_telegraph(enemy: Enemy, key: str) -> bool:
+    """True while a unit is in a windup or cooldown that its own behavior has to keep fully stopped."""
+    ai = enemy.ai
+    if key == "charger":
+        return ai.get("state") in ("WINDUP", "COOLDOWN")
+    if key == "flyer":
+        return ai.get("state") == "WINDUP"
+    if key == "chaser":
+        return float(ai.get("lunge_windup", 0.0)) > 0.0 or float(ai.get("lunge_t", 0.0)) > 0.0
+    return False
+
+
 def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, player_vel: Vec2) -> None:
     """Apply role-based formation/cohesion pressure after per-type behavior update."""
     if dt <= 0.0:
@@ -351,6 +363,10 @@ def _apply_type_coordination(enemy: Enemy, player_pos: Vec2, state, dt: float, p
 
     key = _behavior_key(enemy)
     if not key or key.startswith("boss_"):
+        return
+
+    if _holding_telegraph(enemy, key):
+        # Behaviors own the velocity during windups and cooldowns, so the stop stays a real stop.
         return
 
     enemies = getattr(state, "enemies", None)
@@ -638,7 +654,7 @@ def _update_boss_laser(enemy: Enemy, player_pos: Vec2, state, dt: float, game, p
                         end,
                         damage=dmg,
                         thickness=12.0,
-                        warn=0.22,
+                        warn=0.30,
                         ttl=0.13,
                         color=(255, 100, 255),
                         owner="enemy",
@@ -765,6 +781,39 @@ def _update_egg_sac(enemy: Enemy, player_pos: Vec2, state, dt: float, game, play
             state.enemies.append(Enemy(pos=pos, hp=12 + state.wave, speed=110.0, behavior="swarm"))
 
 
+BRUTE_CHARGE_TIME = 1.2  # seconds the brute keeps charging before it recovers
+
+
+def brute_charge_speed(speed: float, phase: int) -> float:
+    """Charge speed of the brute boss. Shared by its AI and the telegraph lane drawn from it."""
+    charge_speed = float(speed) * 2.8
+    if int(phase) >= 1:
+        charge_speed *= 1.08
+    return charge_speed
+
+
+def _ray_length_to_circle(origin: Vec2, direction: Vec2, radius: float) -> float:
+    """Distance along a unit direction from an origin inside a circle to the circle's edge (0 when outside)."""
+    b = origin.dot(direction)
+    c = origin.length_squared() - radius * radius
+    disc = b * b - c
+    if disc < 0.0:
+        return 0.0
+    return max(0.0, -b + math.sqrt(disc))
+
+
+def brute_charge_lane(enemy: Enemy) -> tuple[Vec2, float] | None:
+    """Direction and drawn length of the brute's telegraphed charge, or None outside its telegraph."""
+    if enemy.ai.get("brute_state") != "telegraph":
+        return None
+    direction = Vec2(float(enemy.ai.get("charge_dir_x", 1.0)), float(enemy.ai.get("charge_dir_y", 0.0))).normalized()
+    if direction.length_squared() <= 1e-9:
+        return None
+    reach = brute_charge_speed(enemy.speed, int(enemy.ai.get("phase", 0))) * BRUTE_CHARGE_TIME
+    wall = _ray_length_to_circle(enemy.pos, direction, config.ROOM_RADIUS * 0.95)
+    return direction, max(0.0, min(reach, wall))
+
+
 def _update_boss_brute(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
     phase_boss = int(enemy.ai.get("phase", 0))
     persona = str(enemy.ai.get("persona", "aggressive"))
@@ -789,22 +838,17 @@ def _update_boss_brute(enemy: Enemy, player_pos: Vec2, state, dt: float, game, p
 
     elif b_state == "telegraph":
         if b_timer <= 0:
+            # The charge keeps the lane drawn during the telegraph: no re-aim at the player here.
             enemy.ai["brute_state"] = "charge"
-            enemy.ai["brute_timer"] = 1.2
-            dvec = player_pos - enemy.pos
-            dir_to = _safe_dir(dvec)
-            enemy.ai["charge_dir_x"] = dir_to.x
-            enemy.ai["charge_dir_y"] = dir_to.y
+            enemy.ai["brute_timer"] = BRUTE_CHARGE_TIME
 
     elif b_state == "charge":
         cx = float(enemy.ai.get("charge_dir_x", 1.0))
         cy = float(enemy.ai.get("charge_dir_y", 0.0))
         charge_dir = Vec2(cx, cy)
-        
-        charge_speed = enemy.speed * 2.8
-        if phase_boss >= 1:
-            charge_speed *= 1.08
-        
+
+        charge_speed = brute_charge_speed(enemy.speed, phase_boss)
+
         step = charge_dir * charge_speed * dt
         enemy.pos = enemy.pos + step
         

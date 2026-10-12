@@ -3,6 +3,7 @@
 # Install: py -m pip install pyglet
 
 import math
+import random
 
 import pyglet
 from pyglet import shapes
@@ -10,6 +11,7 @@ from pyglet import shapes
 pyglet.options["shadow_window"] = False
 
 import config
+import daily
 from config import SCREEN_W, SCREEN_H, FPS, MAP_CIRCLE, ENEMY_COLORS
 
 from map import Room
@@ -48,7 +50,7 @@ from player import Player, perform_dash
 from fsm import StateMachine
 from advanced_fx import AdvancedFX
 from score import ScoreTracker
-from hud import HUD
+from hud import HUD, current_skin_name
 from states import (
     MenuState,
     SettingsState,
@@ -57,6 +59,7 @@ from states import (
     PausedState,
     BossRewardState,
     GameOverState,
+    HangarState,
     add_shake,
 )
 
@@ -121,7 +124,8 @@ class Game(pyglet.window.Window):
         self.pause_menu = PauseMenu(self.width, self.height)
         self.rpg_menu = BossRewardMenu(self.width, self.height, self._apply_temp_reward, self._apply_perm_reward)
         self.game_over_menu = GameOverMenu(self.width, self.height)
-        
+        self.hangar_menu = None  # built on the first visit to the Hangar (see states.HangarState)
+
         # Game objects (will be initialized when game starts)
         self.batch = None
         self.groups = None
@@ -138,6 +142,12 @@ class Game(pyglet.window.Window):
         self.mouse_down = False
         self._rmb_down = False
         self.auto_shoot = True  # Auto-fire starts ON for every run; LMB toggles it
+        # Daily challenge (daily.py): the local date of the active daily run, None for a normal run, and the
+        # mutator ids that run is built with. A daily run has exactly one mutator, chosen by its date.
+        self.daily_date: str | None = None
+        self.run_mutator_ids: tuple[str, ...] = ()
+        # progress.json location for the daily record; None means the store's default. Tests point it at a temp file.
+        self.progress_path: str | None = None
         self.balance = BalanceLogic(fps=float(FPS))
         self._fixed_dt = self.balance.fixed_dt
         self._frame_dt_cap = self.balance.frame_dt_cap
@@ -164,6 +174,7 @@ class Game(pyglet.window.Window):
         self.fsm = StateMachine(MenuState(self))
         self.fsm.add_state(SettingsState(self))
         self.fsm.add_state(GuideState(self))
+        self.fsm.add_state(HangarState(self))
         self.fsm.add_state(PlayingState(self))
         self.fsm.add_state(PausedState(self))
         self.fsm.add_state(BossRewardState(self))
@@ -227,8 +238,12 @@ class Game(pyglet.window.Window):
 
         difficulty = str(self.settings.get("difficulty", "normal")).lower()
         self.state = GameStateData(difficulty=difficulty, map_type=self.settings.get("map_type", MAP_CIRCLE))
-        # Deterministic RNG for this run (seed stored on state for reproducibility).
-        self.state.init_rng()
+        # Deterministic RNG for this run (seed stored on state for reproducibility). A daily run seeds the run RNG
+        # and the module RNG (enemy AI and boss picks draw from it) with the date's seed, so every player gets the same setup.
+        run_seed = daily.daily_seed(self.daily_date) if self.daily_date else None
+        self.state.init_rng(run_seed)
+        if run_seed is not None:
+            random.seed(run_seed)
 
         # Base per-wave head count lives in logic.py's difficulty table (the wave ramp is applied in level.spawn_wave).
         self.state.max_enemies = int(get_difficulty_mods(difficulty).get("max_enemies", 12))
@@ -273,9 +288,18 @@ class Game(pyglet.window.Window):
 
         self.score = ScoreTracker(difficulty=difficulty)
         self.hud = HUD(self.width, self.height)
+        self.hud.set_skin_name(current_skin_name())
 
+    def _start_daily_run(self, today=None):
+        """Start the daily run for the local date (or for ``today`` when a test passes one).
 
-
+        The run uses the date's seed and exactly one mutator, the one daily.daily_mutator picks, so it never
+        stacks with other mutators. Try Again replays the same daily until the player leaves to the menu.
+        """
+        date_iso = daily.today_iso(today)
+        self.daily_date = date_iso
+        self.run_mutator_ids = (daily.daily_mutator(date_iso),)
+        self._init_game()
 
     def _effective_player_damage(self) -> int:
         if not self.player:
@@ -702,6 +726,8 @@ class Game(pyglet.window.Window):
         self.pause_menu.resize(width, height)
         self.rpg_menu.resize(width, height)
         self.game_over_menu.resize(width, height)
+        if getattr(self, "hangar_menu", None) is not None:
+            self.hangar_menu.resize(width, height)
 
         if getattr(self, "_pause_hint", None):
             self._pause_hint.x = width - 10
@@ -719,6 +745,9 @@ class Game(pyglet.window.Window):
     
     def _return_to_menu(self):
         """Return to main menu."""
+        # Leaving to the menu ends any daily run, so the next run is a normal one.
+        self.daily_date = None
+        self.run_mutator_ids = ()
         # Clean up game objects
         if self.batch:
             self.batch = None

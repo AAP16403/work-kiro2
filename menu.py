@@ -289,8 +289,10 @@ class Menu:
 
         self.buttons: list[MenuButton] = []
         self.buttons.append(MenuButton(0, 0, 160, 50, "Start Game", lambda: None, color=(45, 170, 125), hover_color=(80, 220, 160)))
+        self.buttons.append(MenuButton(0, 0, 160, 50, "Daily Run", lambda: None, color=(214, 150, 58), hover_color=(250, 190, 92)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Guide", lambda: None, color=(120, 95, 220), hover_color=(162, 136, 255)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Settings", lambda: None, color=(70, 125, 220), hover_color=(105, 170, 255)))
+        self.buttons.append(MenuButton(0, 0, 160, 50, "Hangar", lambda: None, color=(70, 165, 150), hover_color=(80, 220, 160)))
         self.buttons.append(MenuButton(0, 0, 160, 50, "Quit", lambda: None, color=(200, 70, 90), hover_color=(245, 95, 120)))
 
         self.title = pyglet.text.Label(
@@ -373,8 +375,8 @@ class Menu:
         scale = _ui_scale(width, height)
 
         button_w = int(230 * scale)
-        button_h = int(62 * scale)
-        gap = int(18 * scale)
+        button_h = int(54 * scale)  # six stacked buttons (Daily Run and Hangar): keeps the panel clear of the title at 980x620
+        gap = int(12 * scale)
         font = max(12, int(18 * scale))
         for btn in self.buttons:
             btn.width = button_w
@@ -382,20 +384,22 @@ class Menu:
             btn.font_size = font
 
         total_h = len(self.buttons) * button_h + (len(self.buttons) - 1) * gap
-        start_y = cy + total_h // 2 - button_h
+        # The stack is centred, but its top edge never rises into the subtitle band (five buttons need this at 980x620).
+        stack_top = min(cy + total_h // 2, height - int(147 * scale))
+        start_y = stack_top - button_h
         for i, btn in enumerate(self.buttons):
             btn.x = cx - button_w // 2
             btn.y = start_y - i * (button_h + gap)
             btn.sync()
         self._button_base_positions = [(btn.x, btn.y) for btn in self.buttons]
 
-        # Panel size wraps buttons with padding.
+        # Panel size wraps buttons with padding. The top pad is kept short so the panel edge stays below the title's sway.
         pad_x = int(70 * scale)
-        pad_y = int(55 * scale)
+        pad_y = int(34 * scale)
         panel_w = button_w + pad_x * 2
         panel_h = total_h + pad_y * 2
         panel_x = cx - panel_w // 2
-        panel_y = cy - panel_h // 2 - int(10 * scale)
+        panel_y = stack_top - total_h - pad_y
         self._panel_border.x = panel_x - 3
         self._panel_border.y = panel_y - 3
         self._panel_border.width = panel_w + 6
@@ -411,7 +415,7 @@ class Menu:
 
         self.title.x = cx
         _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(22, int(38 * scale)))
-        self.title.y = height - int(85 * scale)
+        self.title.y = height - int(75 * scale)  # raised for the taller five-button panel; the bob adds up to 6px
         self._title_base_y = self.title.y
         self.subtitle.x = cx
         _sync_label_style_if_ready(self.subtitle, UI_FONT_META, max(10, int(13 * scale)))
@@ -442,10 +446,14 @@ class Menu:
                 btn.callback()
                 if btn.text == "Start Game":
                     return "start_game"
+                elif btn.text == "Daily Run":
+                    return "daily"
                 elif btn.text == "Guide":
                     return "guide"
                 elif btn.text == "Settings":
                     return "settings"
+                elif btn.text == "Hangar":
+                    return "hangar"
                 elif btn.text == "Quit":
                     return "quit"
         return None
@@ -1237,6 +1245,7 @@ class GuideMenu:
         {"key": "weapon", "name": "Weapon (W)", "icon": "W", "what": "Switches current weapon pattern.", "deal": "Adapt playstyle to the new spread/tempo.", "lore": "Recovered armament cache from dead merc squads."},
         {"key": "ultra", "name": "Ultra (U)", "icon": "U", "what": "Adds an Ultra charge for RMB/Q.", "deal": "Spend on boss spikes or dangerous swarms.", "lore": "A forbidden core spark meant for ship cannons."},
         {"key": "boost", "name": "Overdrive (B)", "icon": "B", "what": "Restores boost and grants 6s infinite overdrive + shield.", "deal": "Grab to ram through swarms or kite aggressive bosses.", "lore": "Supercharged fusion capacitor designed for orbital interceptors."},
+        {"key": "drone", "name": "Drone (D)", "icon": "D", "what": "Rare. A drone orbits you for 12s and fires at the nearest enemy.", "deal": "Shoots every 0.6s within 300 units; re-picks refresh the timer.", "lore": "Salvaged escort drone reflashed to fight beside its owner."},
     ]
     BASICS_INFO = [
         {"key": "move", "name": "Movement", "icon": "MV", "what": "Use WASD or Arrow keys to move.", "deal": "Stay moving; linear retreats get punished.", "lore": "Mobility is your main defense layer."},
@@ -1659,6 +1668,7 @@ _GO_STAGE_SPAN = {
     "high": (0.56, 0.80),
     "new_high": (0.62, 0.84),
     "stats": (0.68, 0.90),
+    "daily": (0.72, 0.92),
     "buttons": (0.78, 0.96),
     "hint": (0.86, 1.00),
 }
@@ -1756,6 +1766,19 @@ class GameOverMenu:
             batch=self.batch,
         )
 
+        # Daily challenge line: today's best and whether this run set it. Empty outside daily runs.
+        self.daily_label = pyglet.text.Label(
+            "",
+            font_name=UI_FONT_META,
+            font_size=14,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=_GO_STAT_RGBA,
+            batch=self.batch,
+        )
+
         # One row of run stats: survival time, kills, best combo, leaderboard rank.
         self.stats_labels: list[pyglet.text.Label] = [
             pyglet.text.Label(
@@ -1797,6 +1820,7 @@ class GameOverMenu:
             "high": [(self.high_score_label, 220)],
             "new_high": [(self.new_high_label, 255)],
             "stats": [(label, _GO_STAT_RGBA[3]) for label in self.stats_labels],
+            "daily": [(self.daily_label, _GO_STAT_RGBA[3])],
             "hint": [(self.hint_label, 220)],
         }
         self._reveal_t = float(getattr(config, "GAME_OVER_REVEAL_S", 1.0))
@@ -1820,11 +1844,16 @@ class GameOverMenu:
             btn.font_size = font
 
         gap = int(18 * scale)
-        btn_start_y = cy - int(70 * scale)
+        btn_start_y = cy - int(84 * scale)
         ys = [btn_start_y, btn_start_y - (button_h + gap)]
         self._button_base_y = ys
         for btn in self.buttons:
             btn.x = cx - btn.width // 2
+
+        # The daily line sits one row under the run stats, above the buttons.
+        stats_y = height - int(290 * scale)
+        daily_font = max(10, int(14 * scale))
+        daily_y = stats_y - int(1.5 * daily_font) - int(4 * scale)
 
         # Resting y for every stage; set_reveal() adds the rise offset on top of these.
         self._base_y = {
@@ -1833,7 +1862,8 @@ class GameOverMenu:
             "wave": height - int(195 * scale),
             "high": height - int(225 * scale),
             "new_high": height - int(255 * scale),
-            "stats": height - int(290 * scale),
+            "stats": stats_y,
+            "daily": daily_y,
             "hint": ys[1] - int(28 * scale),
         }
 
@@ -1851,6 +1881,9 @@ class GameOverMenu:
 
         self.new_high_label.x = cx
         _sync_label_style_if_ready(self.new_high_label, UI_FONT_HEAD, max(12, int(18 * scale)))
+
+        self.daily_label.x = cx
+        _sync_label_style_if_ready(self.daily_label, UI_FONT_META, daily_font)
 
         col_w = int(200 * scale)
         stat_font = max(10, int(14 * scale))
@@ -1878,6 +1911,22 @@ class GameOverMenu:
         self.final_score_label.text = f"Score: {score:,}"
         self.high_score_label.text = f"High Score: {high_score:,}"
         self.new_high_label.text = "★ NEW HIGH SCORE! ★" if is_new_high else ""
+
+    def set_daily(self, result) -> None:
+        """Show the daily line for a finished daily run (a daily.DailyResult). None hides it."""
+        if result is None:
+            self.daily_label.text = ""
+            return
+        if result.new_best:
+            self.daily_label.text = f"DAILY {result.date_iso}: NEW DAILY BEST {result.best_score:,} (wave {result.best_wave})"
+            rgb = _GO_RANK_GOLD
+        else:
+            self.daily_label.text = (
+                f"DAILY {result.date_iso}: today's best {result.best_score:,} (wave {result.best_wave}). "
+                f"This run ({result.run_score:,}) did not beat it"
+            )
+            rgb = _GO_STAT_RGBA[:3]
+        self.daily_label.color = (*rgb, _GO_STAT_RGBA[3])
 
     @staticmethod
     def _rank_text(rank: int, points_to_next: int | None, is_new_high: bool) -> str:

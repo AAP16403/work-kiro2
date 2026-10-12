@@ -27,6 +27,7 @@ from fsm import State
 from hazards import LaserBeam
 from player import perform_dash, recharge_dash, format_dash_hud, update_boost, format_boost_hud
 from rpg import format_temp_hud, format_perm_hud
+import audio_cues
 
 
 # Render-only randomness (screen shake). Kept off the seeded run RNG so gameplay
@@ -340,6 +341,7 @@ class PlayingState(State):
                         PlayingState._kill_enemy(game, s, other)
             if dist(game.player.pos, e.pos) <= v_r:
                 game._damage_player(20)
+        audio_cues.play_elite_death(game.audio, e)
 
         spawn_loot_on_enemy_death(s, behavior_name, e.pos, current_weapon=getattr(game.player, "current_weapon", None))
         if getattr(game, 'score', None):
@@ -680,7 +682,7 @@ class PlayingState(State):
                 color = POWERUP_COLORS.get(pu.kind, (200, 200, 200))
                 game.particle_system.add_powerup_collection(pu.pos, color)
                 rare = kind in ("ultra", "weapon", "vortex", "laser")
-                game.audio.play("pickup_rare" if rare else "pickup", volume=0.7, pitch_jitter=0.03)
+                audio_cues.play_pickup(game.audio, kind, rare)
                 if rare:
                     game.particle_system.add_pickup_ring(pu.pos, color)
                 if game.popups:

@@ -452,7 +452,9 @@ class Menu:
 
 class SettingsMenu:
     """Settings screen with difficulty and window size options."""
-    
+
+    DIFFICULTY_KEYS = ("easy", "normal", "hard")
+
     def __init__(
         self,
         width: int,
@@ -618,7 +620,18 @@ class SettingsMenu:
             color=(255, 255, 255, 255),
             batch=self.batch,
         )
-        
+        self.difficulty_note = pyglet.text.Label(
+            "Applies next run",
+            font_name=UI_FONT_META,
+            font_size=11,
+            x=0,
+            y=0,
+            anchor_x="right",
+            anchor_y="center",
+            color=(165, 175, 195, 255),
+            batch=self.batch,
+        )
+
         self.window_label = pyglet.text.Label(
             "Display Mode",
             font_name=UI_FONT_BODY,
@@ -832,7 +845,10 @@ class SettingsMenu:
         _sync_label_style_if_ready(self.difficulty_label, UI_FONT_BODY, max(12, int(18 * scale)))
         self.difficulty_label.x = col1_x
         self.difficulty_label.y = curr_y
-        
+        _sync_label_style_if_ready(self.difficulty_note, UI_FONT_META, max(10, int(11 * scale)))
+        self.difficulty_note.x = col1_x + col_width
+        self.difficulty_note.y = curr_y
+
         curr_y -= (int(16 * scale) + label_gap)
         diff_btn_w = (col_width - 10 * 2) // 3
         for i, btn in enumerate(self.difficulty_buttons):
@@ -965,11 +981,23 @@ class SettingsMenu:
         self.window_size_idx = idx
         self.on_save(self.get_settings())
 
+    def _set_difficulty(self, idx: int):
+        """Difficulty button callback: select easy/normal/hard and notify the owner.
+
+        Difficulty is read when a run starts, so the choice applies to the next run.
+        """
+        self.difficulty = int(idx)
+        self.on_save({"difficulty": self.DIFFICULTY_KEYS[self.difficulty]})
+        self.resize(self.screen_width, self.screen_height)  # Refresh the highlight.
+
     def _set_arena_pct(self, pct: float):
-        """Arena slider callback: percent (90-99) -> arena margin fraction."""
+        """Arena slider callback: percent (90-99) -> arena margin fraction.
+
+        Only the local value moves while dragging. The owner is notified once on
+        release (see on_mouse_release), so the room is rebuilt once, not every tick.
+        """
         self.arena_pct = float(pct)
         self.arena_margin = self.arena_pct / 100.0
-        self.on_save({"arena_margin": self.arena_margin})
 
     def _refresh_fx_button_text(self):
         self.fx_button.text = f"Advanced FX: {'On' if self.advanced_fx else 'Off'}"
@@ -1051,16 +1079,20 @@ class SettingsMenu:
 
     def on_mouse_release(self, x: float, y: float, button: int):
         """Handle mouse release."""
+        arena_was_dragging = self.arena_slider.is_dragging
         for slider in self._all_sliders():
             slider.is_dragging = False
             slider.sync()
-    
+        if arena_was_dragging:
+            # Save the arena size once per drag. Only arena_margin is sent: get_settings()
+            # would also push the menu's last-chosen window size and could undo a manual resize.
+            self.on_save({"arena_margin": self.arena_margin})
+
     def get_settings(self) -> dict:
         """Get current settings."""
-        difficulty_names = ["easy", "normal", "hard"]
         fullscreen = self.window_sizes[self.window_size_idx] is None
         return {
-            "difficulty": difficulty_names[self.difficulty],
+            "difficulty": self.DIFFICULTY_KEYS[self.difficulty],
             "window_size": self.window_sizes[self.window_size_idx],
             "fullscreen": fullscreen,
             "arena_margin": float(self.arena_margin),

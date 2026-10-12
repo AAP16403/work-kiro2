@@ -7,6 +7,7 @@ import pyglet
 
 from config import ENEMY_COLORS, POWERUP_COLORS
 import config
+import daily
 from utils import (
     Vec2,
     clamp_to_map,
@@ -108,6 +109,9 @@ class MenuState(State):
         action = self.game.main_menu.on_mouse_press(x, y, button)
         if action == "start_game":
             self.game._init_game()
+            self.game.fsm.set_state(GameStateName.PLAYING)
+        elif action == "daily":
+            self.game._start_daily_run()
             self.game.fsm.set_state(GameStateName.PLAYING)
         elif action == "guide":
             self.game.fsm.set_state(GameStateName.GUIDE)
@@ -1010,6 +1014,11 @@ class GameOverState(State):
             is_new_high = score_obj.submit_score(wave)
             high_score = score_obj.get_high_score()
         game.game_over_menu.set_results(wave, final_score, high_score, is_new_high)
+        # A daily run only ever touches its own date's record in progress.json.
+        daily_result = None
+        if game.daily_date:
+            daily_result = daily.settle_daily_run(game.daily_date, final_score, wave, path=game.progress_path)
+        game.game_over_menu.set_daily(daily_result)
         game.game_over_menu.set_run_stats(
             survived=float(game.state.time),
             kills=int(getattr(score_obj, "kills", 0)),

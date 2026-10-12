@@ -57,6 +57,7 @@ from states import (
     PausedState,
     BossRewardState,
     GameOverState,
+    HangarState,
     add_shake,
 )
 
@@ -121,7 +122,8 @@ class Game(pyglet.window.Window):
         self.pause_menu = PauseMenu(self.width, self.height)
         self.rpg_menu = BossRewardMenu(self.width, self.height, self._apply_temp_reward, self._apply_perm_reward)
         self.game_over_menu = GameOverMenu(self.width, self.height)
-        
+        self.hangar_menu = None  # built on the first visit to the Hangar (see states.HangarState)
+
         # Game objects (will be initialized when game starts)
         self.batch = None
         self.groups = None
@@ -164,6 +166,7 @@ class Game(pyglet.window.Window):
         self.fsm = StateMachine(MenuState(self))
         self.fsm.add_state(SettingsState(self))
         self.fsm.add_state(GuideState(self))
+        self.fsm.add_state(HangarState(self))
         self.fsm.add_state(PlayingState(self))
         self.fsm.add_state(PausedState(self))
         self.fsm.add_state(BossRewardState(self))
@@ -702,6 +705,8 @@ class Game(pyglet.window.Window):
         self.pause_menu.resize(width, height)
         self.rpg_menu.resize(width, height)
         self.game_over_menu.resize(width, height)
+        if getattr(self, "hangar_menu", None) is not None:
+            self.hangar_menu.resize(width, height)
 
         if getattr(self, "_pause_hint", None):
             self._pause_hint.x = width - 10

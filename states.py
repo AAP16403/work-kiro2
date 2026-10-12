@@ -74,6 +74,7 @@ class GameStateName(str, Enum):
     MENU = "MenuState"
     SETTINGS = "SettingsState"
     GUIDE = "GuideState"
+    HANGAR = "HangarState"
     PLAYING = "PlayingState"
     PAUSED = "PausedState"
     BOSS_REWARD = "BossRewardState"
@@ -110,6 +111,8 @@ class MenuState(State):
             self.game.fsm.set_state(GameStateName.GUIDE)
         elif action == "settings":
             self.game.fsm.set_state(GameStateName.SETTINGS)
+        elif action == "hangar":
+            self.game.fsm.set_state(GameStateName.HANGAR)
         elif action == "quit":
             self.game._quit_game()
 
@@ -173,6 +176,35 @@ class GuideState(State):
 
     def draw(self):
         self.game.guide_menu.draw()
+
+
+class HangarState(State):
+    """Skins and achievements. The menu is built on the first visit so the rest of the game never imports it eagerly."""
+
+    def enter(self):
+        self.game._reset_input_flags()
+        if self.game.hangar_menu is None:
+            from hangar import HangarMenu
+            self.game.hangar_menu = HangarMenu(self.game.width, self.game.height)
+        self.game.hangar_menu.open()
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        action = self.game.hangar_menu.on_mouse_press(x, y, button)
+        if action == "back":
+            self.game.fsm.set_state(GameStateName.MENU)
+
+    def on_mouse_motion(self, x, y, dx, dy):
+        self.game.hangar_menu.on_mouse_motion(x, y)
+
+    def on_key_press(self, symbol, modifiers):
+        if self.game.hangar_menu.on_key_press(symbol) == "back":
+            self.game.fsm.set_state(GameStateName.MENU)
+
+    def update(self, dt: float):
+        self.game.hangar_menu.update(dt)
+
+    def draw(self):
+        self.game.hangar_menu.draw()
 
 
 class PlayingState(State):

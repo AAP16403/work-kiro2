@@ -1005,6 +1005,12 @@ _GAME_OVER_KEYS = _GAME_OVER_RETRY_KEYS + _GAME_OVER_MENU_KEYS
 class GameOverState(State):
     """Run-over screen. Input unlocks when the staged reveal ends."""
 
+    _armed_at = float("inf")  # locked until enter() starts the reveal clock
+
+    def accepts_input(self) -> bool:
+        """True once the staged reveal has ended; clicks and keys are ignored before that."""
+        return self._input_armed()
+
     def enter(self):
         game = self.game
         wave = int(game.state.wave)

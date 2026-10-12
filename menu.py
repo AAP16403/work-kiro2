@@ -1352,6 +1352,15 @@ class GuideMenu:
         )
         self.resize(width, height)
 
+    def _fit_desc(self, label) -> None:
+        """Shrink a row's one-line description (to 8 px at the smallest) until it fits the row width."""
+        size = self._desc_size
+        if int(label.font_size) != size:
+            label.font_size = size
+        while label.content_width > self._desc_max_w and size > 8:
+            size -= 1
+            label.font_size = size
+
     def _entries(self) -> list[dict]:
         if self.tab == "enemies":
             return self.ENEMY_INFO
@@ -1445,6 +1454,9 @@ class GuideMenu:
         row_gap = int(6 * scale)
         row_x = panel_x + int(24 * scale)
         row_w = panel_w - int(48 * scale)
+        # Threat/Counter is one line: its font shrinks (see _fit_desc) rather than running past the row edge.
+        self._desc_size = max(9, int(12 * scale))
+        self._desc_max_w = max(60, row_w - int(56 * scale) - int(14 * scale))
         for i, (bg, accent, pic_plate, icon_ring, icon, glyph, name, desc, lore, _) in enumerate(self._rows):
             y = row_top - i * (row_h + row_gap) - row_h
             bg.x = row_x
@@ -1575,6 +1587,7 @@ class GuideMenu:
             else:
                 desc.text = f"Threat: {str(e.get('what', ''))}  |  Counter: {str(e.get('deal', ''))}"
                 lore.text = f"Lore: {str(e.get('lore', ''))}"
+            self._fit_desc(desc)
 
         page_info = f"Page {self.page + 1}/{self._total_pages()}  |  Left/Right or buttons to browse"
         if self.tab == "enemies":

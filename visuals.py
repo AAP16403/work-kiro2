@@ -9,7 +9,7 @@ import pyglet
 from pyglet import shapes
 from pyglet.graphics import Group
 
-from config import ENEMY_COLORS, SCREEN_H
+from config import ENEMY_COLORS, SCREEN_H, SHIELD_MAX
 from drone_art import DroneArt
 from enemy import brute_charge_lane
 from event_visuals import ArenaEventFx
@@ -331,8 +331,8 @@ class Visuals:
             shield_ring2.x, shield_ring2.y = cx, cy
             shield_ring.radius = 18 + 2.0 * pulse
             shield_ring2.radius = 24 + 3.0 * pulse
-            shield_ring.opacity = int(90 + min(120, player.shield) * 1.0 * pulse)
-            shield_ring2.opacity = int(60 + min(120, player.shield) * 0.5 * pulse)
+            shield_ring.opacity = int(90 + min(SHIELD_MAX, player.shield) * 1.0 * pulse)
+            shield_ring2.opacity = int(60 + min(SHIELD_MAX, player.shield) * 0.5 * pulse)
         else:
             shield_ring.opacity = 0
             shield_ring2.opacity = 0

@@ -768,7 +768,10 @@ class Game(pyglet.window.Window):
         self.fsm.on_mouse_drag(x, y, dx, dy, buttons, modifiers)
 
     def on_mouse_press(self, x, y, button, modifiers):
-        if not isinstance(self.fsm.current_state, PlayingState):
+        state = self.fsm.current_state
+        # A click inside the Game Over input lock is ignored by the state, so it must not play a sound either.
+        game_over_locked = isinstance(state, GameOverState) and not state.accepts_input()
+        if not isinstance(state, PlayingState) and not game_over_locked:
             self.audio.play("ui_click", volume=0.6)
         self.fsm.on_mouse_press(x, y, button, modifiers)
 

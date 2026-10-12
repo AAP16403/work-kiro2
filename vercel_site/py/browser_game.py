@@ -612,7 +612,11 @@ class BrowserGame:
 
         spawn_loot_on_enemy_death(self.state, behavior, enemy_obj.pos, current_weapon=getattr(self.player, "current_weapon", None))
         self.particles.add_death_explosion(enemy_obj.pos, ENEMY_COLORS.get(behavior, (220, 220, 220)), behavior)
-        self.score.on_enemy_kill(behavior)
+        is_elite = bool(getattr(enemy_obj, "is_elite", False))
+        self.score.on_enemy_kill(
+            behavior,
+            multiplier=(float(config.ELITE_SCORE_MULT) if is_elite else 1.0),
+        )
         self.impact = max(self.impact, 0.32)
 
     def _explode_enemy_bomb(self, projectile) -> None:

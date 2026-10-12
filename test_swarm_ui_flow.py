@@ -40,7 +40,7 @@ def _crowded_segments(auto="AUTO ON"):
         (4, "Dash 1/2 1.4s"),
         (5, "BOOSTING 100%"),
         (6, "Run Shield,Crit,Dash,Ultra"),
-        (7, auto),
+        (3, auto),
     ]
 
 
@@ -114,19 +114,19 @@ def test_status_fit_keeps_boss_and_ultra_when_crowded(g):
     print("[PASS] test_status_fit_keeps_boss_and_ultra_when_crowded passed (boss and ultra kept, 7 low-priority segments hidden)")
 
 
-def test_status_fit_drops_auto_before_perm_and_boost(g):
+def test_status_fit_keeps_auto_before_perm_and_boost(g):
     _new_run(g)
     hud = g.hud
     label = hud.status_label
-    # Room for everything but the lowest-priority segment (AUTO) plus its ' +1' suffix.
-    full = SEP.join(text for _, text in _crowded_segments())
-    label.text = full.rsplit(SEP, 1)[0] + " +1"
+    # Room for everything but the perm-reward segment (the lowest priority, 6) plus its ' +1' suffix.
+    kept_segments = [seg for seg in _crowded_segments() if "Run Shield" not in seg[1]]
+    label.text = SEP.join(text for _, text in kept_segments) + " +1"
     hud._status_max_w = label.content_width + 2.0
     text = hud._fit_status(_crowded_segments())
     assert text.endswith(" +1"), f"exactly one segment should be hidden: {text!r}"
-    assert "AUTO ON" not in text, "AUTO is the lowest priority and goes first"
-    assert "Run Shield,Crit,Dash,Ultra" in text, "perm rewards must outlast AUTO"
-    print("[PASS] test_status_fit_drops_auto_before_perm_and_boost passed (lowest priority segment is dropped first)")
+    assert "Run Shield,Crit,Dash,Ultra" not in text, "the perm-reward segment is the one dropped"
+    assert text.endswith("AUTO ON +1"), f"auto-fire state must outlast perm rewards: {text!r}"
+    print("[PASS] test_status_fit_keeps_auto_before_perm_and_boost passed (auto-fire state outlasts perm rewards, boost and dash)")
 
 
 def test_status_fit_trims_lone_segment_with_ellipsis(g):
@@ -253,7 +253,7 @@ def run_all():
         test_status_line_ends_with_auto_state(g)
         test_boss_status_is_name_only_and_survives_draw(g)
         test_status_fit_keeps_boss_and_ultra_when_crowded(g)
-        test_status_fit_drops_auto_before_perm_and_boost(g)
+        test_status_fit_keeps_auto_before_perm_and_boost(g)
         test_status_fit_trims_lone_segment_with_ellipsis(g)
         test_status_fit_keeps_suffix_when_trimming_lone_segment(g)
         test_status_fit_joins_short_segments_without_suffix(g)

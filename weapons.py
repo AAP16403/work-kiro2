@@ -135,7 +135,9 @@ WEAPONS = {
         rank=7,
         damage=11,
         fire_rate=0.35,
-        projectile_count=5,
+        # Balance pass: 3 pellets across a 72-degree fan (was 5 across 144). The rank above still counts
+        # every pellet, so it is an upper bound on single-target DPS until playtest confirms it.
+        projectile_count=3,
         spread_angle=36,
         projectile_speed=340.0,
         projectile_type="flak",
@@ -155,7 +157,9 @@ def get_weapon_pool_for_wave(wave: int) -> list[str]:
     if wave <= 4:
         return ["basic", "rapid", "spread"]
     if wave <= 6:
-        return ["rapid", "spread", "plasma", "flak"]
+        # Flak is held back until wave 7: as the top rank it can never be replaced, so an early roll
+        # would turn every later weapon pickup into a shield top-up for the rest of the run.
+        return ["rapid", "spread", "plasma"]
     return ["spread", "plasma", "heavy", "railgun", "flak"]
 
 
@@ -167,7 +171,7 @@ def _pool_weights_for_wave(w: int) -> list[float]:
         # Keep basic common early; introduce rapid/spread gradually.
         return [0.50, 0.25, 0.25]
     if w <= 6:
-        return [0.30, 0.25, 0.25, 0.20]
+        return [0.30, 0.25, 0.25]  # matches get_weapon_pool_for_wave: flak is not in this pool
     # High wave variety
     return [0.22, 0.22, 0.18, 0.18, 0.20]
 

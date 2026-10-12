@@ -87,8 +87,8 @@ class Game(pyglet.window.Window):
         self.popups = None
         self._hitstop = 0.0
 
-        reduced_shake = shake_prefs.load_reduced_shake(default=False)
-        config.SHAKE_SCALE = float(config.SHAKE_REDUCED_SCALE) if reduced_shake else 1.0
+        shake_level = shake_prefs.load_shake_level(default="full")
+        config.SHAKE_SCALE = shake_prefs.shake_scale_for_level(shake_level)
 
         self.settings = {
             "difficulty": "normal",
@@ -96,7 +96,8 @@ class Game(pyglet.window.Window):
             "fullscreen": True,
             "arena_margin": float(getattr(config, "ARENA_MARGIN", 0.97)),
             "advanced_fx": bool(getattr(config, "ENABLE_ADVANCED_FX", True)),
-            "reduced_shake": reduced_shake,
+            "shake_level": shake_level,
+            "reduced_shake": shake_prefs.shake_level_is_reduced(shake_level),
             "map_type": MAP_CIRCLE,
             "music_volume": music_vol,
             "sfx_volume": sfx_vol,
@@ -111,7 +112,7 @@ class Game(pyglet.window.Window):
             self._on_settings_change,
             display_size=self._display_size,
             advanced_fx_enabled=bool(self.settings.get("advanced_fx", True)),
-            reduced_shake=reduced_shake,
+            shake_level=shake_level,
             map_type=self.settings.get("map_type", MAP_CIRCLE),
             music_volume=music_vol,
             sfx_volume=sfx_vol,
@@ -598,11 +599,25 @@ class Game(pyglet.window.Window):
                 return False
         return bool(default)
     
+    def _shake_level_from_settings(self, value: dict):
+        """Return the shake level named in a settings dict, or None when it names none.
+
+        ``shake_level`` (Full / Reduced / Off) wins. The legacy ``reduced_shake`` boolean still maps
+        to Reduced or Full so older callers keep working.
+        """
+        level = value.get("shake_level")
+        if isinstance(level, str) and level in config.SHAKE_LEVELS:
+            return level
+        reduced = value.get("reduced_shake")
+        if reduced is not None:
+            return "reduced" if self._coerce_bool(reduced, default=False) else "full"
+        return None
+
     def _on_settings_change(self, value):
         """Callback for settings changes."""
         if not isinstance(value, dict):
             return
-        previous_reduced_shake = bool(self.settings.get("reduced_shake", False))
+        previous_shake_level = shake_prefs.normalize_shake_level(self.settings.get("shake_level"))
         self.settings.update(value)
         if "music_volume" in value or "sfx_volume" in value:
             self.audio.set_volumes(music=value.get("music_volume"), sfx=value.get("sfx_volume"))
@@ -617,15 +632,15 @@ class Game(pyglet.window.Window):
                 self.settings_menu.advanced_fx = fx_enabled
                 self.settings_menu._refresh_fx_button_text()
         # Must run before the fullscreen early return below, which would skip it.
-        reduced_shake = value.get("reduced_shake")
-        if reduced_shake is not None:
-            reduced = self._coerce_bool(reduced_shake, default=False)
-            self.settings["reduced_shake"] = reduced
-            config.SHAKE_SCALE = float(config.SHAKE_REDUCED_SCALE) if reduced else 1.0
-            if reduced != previous_reduced_shake:
-                shake_prefs.save_reduced_shake(reduced)
+        shake_level = self._shake_level_from_settings(value)
+        if shake_level is not None:
+            self.settings["shake_level"] = shake_level
+            self.settings["reduced_shake"] = shake_prefs.shake_level_is_reduced(shake_level)
+            config.SHAKE_SCALE = shake_prefs.shake_scale_for_level(shake_level)
+            if shake_level != previous_shake_level:
+                shake_prefs.save_shake_level(shake_level)
             if getattr(self, "settings_menu", None):
-                self.settings_menu.reduced_shake = reduced
+                self.settings_menu.shake_level = shake_level
                 self.settings_menu._refresh_shake_button_text()
         fullscreen = value.get("fullscreen")
         arena_margin = value.get("arena_margin")

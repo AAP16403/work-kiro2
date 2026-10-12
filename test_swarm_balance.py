@@ -278,11 +278,13 @@ def test_boss_weapon_drop_outranks_current_weapon():
     st.init_rng(1)
     spawn_loot_on_enemy_death(st, "boss_brute", Vec2(0.0, 0.0), current_weapon=WEAPONS["flak"])
     drops = [p.data for p in st.powerups if p.kind == "weapon"]
-    assert drops == ["flak"], f"with the top of the pool held, the drop is the best pool weapon, got {drops}"
+    # Flak is not in the wave 5-6 pool, so with flak held the best pool weapon at wave 5 is plasma.
+    assert drops == ["plasma"], f"with the top of the pool held, the drop is the best pool weapon, got {drops}"
     hero = Player(pos=Vec2(0.0, 0.0))
     hero.current_weapon = WEAPONS["flak"]
     apply_powerup(hero, PowerUp(pos=Vec2(0.0, 0.0), kind="weapon", data=drops[0]), 0.0)
     assert hero.current_weapon is WEAPONS["flak"] and hero.shield == 20, "that drop pays off as a shield top-up"
+    assert WEAPONS["plasma"].rank < WEAPONS["flak"].rank, "plasma must be a downgrade against held flak"
     print("[PASS] test_boss_weapon_drop_outranks_current_weapon passed (boss drops are upgrades)")
 
 

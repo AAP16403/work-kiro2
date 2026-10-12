@@ -99,8 +99,9 @@ def test_chaser_lunge_windup_is_planted_and_drawn(g):
     assert abs(chaser.ai["lunge_windup"] - LUNGE_WINDUP_S) < 1e-9, "lunge must start with a windup"
     assert chaser.vel.length() < 1e-9, "chaser must be planted during windup"
     cd_after_trigger = chaser.ai["lunge_cd"]
-    assert 1.4 - LUNGE_WINDUP_S - 1e-9 <= cd_after_trigger <= 2.0 - LUNGE_WINDUP_S + 1e-9, \
-        f"lunge cooldown must be shortened by the windup, got {cd_after_trigger}"
+    # The per-frame tick already counts the windup, so the cooldown is the full 1.4-2.0 s roll.
+    assert 1.4 - 1e-9 <= cd_after_trigger <= 2.0 + 1e-9, \
+        f"lunge cooldown must not be shortened a second time by the windup, got {cd_after_trigger}"
 
     beams = _telegraphs(s)
     assert len(beams) == 1 and abs(beams[0].warn - LUNGE_WINDUP_S) < 1e-9, "one aim line must cover the windup"

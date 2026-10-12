@@ -109,13 +109,19 @@ PARTICLE_HARD_CAP = 650
 DEPTH_BUCKET = 16
 
 # Screen shake. Impulses stack, the total is capped, and every impulse is scaled by
-# SHAKE_SCALE (set at runtime by the Reduced Shake setting, default off).
+# SHAKE_SCALE. The Screen Shake setting (Full / Reduced / Off) sets SHAKE_SCALE at runtime:
+# Full = 1.0, Reduced = SHAKE_REDUCED_SCALE, Off = SHAKE_OFF_SCALE. Default is Full.
 SHAKE_CAP = 14.0            # hard ceiling on the shake amplitude in px
 SHAKE_DECAY = 20.0          # px of shake lost per second
-SHAKE_SCALE = 1.0           # runtime multiplier: 1.0 full shake, SHAKE_REDUCED_SCALE when reduced
+SHAKE_SCALE = 1.0           # runtime multiplier, one of SHAKE_FULL_SCALE / SHAKE_REDUCED_SCALE / SHAKE_OFF_SCALE
+SHAKE_FULL_SCALE = 1.0
 SHAKE_REDUCED_SCALE = 0.5
-SHAKE_HIT_IMPULSE = 2.0     # per player bullet, beam or vortex hit on an enemy
-SHAKE_CRIT_IMPULSE = 3.0    # per critical bullet hit
+SHAKE_OFF_SCALE = 0.0
+SHAKE_LEVELS = ("full", "reduced", "off")  # Screen Shake setting, in the order the menu cycles through them
+SHAKE_LEVEL_LABELS = {"full": "Full", "reduced": "Reduced", "off": "Off"}
+SHAKE_HIT_IMPULSE = 2.0     # per player bullet hit at PLAYER_DAMAGE; beam and vortex ticks use it flat
+SHAKE_HIT_DAMAGE_MAX_SCALE = 1.5  # bullet hits scale with damage / PLAYER_DAMAGE, clamped to [1.0, this]
+SHAKE_CRIT_IMPULSE = 3.0    # per critical bullet hit, added on top of the damage-scaled hit impulse
 SHAKE_HIT_FRAME_MAX = 3.0   # weapon hits in one frame sum to at most this, so multi-pellet fire cannot saturate
 SHAKE_HIT_CEILING = 4.0     # sustained weapon fire holds at or below this; bigger impacts still stack past it
 SHAKE_PLAYER_HIT_BASE = 2.0  # player damage shake: base + SHAKE_PLAYER_HIT_PER_HP * HP lost after shields

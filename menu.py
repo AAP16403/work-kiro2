@@ -471,6 +471,7 @@ class SettingsMenu:
         music_volume: float = 0.5,
         sfx_volume: float = 0.8,
         reduced_shake: bool = False,
+        shake_level: str | None = None,
     ):
         self.screen_width = width
         self.screen_height = height
@@ -518,7 +519,9 @@ class SettingsMenu:
         self.arena_margin = float(getattr(config, "ARENA_MARGIN", 0.97))
         self.arena_pct = float(round(self.arena_margin * 100.0))
         self.advanced_fx = bool(getattr(config, "ENABLE_ADVANCED_FX", True) if advanced_fx_enabled is None else advanced_fx_enabled)
-        self.reduced_shake = bool(reduced_shake)
+        if shake_level not in config.SHAKE_LEVELS:
+            shake_level = "reduced" if reduced_shake else "full"
+        self.shake_level = str(shake_level)
         self.window_size_idx = 0
         self.window_sizes, self.window_size_names = self._build_window_size_options(display_size)
         current_size = (int(width), int(height))
@@ -664,7 +667,7 @@ class SettingsMenu:
         self.fx_button = MenuButton(0, 0, 210, 50, "", self._toggle_advanced_fx, color=(82, 122, 180), hover_color=(112, 156, 220))
         self._refresh_fx_button_text()
 
-        # Reduced screen shake (default off). Persisted by the game through shake_prefs.
+        # Screen shake: Full (default), Reduced or Off. Persisted by the game through shake_prefs.
         self.shake_label = pyglet.text.Label(
             "Screen Shake",
             font_name=UI_FONT_BODY,
@@ -676,7 +679,7 @@ class SettingsMenu:
             color=(255, 255, 255, 255),
             batch=self.batch,
         )
-        self.shake_button = MenuButton(0, 0, 210, 50, "", self._toggle_reduced_shake, color=(82, 122, 180), hover_color=(112, 156, 220))
+        self.shake_button = MenuButton(0, 0, 210, 50, "", self._cycle_shake_level, color=(82, 122, 180), hover_color=(112, 156, 220))
         self._refresh_shake_button_text()
 
         self.map_label = pyglet.text.Label(
@@ -1052,12 +1055,26 @@ class SettingsMenu:
         self._refresh_fx_button_text()
         self.on_save(self.get_settings())
 
+    @property
+    def reduced_shake(self) -> bool:
+        """Legacy boolean view: True when screen shake is Reduced or Off."""
+        return self.shake_level != "full"
+
+    @reduced_shake.setter
+    def reduced_shake(self, value: bool) -> None:
+        if not value:
+            self.shake_level = "full"
+        elif self.shake_level == "full":
+            self.shake_level = "reduced"
+
     def _refresh_shake_button_text(self):
-        self.shake_button.text = f"Reduced: {'On' if self.reduced_shake else 'Off'}"
+        self.shake_button.text = config.SHAKE_LEVEL_LABELS.get(self.shake_level, "Full")
         self.shake_button.sync()
 
-    def _toggle_reduced_shake(self):
-        self.reduced_shake = not self.reduced_shake
+    def _cycle_shake_level(self):
+        """Step Screen Shake through Full, Reduced and Off, then wrap back to Full."""
+        levels = config.SHAKE_LEVELS
+        self.shake_level = levels[(levels.index(self.shake_level) + 1) % len(levels)]
         self._refresh_shake_button_text()
         self.on_save(self.get_settings())
 
@@ -1144,6 +1161,7 @@ class SettingsMenu:
             "fullscreen": fullscreen,
             "arena_margin": float(self.arena_margin),
             "advanced_fx": bool(self.advanced_fx),
+            "shake_level": str(self.shake_level),
             "reduced_shake": bool(self.reduced_shake),
             "music_volume": float(self.music_volume),
             "sfx_volume": float(self.sfx_volume),

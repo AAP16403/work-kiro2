@@ -35,7 +35,7 @@ _SHAKE_RNG = random.Random()
 
 
 def add_shake(s, amount: float, limit: float | None = None) -> None:
-    """Stack screen shake onto state ``s``: scaled by the reduced-shake setting, capped at SHAKE_CAP.
+    """Stack screen shake onto state ``s``: scaled by the Screen Shake setting (Full, Reduced or Off), capped at SHAKE_CAP.
 
     ``limit`` is an optional ceiling for this one contribution, used by sustained sources such
     as ramming. It stops that source from pushing the shake past ``limit``, but it never lowers
@@ -52,6 +52,22 @@ def add_shake(s, amount: float, limit: float | None = None) -> None:
             return
         cap = ceiling
     s.shake = min(cap, current + impulse)
+
+
+def projectile_hit_impulse(damage: float, is_crit: bool = False) -> float:
+    """Shake for one bullet hit on an enemy, before the per-frame clamp in PlayingState.
+
+    The base impulse scales with the bullet's damage against PLAYER_DAMAGE (the basic gun's damage).
+    The scale is clamped to [1.0, SHAKE_HIT_DAMAGE_MAX_SCALE]: weak bullets never shake less than the
+    base impulse, and the heaviest single hit lands exactly on the per-frame clamp. A crit adds its
+    extra impulse on top, so a basic crit still gives SHAKE_CRIT_IMPULSE.
+    """
+    ref = max(1.0, float(config.PLAYER_DAMAGE))
+    scale = min(float(config.SHAKE_HIT_DAMAGE_MAX_SCALE), max(1.0, float(damage) / ref))
+    impulse = float(config.SHAKE_HIT_IMPULSE) * scale
+    if is_crit:
+        impulse += float(config.SHAKE_CRIT_IMPULSE) - float(config.SHAKE_HIT_IMPULSE)
+    return impulse
 
 
 class GameStateName(str, Enum):
@@ -608,7 +624,7 @@ class PlayingState(State):
                         hit_entities.add(id(e))
                         is_crit = getattr(p, "is_crit", False)
                         PlayingState._damage_enemy(game, s, e, p.damage, is_crit=is_crit)
-                        hit_shake += float(config.SHAKE_CRIT_IMPULSE if is_crit else config.SHAKE_HIT_IMPULSE)
+                        hit_shake += projectile_hit_impulse(p.damage, is_crit)
 
                         behavior_name = getattr(e, "_behavior_name", enemy_behavior_name(e))
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
@@ -838,7 +854,9 @@ class PlayingState(State):
             (4, dash_txt),
             (5, boost_txt),
             (6, perm_txt),
-            (7, auto_txt),
+            # Auto-fire is a mid-fight state the player needs to read, so it outlasts the dash, boost and
+            # permanent-reward text. Only boss, ultra, laser, vortex and temp rewards outrank it.
+            (3, auto_txt),
         ]
 
         game.hud.update_bars(

@@ -255,6 +255,7 @@ def test_reduced_shake_setting_wires_through_game_and_persists(g):
     saved_path = audio._SETTINGS_PATH
     saved_scale = config.SHAKE_SCALE
     saved_flag = bool(g.settings.get("reduced_shake", False))
+    saved_level = str(g.settings.get("shake_level", "full"))
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "user_settings.json")
         with open(path, "w", encoding="utf-8") as fh:
@@ -266,7 +267,7 @@ def test_reduced_shake_setting_wires_through_game_and_persists(g):
             assert abs(config.SHAKE_SCALE - float(config.SHAKE_REDUCED_SCALE)) < 1e-9, "turning the setting on must set the scale"
             assert g.settings["reduced_shake"] is True
             assert g.settings_menu.reduced_shake is True
-            assert g.settings_menu.shake_button.text == "Reduced: On"
+            assert g.settings_menu.shake_button.text == "Reduced", "the button shows the level name"
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             assert data.get("reduced_shake") is True, "the flag must be written to user_settings.json"
@@ -280,7 +281,9 @@ def test_reduced_shake_setting_wires_through_game_and_persists(g):
             audio._SETTINGS_PATH = saved_path
             config.SHAKE_SCALE = saved_scale
             g.settings["reduced_shake"] = saved_flag
+            g.settings["shake_level"] = saved_level
             g.settings_menu.reduced_shake = saved_flag
+            g.settings_menu.shake_level = saved_level
             g.settings_menu._refresh_shake_button_text()
     print("[PASS] test_reduced_shake_setting_wires_through_game_and_persists passed (scale, menu and file stay in sync)")
 
@@ -305,13 +308,22 @@ def test_reduced_shake_file_defaults_and_bad_json(g):
 def test_settings_menu_toggle_defaults_off_and_responds_to_click(g):
     captured = []
     m = SettingsMenu(980, 620, captured.append)
-    assert m.reduced_shake is False and m.get_settings()["reduced_shake"] is False, "reduced shake must default to off"
-    assert m.shake_button.text == "Reduced: Off"
+    assert m.reduced_shake is False and m.get_settings()["reduced_shake"] is False, "screen shake must default to Full"
+    assert m.shake_level == "full" and m.get_settings()["shake_level"] == "full"
+    assert m.shake_button.text == "Full"
     btn = m.shake_button
-    m.on_mouse_press(btn.x + btn.width / 2.0, btn.y + btn.height / 2.0, pyglet.window.mouse.LEFT)
-    assert captured and captured[-1]["reduced_shake"] is True, "clicking the toggle must report the new value to the owner"
-    assert m.shake_button.text == "Reduced: On"
-    print("[PASS] test_settings_menu_toggle_defaults_off_and_responds_to_click passed (default off, click reports on)")
+    center = (btn.x + btn.width / 2.0, btn.y + btn.height / 2.0)
+    m.on_mouse_press(center[0], center[1], pyglet.window.mouse.LEFT)
+    assert captured and captured[-1]["reduced_shake"] is True, "the first click (Full to Reduced) must report reduced"
+    assert captured[-1]["shake_level"] == "reduced"
+    assert m.shake_button.text == "Reduced"
+    m.on_mouse_press(center[0], center[1], pyglet.window.mouse.LEFT)
+    assert captured[-1]["shake_level"] == "off" and captured[-1]["reduced_shake"] is True, "the second click (Reduced to Off) must report off"
+    assert m.shake_button.text == "Off"
+    m.on_mouse_press(center[0], center[1], pyglet.window.mouse.LEFT)
+    assert captured[-1]["shake_level"] == "full" and captured[-1]["reduced_shake"] is False, "the third click wraps back to Full"
+    assert m.shake_button.text == "Full"
+    print("[PASS] test_settings_menu_toggle_defaults_off_and_responds_to_click passed (default Full, clicks cycle Full, Reduced, Off)")
 
 
 def test_shake_toggle_clear_of_footer_and_size_grid(g):

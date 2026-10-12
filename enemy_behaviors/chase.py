@@ -53,8 +53,10 @@ class Chase(Behavior):
         elif enemy.ai["lunge_t"] <= 0.0 and enemy.ai["lunge_cd"] <= 0.0 and 80.0 < dist_to_player < 240.0:
             lunge_dir = (player_pos + player_vel * 0.22 - enemy.pos).normalized()
             enemy.ai["lunge_windup"] = LUNGE_WINDUP_S
-            # The windup counts against the cooldown so the lunge cadence is unchanged.
-            enemy.ai["lunge_cd"] = 1.4 + random.uniform(0.0, 0.6) - LUNGE_WINDUP_S
+            # The cooldown is ticked down every frame above, including the windup frames, so the
+            # windup already counts against it. Do not subtract LUNGE_WINDUP_S again: that would
+            # shorten the trigger-to-trigger interval by the windup length.
+            enemy.ai["lunge_cd"] = 1.4 + random.uniform(0.0, 0.6)
             enemy.ai["lunge_dir"] = lunge_dir
             reach = enemy.speed * LUNGE_REACH_MULT
             enemy.ai["telegraph_beam"] = add_windup_telegraph(

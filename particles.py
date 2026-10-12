@@ -172,9 +172,10 @@ class ParticleSystem:
         strength = max(4, min(18, int(amount) // 4))
         self.emit(pos, (120, 210, 255), count=strength, speed=90.0, life=0.35, size=2.6)
 
-    def add_dash_effect(self, pos: Vec2, dash_dir: Vec2):
+    def add_dash_effect(self, pos: Vec2, dash_dir: Vec2, color: tuple[int, int, int] | None = None):
         back = -dash_dir
-        self.emit(pos, (160, 220, 255), count=8, speed=140.0, life=0.25, size=2.4, direction=back, spread_angle=0.4)
+        afterimage = (160, 220, 255) if color is None else color
+        self.emit(pos, afterimage, count=8, speed=140.0, life=0.25, size=2.4, direction=back, spread_angle=0.4)
 
     def add_laser_beam(self, start: Vec2, end: Vec2, color: tuple[int, int, int]):
         # Emit particles along the line

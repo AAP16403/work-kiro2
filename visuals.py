@@ -11,10 +11,14 @@ from pyglet.graphics import Group
 
 from config import ENEMY_COLORS, SCREEN_H
 from enemy import brute_charge_lane
+from skin_apply import aura_outer, complete_palette
 from utils import to_iso, Vec2, enemy_behavior_name
 
 # Reduce group churn by bucketing depth values.
 DEPTH_BUCKET = 16
+
+# Player shot types with their own identity colour. A skin recolours every other player shot's body.
+_HEAVY_SHOT_TYPES = ("bomb", "railgun", "flak", "missile", "plasma")
 
 
 class GroupCache:
@@ -74,6 +78,8 @@ class Visuals:
         self._laser_handles: dict[int, RenderHandle] = {}
         self._thunder_handles: dict[int, RenderHandle] = {}
         self._player_handle: RenderHandle | None = None
+        self._player_palette = complete_palette()
+        self._shot_palette: dict | None = None  # None keeps the per-weapon player shot colours
         self._scene_stars: list[tuple[shapes.Circle, float, float, float]] = []
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
@@ -168,19 +174,21 @@ class Visuals:
         left.opacity = int(v_op * 0.8)
         right.opacity = int(v_op * 0.8)
 
-    def make_player(self):
-        """Create player visual."""
+    def make_player(self, palette: dict | None = None):
+        """Create player visual. ``palette`` is the run's skin palette (see skin_apply.LEGACY_PALETTE)."""
+        pal = complete_palette(palette)
+        self._player_palette = pal
         sh = shapes.Ellipse(0, 0, 30, 12, color=(0, 0, 0), batch=self.batch)
         sh.opacity = 130
 
-        glow = shapes.Circle(0, 0, 22, color=(60, 140, 220), batch=self.batch)
+        glow = shapes.Circle(0, 0, 22, color=pal["glow"], batch=self.batch)
         glow.opacity = 65
-        glow2 = shapes.Circle(0, 0, 28, color=(80, 120, 220), batch=self.batch)
+        glow2 = shapes.Circle(0, 0, 28, color=aura_outer(pal), batch=self.batch)
         glow2.opacity = 28
 
         wing_color = (15, 22, 36)
-        hull_color = (132, 224, 255)
-        cockpit_color = (10, 200, 255)
+        hull_color = pal["body"]
+        cockpit_color = pal["accent"]
 
         wing = shapes.Polygon(
             (8, 0), (-12, 18), (-16, 18), (-10, 6), (-18, 8), (-18, -8), (-10, -6), (-16, -18), (-12, -18),
@@ -198,15 +206,15 @@ class Visuals:
         engine_glow.opacity = 200
 
         # Thrusters
-        thruster_l = shapes.Line(0, 0, 0, 0, thickness=4, color=(130, 210, 255), batch=self.batch)
-        thruster_r = shapes.Line(0, 0, 0, 0, thickness=4, color=(130, 210, 255), batch=self.batch)
+        thruster_l = shapes.Line(0, 0, 0, 0, thickness=4, color=pal["trail"], batch=self.batch)
+        thruster_r = shapes.Line(0, 0, 0, 0, thickness=4, color=pal["trail"], batch=self.batch)
         thruster_l.opacity = 0
         thruster_r.opacity = 0
 
         # Gun barrel
         gun = shapes.Line(0, 0, 0, 0, thickness=3, color=(230, 230, 240), batch=self.batch)
         gun.opacity = 210
-        gun_core = shapes.Line(0, 0, 0, 0, thickness=1, color=(255, 255, 255), batch=self.batch)
+        gun_core = shapes.Line(0, 0, 0, 0, thickness=1, color=pal["eye"], batch=self.batch)
         gun_core.opacity = 220
 
         shield_ring = shapes.Arc(0, 0, 19, segments=48, thickness=4, color=(120, 220, 255), batch=self.batch)
@@ -257,7 +265,7 @@ class Visuals:
         elif getattr(player, "invincibility_timer", 0) > 0:
             hull = (255, 236, 160)
         else:
-            hull = (132, 224, 255)
+            hull = self._player_palette["body"]
         body.color = hull
         
         for part in (wing, body, cockpit):
@@ -292,7 +300,7 @@ class Visuals:
             thruster_l.x2, thruster_l.y2 = tx1 + back.x * jet_len, ty1 + back.y * (jet_len * 0.6)
             thruster_r.x, thruster_r.y = tx2, ty2
             thruster_r.x2, thruster_r.y2 = tx2 + back.x * (jet_len * 0.85), ty2 + back.y * (jet_len * 0.5)
-            jet_color = (255, 170, 70) if is_boosting else (130, 210, 255)
+            jet_color = (255, 170, 70) if is_boosting else self._player_palette["trail"]
             thruster_l.color = jet_color
             thruster_r.color = jet_color
             thruster_l.opacity = int(140 + 110 * pulse)
@@ -305,8 +313,8 @@ class Visuals:
             thruster_l.x2, thruster_l.y2 = tx1 + back.x * jet_len, ty1 + back.y * (jet_len * 0.6)
             thruster_r.x, thruster_r.y = tx2, ty2
             thruster_r.x2, thruster_r.y2 = tx2 + back.x * jet_len, ty2 + back.y * (jet_len * 0.5)
-            thruster_l.color = (130, 210, 255)
-            thruster_r.color = (130, 210, 255)
+            thruster_l.color = self._player_palette["trail"]
+            thruster_r.color = self._player_palette["trail"]
             thruster_l.opacity = int(60 + 40 * idle_pulse)
             thruster_r.opacity = int(50 + 35 * idle_pulse)
 
@@ -854,6 +862,10 @@ class Visuals:
         if h:
             h.delete()
 
+    def set_shot_palette(self, palette: dict | None) -> None:
+        """Skin palette for the player's shots and their trails. None keeps the per-weapon colours."""
+        self._shot_palette = None if palette is None else complete_palette(palette)
+
     def ensure_projectile(self, proj):
         """Ensure projectile visual exists."""
         if id(proj) in self._proj_handles:
@@ -863,7 +875,10 @@ class Visuals:
         projectile_type = getattr(proj, 'projectile_type', 'bullet')
         is_enemy = str(getattr(proj, "owner", "player")) == "enemy"
         is_crit = bool(getattr(proj, "is_crit", False))
-        simple_dot = projectile_type in ("bullet", "spread") and not is_crit
+        # The skin recolours the player's plain and spread shots and gives them a trail. Crits keep their gold
+        # and enemy bullets keep their red-orange.
+        shot_pal = None if (is_enemy or is_crit) else self._shot_palette
+        simple_dot = projectile_type in ("bullet", "spread") and not is_crit and shot_pal is None
         
         if is_crit:
             sh = shapes.Circle(0, 0, 5, color=(255, 205, 50), batch=self.batch, group=self._projectile_group)
@@ -913,6 +928,9 @@ class Visuals:
                 sh = shapes.Circle(0, 0, 4, color=(255, 245, 190), batch=self.batch, group=self._projectile_group)
                 core = shapes.Circle(0, 0, 2, color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
 
+        if shot_pal is not None and projectile_type not in _HEAVY_SHOT_TYPES:
+            sh.color = shot_pal["bullet"]
+
         if simple_dot:
             # Tight dot (no trailing streak) to avoid visual noise.
             flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch, group=self._projectile_group)
@@ -920,7 +938,12 @@ class Visuals:
             handle = RenderHandle(sh, core, flare)
         else:
             # Streaked projectile for heavier/kinetic types.
-            trail_color = (255, 220, 80) if is_crit else sh.color
+            if is_crit:
+                trail_color = (255, 220, 80)
+            elif shot_pal is not None:
+                trail_color = shot_pal["trail"]
+            else:
+                trail_color = sh.color
             trail = shapes.Line(0, 0, 0, 0, thickness=max(1, int(sh.radius * 0.65)), color=trail_color, batch=self.batch, group=self._projectile_group)
             trail.opacity = 95 if is_enemy else (150 if is_crit else 125)
             flare = shapes.Circle(0, 0, max(2, int(sh.radius * 0.55)), color=(255, 255, 255), batch=self.batch, group=self._projectile_group)

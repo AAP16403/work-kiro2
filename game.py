@@ -18,6 +18,7 @@ from level import GameState as GameStateData, get_difficulty_mods, spawn_loot_on
 from utils import set_view_size, compute_room_radius, Vec2, clamp_to_map, enemy_behavior_name, iso_to_world, dist, point_segment_distance
 
 from visuals import Visuals, GroupCache
+from skin_apply import default_run_skin, read_run_skin
 from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
@@ -130,7 +131,8 @@ class Game(pyglet.window.Window):
         self.player = None
         self.visuals = None
         self.particle_system = None
-        
+        self.run_skin = default_run_skin()  # replaced with the selected skin at each run start
+
         self.keys = pyglet.window.key.KeyStateHandler()
         self.push_handlers(self.keys)
 
@@ -264,9 +266,12 @@ class Game(pyglet.window.Window):
         self._dash_cd_mult = 1.0
         self._dash_cd_difficulty = float(get_difficulty_mods(difficulty).get("dash_cd", 1.0))
 
+        # The skin selected in progress is read once per run start and drives the ship, shots and trails.
+        self.run_skin = read_run_skin()
         self.visuals = Visuals(self.batch, self.groups)
-        self.visuals.make_player()
-        
+        self.visuals.make_player(self.run_skin.palette)
+        self.visuals.set_shot_palette(self.run_skin.shot_palette)
+
         self.particle_system = ParticleSystem(self.batch)
         self.popups = DamagePopups()
         self._hitstop = 0.0
@@ -549,7 +554,7 @@ class Game(pyglet.window.Window):
         )
         if did_dash:
             self.audio.play("dash", volume=0.7, pitch_jitter=0.05)
-            self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction)
+            self.particle_system.add_dash_effect(self.player.pos, self.player.dash_direction, color=self.run_skin.dash_color)
             if getattr(self, "advanced_fx", None):
                 self.advanced_fx.trigger_dash(0.7)
 

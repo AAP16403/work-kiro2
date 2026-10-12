@@ -103,6 +103,20 @@ PARTICLE_SOFT_CAP = 450
 PARTICLE_HARD_CAP = 650
 DEPTH_BUCKET = 16
 
+# Screen shake. Impulses stack, the total is capped, and every impulse is scaled by
+# SHAKE_SCALE (set at runtime by the Reduced Shake setting, default off).
+SHAKE_CAP = 14.0            # hard ceiling on the shake amplitude in px
+SHAKE_DECAY = 20.0          # px of shake lost per second
+SHAKE_SCALE = 1.0           # runtime multiplier: 1.0 full shake, SHAKE_REDUCED_SCALE when reduced
+SHAKE_REDUCED_SCALE = 0.5
+SHAKE_HIT_IMPULSE = 2.0     # per player bullet, beam or vortex hit on an enemy
+SHAKE_CRIT_IMPULSE = 3.0    # per critical bullet hit
+SHAKE_HIT_FRAME_MAX = 3.0   # weapon hits in one frame sum to at most this, so multi-pellet fire cannot saturate
+SHAKE_HIT_CEILING = 4.0     # sustained weapon fire holds at or below this; bigger impacts still stack past it
+SHAKE_PLAYER_HIT_BASE = 2.0  # player damage shake: base + SHAKE_PLAYER_HIT_PER_HP * HP lost after shields
+SHAKE_PLAYER_HIT_PER_HP = 0.25
+SHAKE_PLAYER_HIT_MAX = 8.0
+
 # Enemy Colors
 ENEMY_COLORS = {
     "bomber": (255, 160, 50),       # Vibrant Yellow-Orange

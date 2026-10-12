@@ -22,6 +22,7 @@ from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
 from audio import AudioManager, load_audio_settings, save_audio_settings
+import shake_prefs
 from popups import DamagePopups
 from menu import (
     Menu,
@@ -55,7 +56,8 @@ from states import (
     PlayingState,
     PausedState,
     BossRewardState,
-    GameOverState
+    GameOverState,
+    add_shake,
 )
 
 
@@ -85,12 +87,16 @@ class Game(pyglet.window.Window):
         self.popups = None
         self._hitstop = 0.0
 
+        reduced_shake = shake_prefs.load_reduced_shake(default=False)
+        config.SHAKE_SCALE = float(config.SHAKE_REDUCED_SCALE) if reduced_shake else 1.0
+
         self.settings = {
             "difficulty": "normal",
             "window_size": (self.width, self.height),
             "fullscreen": True,
             "arena_margin": float(getattr(config, "ARENA_MARGIN", 0.97)),
             "advanced_fx": bool(getattr(config, "ENABLE_ADVANCED_FX", True)),
+            "reduced_shake": reduced_shake,
             "map_type": MAP_CIRCLE,
             "music_volume": music_vol,
             "sfx_volume": sfx_vol,
@@ -105,6 +111,7 @@ class Game(pyglet.window.Window):
             self._on_settings_change,
             display_size=self._display_size,
             advanced_fx_enabled=bool(self.settings.get("advanced_fx", True)),
+            reduced_shake=reduced_shake,
             map_type=self.settings.get("map_type", MAP_CIRCLE),
             music_volume=music_vol,
             sfx_volume=sfx_vol,
@@ -340,7 +347,7 @@ class Game(pyglet.window.Window):
         if self.particle_system:
             self.particle_system.add_powerup_collection(self.player.pos, (255, 235, 170))
         if self.state:
-            self.state.shake = max(self.state.shake, 5.0)
+            add_shake(self.state, 5.0)
         self._recompute_temp_reward_mods()
 
     def _apply_perm_reward(self, key: str) -> None:
@@ -359,7 +366,7 @@ class Game(pyglet.window.Window):
         if self.particle_system:
             self.particle_system.add_powerup_collection(self.player.pos, (200, 235, 255))
         if self.state:
-            self.state.shake = max(self.state.shake, 6.0)
+            add_shake(self.state, 6.0)
 
     def _regen_layout(self, segment: int | None = None):
         if not config.ENABLE_OBSTACLES:
@@ -411,6 +418,12 @@ class Game(pyglet.window.Window):
                 self._hitstop = max(self._hitstop, 0.05)
             if getattr(self, "advanced_fx", None):
                 self.advanced_fx.trigger_hit(min(1.0, 0.28 + amount * 0.03))
+            state = getattr(self, "state", None)
+            if state is not None:
+                # Shake scales with the HP that actually got through the shield (shield hits add none).
+                hp_shake = float(config.SHAKE_PLAYER_HIT_BASE) + amount * float(config.SHAKE_PLAYER_HIT_PER_HP)
+                hp_shake = max(float(config.SHAKE_PLAYER_HIT_BASE), min(float(config.SHAKE_PLAYER_HIT_MAX), hp_shake))
+                add_shake(state, hp_shake)
             if getattr(self, 'score', None):
                 self.score.on_player_hit()
 
@@ -477,7 +490,7 @@ class Game(pyglet.window.Window):
                 thickness=beam_thickness,
                 color=tuple(config.ULTRA_BEAM_COLOR),
             )
-            s.shake = max(s.shake, 12.0)
+            add_shake(s, 12.0)
         elif variant == 1:
             # Tri-beam spread for multi-target pressure.
             for deg in (-16.0, 0.0, 16.0):
@@ -493,7 +506,7 @@ class Game(pyglet.window.Window):
                     thickness=beam_thickness * 0.8,
                     color=(255, 180, 180),
                 )
-            s.shake = max(s.shake, 14.0)
+            add_shake(s, 14.0)
         else:
             # Shockwave + forward finisher beam.
             blast_r = 160.0
@@ -512,7 +525,7 @@ class Game(pyglet.window.Window):
                 thickness=beam_thickness * 0.7,
                 color=(255, 210, 120),
             )
-            s.shake = max(s.shake, 16.0)
+            add_shake(s, 16.0)  # capped at SHAKE_CAP (14) like every other stacked impulse
 
         self.audio.play("ultra_fire", volume=0.9)
         self._hitstop = max(self._hitstop, 0.06)
@@ -587,6 +600,7 @@ class Game(pyglet.window.Window):
         """Callback for settings changes."""
         if not isinstance(value, dict):
             return
+        previous_reduced_shake = bool(self.settings.get("reduced_shake", False))
         self.settings.update(value)
         if "music_volume" in value or "sfx_volume" in value:
             self.audio.set_volumes(music=value.get("music_volume"), sfx=value.get("sfx_volume"))
@@ -600,6 +614,17 @@ class Game(pyglet.window.Window):
             if getattr(self, "settings_menu", None):
                 self.settings_menu.advanced_fx = fx_enabled
                 self.settings_menu._refresh_fx_button_text()
+        # Must run before the fullscreen early return below, which would skip it.
+        reduced_shake = value.get("reduced_shake")
+        if reduced_shake is not None:
+            reduced = self._coerce_bool(reduced_shake, default=False)
+            self.settings["reduced_shake"] = reduced
+            config.SHAKE_SCALE = float(config.SHAKE_REDUCED_SCALE) if reduced else 1.0
+            if reduced != previous_reduced_shake:
+                shake_prefs.save_reduced_shake(reduced)
+            if getattr(self, "settings_menu", None):
+                self.settings_menu.reduced_shake = reduced
+                self.settings_menu._refresh_shake_button_text()
         fullscreen = value.get("fullscreen")
         arena_margin = value.get("arena_margin")
         if arena_margin is not None:

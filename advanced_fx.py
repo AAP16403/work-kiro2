@@ -38,6 +38,7 @@ class AdvancedFX:
         self._ultra_flash = 0.0
         self._dash_pulse = 0.0
         self._boost_pulse = 0.0
+        self._boss_flash = 0.0
 
         # Pyglet fallback overlay batch
         self._fb_batch = pyglet.graphics.Batch()
@@ -84,6 +85,7 @@ class AdvancedFX:
                     uniform float u_ultra_flash;
                     uniform float u_dash_pulse;
                     uniform float u_boost_pulse;
+                    uniform float u_boss_flash;
                     uniform float u_hp_danger;
                     uniform float u_boss_pressure;
                     uniform vec2 u_resolution;
@@ -107,6 +109,7 @@ class AdvancedFX:
                         alpha += u_ultra_flash * (0.10 + 0.22 * corePulse);
                         alpha += u_dash_pulse * (0.04 + 0.06 * (1.0 - abs(centered.x)));
                         alpha += u_boost_pulse * (0.05 + 0.07 * radial);
+                        alpha += u_boss_flash * (0.30 + 0.20 * radial);
                         alpha += u_boss_pressure * (0.02 + 0.04 * bossBand);
                         alpha += u_hp_danger * (0.03 + 0.06 * (1.0 - radial));
                         vec3 tint = vec3(0.03, 0.05, 0.08) + vec3(0.08, 0.06, 0.02) * (0.5 + 0.5 * sin(u_time * 0.3));
@@ -114,6 +117,7 @@ class AdvancedFX:
                         tint = mix(tint, vec3(0.90, 0.62, 0.22), u_ultra_flash * 0.40);
                         tint = mix(tint, vec3(0.14, 0.30, 0.50), u_dash_pulse * 0.30);
                         tint = mix(tint, vec3(0.85, 0.50, 0.15), u_boost_pulse * 0.35);
+                        tint = mix(tint, vec3(1.0, 0.94, 0.82), u_boss_flash * 0.85);
                         tint = mix(tint, vec3(0.42, 0.10, 0.10), u_hp_danger * 0.35);
                         tint = mix(tint, vec3(0.20, 0.10, 0.28), u_boss_pressure * 0.20);
                         fragColor = vec4(tint, alpha);
@@ -162,6 +166,10 @@ class AdvancedFX:
     def trigger_boost(self, strength: float = 1.0) -> None:
         self._boost_pulse = max(self._boost_pulse, max(0.0, min(1.0, float(strength))))
 
+    def trigger_boss_flash(self, strength: float = 1.0) -> None:
+        """Camera-style white flash for a boss kill. Decays in about 0.4 s."""
+        self._boss_flash = max(self._boss_flash, max(0.0, min(1.0, float(strength))))
+
     def render(self, time_s: float, combat_intensity: float, hp_ratio: float = 1.0, boss_active: bool = False) -> None:
         if not self.enabled:
             return
@@ -175,10 +183,18 @@ class AdvancedFX:
         self._ultra_flash = max(0.0, self._ultra_flash - 0.030)
         self._dash_pulse = max(0.0, self._dash_pulse - 0.065)
         self._boost_pulse = max(0.0, self._boost_pulse - 0.080)
+        self._boss_flash = max(0.0, self._boss_flash - 0.045)
 
         if not self._ensure_ready():
             # Graceful Pyglet software fallback
+            if self._boss_flash > 0.02:
+                self._fb_flash.color = (255, 240, 210)
+                self._fb_flash.width = self.width
+                self._fb_flash.height = self.height
+                self._fb_flash.opacity = max(0, min(230, int(self._boss_flash * 230)))
+                self._fb_batch.draw()
             if self._hit_flash > 0.02 or hp_danger > 0.2:
+                self._fb_flash.color = (255, 60, 60)
                 op = int(self._hit_flash * 60 + hp_danger * 40)
                 self._fb_flash.width = self.width
                 self._fb_flash.height = self.height
@@ -198,6 +214,7 @@ class AdvancedFX:
         self._prog["u_ultra_flash"].value = self._ultra_flash
         self._prog["u_dash_pulse"].value = self._dash_pulse
         self._prog["u_boost_pulse"].value = self._boost_pulse
+        self._prog["u_boss_flash"].value = self._boss_flash
         self._prog["u_hp_danger"].value = hp_danger
         self._prog["u_boss_pressure"].value = boss_pressure
         self._prog["u_resolution"].value = (float(self.width), float(self.height))

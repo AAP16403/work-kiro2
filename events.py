@@ -13,6 +13,7 @@ import math
 import random
 from dataclasses import dataclass, field
 
+import audio_cues
 import config
 from hazards import LaserBeam, Trap
 from utils import Vec2, dist_sq
@@ -186,6 +187,11 @@ def begin_wave_event(state, game=None) -> ArenaEvent | None:
     if ev.beam is not None:
         state.lasers.append(ev.beam)
     state.arena_event = ev
+    # Announce the event: the warning sound for every event, and the hum when a nebula starts.
+    audio = getattr(game, "audio", None)
+    audio_cues.cue(audio, "event_warn")
+    if kind == EVENT_NEBULA:
+        audio_cues.cue(audio, "nebula_hum")
     return ev
 
 
@@ -267,6 +273,7 @@ def _update_flare(ev: ArenaEvent, game, dt: float) -> None:
         return  # no damage during the warning, and none on the frame the sweep has finished
     if not ev.fired:
         ev.fired = True
+        audio_cues.cue(getattr(game, "audio", None), "flare_sweep")
         particles = getattr(game, "particle_system", None)
         if particles is not None:
             particles.add_laser_beam(beam.start, beam.end, color=beam.color)

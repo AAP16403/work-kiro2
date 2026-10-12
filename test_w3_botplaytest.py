@@ -344,7 +344,7 @@ def test_mutators_are_recorded_when_present():
     from mutators import MUTATORS
     picked = playtest._mutator_ids_for_seed(9)
     assert picked == playtest._mutator_ids_for_seed(9), "mutator choice must be deterministic"
-    assert set(picked) <= set(MUTATORS) and len(picked) <= 2
+    assert set(picked) <= {m.id for m in MUTATORS} and len(picked) <= 2
     print(f"[PASS] test_mutators_are_recorded_when_present passed (seed 9 picks {picked})")
 
 

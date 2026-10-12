@@ -159,8 +159,9 @@ def test_mutator_pool_matches_mutators_module():
     if not _have("mutators"):
         return _skip("test_mutator_pool_matches_mutators_module", "mutators")
     mutators = importlib.import_module("mutators")
-    assert daily.mutator_pool() == tuple(sorted(mutators.MUTATORS)), "daily pool must be exactly mutators.MUTATORS"
-    assert daily.daily_mutator(DAY_ISO) in mutators.MUTATORS
+    ids = tuple(sorted(m.id for m in mutators.MUTATORS))
+    assert daily.mutator_pool() == ids, "daily pool must be exactly the ids in mutators.MUTATORS"
+    assert daily.daily_mutator(DAY_ISO) in ids
     print("[PASS] test_mutator_pool_matches_mutators_module passed (pool is the sorted mutators.MUTATORS keys)")
 
 
@@ -368,21 +369,22 @@ def test_daily_game_over_records_the_day(g):
         assert g.game_over_menu.daily_label.text == "DAILY 2026-10-12: NEW DAILY BEST 400 (wave 1)", g.game_over_menu.daily_label.text
         with open(path, "r", encoding="utf-8") as f:
             assert json.load(f)["daily"][DAY_ISO] == {"score": 400, "wave": 1}
-        with open(path, "rb") as f:
-            before = f.read()
+        with open(path, "r", encoding="utf-8") as f:
+            record_before = json.load(f)["daily"]
 
         _new_daily_run(g)
         _end_run(g, 200)
         assert g.game_over_menu.daily_label.text == "DAILY 2026-10-12: today's best 400 (wave 1). This run (200) did not beat it", g.game_over_menu.daily_label.text
-        with open(path, "rb") as f:
-            assert f.read() == before, "a lower daily run must not rewrite the record"
+        # The run's lifetime stats also land in this file now (progress_path), so compare the daily record itself.
+        with open(path, "r", encoding="utf-8") as f:
+            assert json.load(f)["daily"] == record_before, "a lower daily run must not rewrite the record"
 
         g.daily_date = None
         _new_daily_run_plain(g)
         _end_run(g, 999)
         assert g.game_over_menu.daily_label.text == "", "a normal run shows no daily line"
-        with open(path, "rb") as f:
-            assert f.read() == before, "a normal run must not write the daily record"
+        with open(path, "r", encoding="utf-8") as f:
+            assert json.load(f)["daily"] == record_before, "a normal run must not write the daily record"
     finally:
         g.progress_path = None
     print("[PASS] test_daily_game_over_records_the_day passed (record stored on a new best, untouched by a lower or normal run)")

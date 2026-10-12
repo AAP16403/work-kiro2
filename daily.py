@@ -64,7 +64,7 @@ def mutator_pool() -> tuple[str, ...]:
     """Every mutator id in mutators.py, sorted so the pick does not depend on dict order."""
     import mutators  # wave-1 module; imported lazily so this file loads without it
 
-    return tuple(sorted(mutators.MUTATORS))
+    return tuple(sorted(m.id for m in mutators.MUTATORS))
 
 
 def daily_mutator(date_iso: str, pool: tuple[str, ...] | None = None) -> str:

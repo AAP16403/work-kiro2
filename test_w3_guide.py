@@ -222,7 +222,8 @@ def test_contract_mutator_ids_have_entries():
         print("[SKIP requires-wave1] mutator ids need mutators.py in the build")
         return
     import mutators
-    assert set(mutators.MUTATORS) == set(CONTRACT_MUTATOR_IDS), sorted(mutators.MUTATORS)
+    ids = {m.id for m in mutators.MUTATORS}
+    assert ids == set(CONTRACT_MUTATOR_IDS), sorted(ids)
     keys = {e["key"] for e in guide_info.systems_entries()}
     missing = [m for m in CONTRACT_MUTATOR_IDS if m not in keys]
     assert not missing, f"Systems tab has no entry for mutators: {missing}"

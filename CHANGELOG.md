@@ -182,10 +182,10 @@ score multiplier shows on the Game Over screen.
 
 ### Tools
 
-- tools/bench.py: a headless, seeded benchmark for waves 1, 8, 15, 22 and 29. It records per-frame
-  update and draw times and the top 15 cProfile entries, writes a JSON report to --out, and prints
-  a summary. A benchmark mode compares forced 20 and 30 enemy waves with and without the parallel
-  path.
+- tools/bench.py: a headless, seeded benchmark of the enemy AI update on forced waves (20 and 30
+  enemies by default). It prints median and mean frame times. --out writes a JSON report with those
+  medians and the top 15 cProfile entries. The parallel column prints a skip until the batch path is
+  wired into the bench.
 - tools/playtest.py: a headless bot plays seeded runs at easy, normal and hard. It checks invariants
   every frame, detects softlocks (no damage dealt for 60 s of game time while enemies remain), and
   writes a JSON report. It exits non-zero on a crash, an invariant violation or a softlock.
@@ -198,7 +198,8 @@ score multiplier shows on the Game Over screen.
   covers damage per second and time to clear a wave for waves 1 to 30, power-up value outliers, and
   the score and difficulty effect of each skin and mutator. --csv writes the same data to a CSV.
 - replay.py: records a run's seed, difficulty, skin, mutators and per-step inputs, and replays them
-  to the same state hash. Option: recording (default off) is turned on in Settings or with a flag.
+  to the same state hash. Recording is off by default; the --record flag saves each finished run to
+  replays/last_run.json.
 - parallel.py: a process pool and batch enemy steering. Large waves use it only above a measured
   threshold, and the results match the serial path exactly.
 - tools/synth_sfx.py and tools/synth_music.py accept --jobs N and write byte-identical files.

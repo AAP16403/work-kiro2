@@ -129,6 +129,7 @@ ELITE_VOLATILE_BLAST_DAMAGE = 45     # Volatile affix: damage to enemies inside 
 ELITE_SPLIT_COUNT = 2                # Splitter affix: copies left behind on death
 ELITE_SPLIT_HP_FRAC = 0.5            # Splitter affix: each copy's max HP as a fraction of the elite's max HP
 ELITE_REFLECT_COOLDOWN = 3.0         # Reflector affix: seconds between reflected shots
+ELITE_REFLECT_SPEED = 260.0          # Reflector affix: speed of a reflected shot, px per second
 
 # Boss waves. Boss rage starts once per boss, at or below BOSS_RAGE_HP_FRAC of its max HP.
 BOSS_WAVE_EVERY = 5                  # A boss arrives every Nth wave

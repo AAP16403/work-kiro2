@@ -151,14 +151,18 @@ def nearest_homing_target(pos: Vec2, enemies, skip_ids=()):
     return best
 
 
-def steer_homing(p, enemies, player, now: float, dt: float) -> None:
-    """Gently steer a player bullet toward the nearest live enemy while Homing runs. Call before p.update."""
+def steer_homing(p, enemies, player, now: float, dt: float):
+    """Gently steer a player bullet toward the nearest live enemy while Homing runs. Call before p.update.
+
+    Returns the enemy the bullet is steering toward, or None when nothing is steered this call.
+    """
     if getattr(p, "owner", "player") != "player" or not timed_active(player, "homing_until", now):
-        return
+        return None
     target = nearest_homing_target(p.pos, enemies, skip_ids=getattr(p, "_hit_entities", None) or ())
     if target is None:
-        return
+        return None
     desired = (target.pos - p.pos).normalized()
     if desired.length_squared() <= 1e-12:
-        return
+        return None
     p.vel = steer_velocity(p.vel, desired, float(config.HOMING_TURN_RATE) * float(dt))
+    return target

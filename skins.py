@@ -21,6 +21,8 @@ Public API:
         changes and False is returned.
     unlock_hint(skin) -> str
         One line for a locked skin, such as "Score 5,000 in one run".
+    unlock_rule_text(rule, achievement_names=None) -> str
+        The same line for an UnlockRule. The Hangar and the Guide both use it, so the wording lives once.
 
 Palettes are plain dicts of (r, g, b) tuples. Treat them as read-only, or copy them with
 dict(skin.palette) before changing anything.
@@ -222,19 +224,30 @@ def select(progress: dict, skin_id) -> bool:
     return True
 
 
+def unlock_rule_text(rule: UnlockRule, achievement_names: dict | None = None) -> str:
+    """One plain-language line for an unlock rule, such as "Score 5,000 in one run".
+
+    This is the one wording source for skin unlocks: unlock_hint, the Hangar's locked cards and the
+    Guide's Systems tab all use it. ``achievement_names`` maps ids to display names when the caller has them.
+    """
+    kind = rule.kind
+    value = rule.value
+    if kind == "default":
+        return "Always unlocked"
+    if kind == "score":
+        return f"Score {int(value):,} in one run"
+    if kind == "wave":
+        return f"Reach wave {int(value)}"
+    if kind == "bosses":
+        return f"Defeat {int(value)} bosses across all runs"
+    if kind == "kills":
+        return f"Destroy {int(value):,} enemies across all runs"
+    if kind == "achievement":
+        name = (achievement_names or {}).get(value) or achievements.name_of(value)
+        return f"Earn the {name} achievement"
+    return ""
+
+
 def unlock_hint(skin: Skin) -> str:
     """One line that says how to unlock ``skin``."""
-    rule = skin.unlock
-    if rule.kind == "default":
-        return "Always unlocked"
-    if rule.kind == "score":
-        return f"Score {int(rule.value):,} in one run"
-    if rule.kind == "wave":
-        return f"Reach wave {int(rule.value)}"
-    if rule.kind == "bosses":
-        return f"Defeat {int(rule.value)} bosses across all runs"
-    if rule.kind == "kills":
-        return f"Destroy {int(rule.value):,} enemies across all runs"
-    if rule.kind == "achievement":
-        return f"Earn the {achievements.name_of(rule.value)} achievement"
-    return ""
+    return unlock_rule_text(skin.unlock)

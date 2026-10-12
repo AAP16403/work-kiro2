@@ -10,6 +10,7 @@ Boss death: celebrate_boss_death() adds a camera-style flash through advanced_fx
 victory fanfare from the existing SFX list.
 """
 
+import audio_cues
 from utils import enemy_behavior_name
 
 RAGE_HP_FRACTION = 0.35
@@ -18,14 +19,11 @@ RAGE_EXTRA_SHOTS = 1  # one extra projectile, beam or pulse per volley
 RAGE_BANNER_TITLE = "BOSS RAGE"
 RAGE_BANNER_COLOR = (255, 110, 70)
 RAGE_BANNER_DURATION = 2.4
-RAGE_SFX = "boss_warn"
-RAGE_SFX_VOLUME = 0.9
 
-FANFARE_SFX = "wave_clear"  # ascending A major arpeggio, the existing victory-style sound
-FANFARE_VOLUME = 0.9
-# The wave-clear chirp fires on the same frame when the boss was the last enemy. Both calls use this
-# gap, so the chirp is dropped and the fanfare is not doubled.
-FANFARE_MIN_GAP = 0.6
+# The rage warning and the victory fanfare are cues from audio_cues.CUE_SPECS ("rage_warn", "victory_fanfare").
+# The wave-clear chirp fires on the same frame when the boss was the last enemy. states.py skips that chirp
+# on a frame where celebrate_boss_death already played the fanfare, so the two never double up.
+FANFARE_MIN_GAP = 0.6  # the chirp's min_gap (states.py)
 DEATH_FLASH_STRENGTH = 1.0
 
 
@@ -53,7 +51,7 @@ def _announce(enemy, game) -> None:
         )
     audio = getattr(game, "audio", None)
     if audio is not None:
-        audio.play(RAGE_SFX, volume=RAGE_SFX_VOLUME)
+        audio_cues.cue(audio, "rage_warn")
 
 
 def update_rage(enemy, game=None) -> bool:
@@ -88,10 +86,15 @@ def volley(enemy, count: int) -> int:
 
 
 def celebrate_boss_death(game) -> None:
-    """Boss kill set piece: a camera-style flash through advanced_fx and the victory fanfare."""
+    """Boss kill set piece: a camera-style flash through advanced_fx and the victory fanfare.
+
+    The game remembers the state time of the fanfare, so the wave-clear chirp on the same frame is skipped.
+    """
     fx = getattr(game, "advanced_fx", None)
     if fx is not None:
         fx.trigger_boss_flash(DEATH_FLASH_STRENGTH)
     audio = getattr(game, "audio", None)
     if audio is not None:
-        audio.play(FANFARE_SFX, volume=FANFARE_VOLUME, min_gap=FANFARE_MIN_GAP)
+        audio_cues.cue(audio, "victory_fanfare")
+    state = getattr(game, "state", None)
+    game._fanfare_stamp = getattr(state, "time", None)

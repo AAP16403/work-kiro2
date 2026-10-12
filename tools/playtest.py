@@ -544,7 +544,7 @@ def _mutator_ids_for_seed(seed: int):
         if exc.name == "mutators":
             return None
         raise
-    ids = sorted(MUTATORS)
+    ids = sorted(m.id for m in MUTATORS)
     rng = random.Random(f"playtest-mutators:{seed}")
     count = rng.randint(0, min(2, len(ids)))
     return sorted(rng.sample(ids, count))
@@ -751,10 +751,13 @@ def run_playtest(runs: int = DEFAULT_RUNS, difficulties=DIFFICULTIES, seed_base:
         game = _create_game()
     real_audio = game.audio
     real_score_file = score_module.HIGH_SCORE_FILE
+    real_progress_path = game.progress_path
     scratch = tempfile.mkdtemp(prefix="plouto-playtest-")
     records = []
     try:
         score_module.HIGH_SCORE_FILE = os.path.join(scratch, "high_scores.json")
+        # Every run ends in the game's meta-progress save: keep it in the scratch folder, not the player's progress.json.
+        game.progress_path = os.path.join(scratch, "progress.json")
         game.audio = _SilentAudio()
         for difficulty in difficulties:
             for index in range(int(runs)):
@@ -766,6 +769,7 @@ def run_playtest(runs: int = DEFAULT_RUNS, difficulties=DIFFICULTIES, seed_base:
                     log(_format_run_line(record))
     finally:
         score_module.HIGH_SCORE_FILE = real_score_file
+        game.progress_path = real_progress_path
         game.audio = real_audio
         shutil.rmtree(scratch, ignore_errors=True)
         if own_game:

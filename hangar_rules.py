@@ -58,7 +58,14 @@ def describe_unlock(skin, achievement_names: Optional[dict] = None) -> str:
     if not rule:
         return "Open from the start"
     if not isinstance(rule, dict):
-        return f"Unlock: {rule}"
+        # An UnlockRule from skins.py: its wording comes from skins.unlock_rule_text, the same source the Guide uses.
+        if getattr(rule, "kind", None) is None:
+            return f"Unlock: {rule}"
+        if str(rule.kind) == "default":
+            return "Open from the start"
+        from skins import unlock_rule_text  # imported here so this module stays importable without skins
+        text = unlock_rule_text(rule, achievement_names)
+        return "Unlock: " + text[:1].lower() + text[1:]
     text = rule.get("text") or rule.get("label") or rule.get("description")
     if text:
         return f"Unlock: {text}"

@@ -156,6 +156,8 @@ class HUD:
 
         # Achievement toasts: a FIFO that shows one toast at a time, under the score panel
         self.toasts = ToastQueue()
+        # Optional callable, run each time a toast is queued. The game sets it to play the toast cue.
+        self.on_toast = None
         self.toast_view = ToastView(self.batch, self._label, frame_batch=self._frame_batch)
         # High-contrast plates: one dark plate behind each HUD number, sized to its text in _sync_number_plates().
         number_labels = [
@@ -332,11 +334,13 @@ class HUD:
             shadow_shapes = draw_panel(self._frame_batch, x + offset, y - offset, w, h, color=token("BG"))
         edge_shapes = draw_panel(self._frame_batch, x - edge, y - edge, w + 2 * edge, h + 2 * edge, color=token("ACCENT"))
         fill_shapes = draw_panel(self._frame_batch, x, y, w, h, color=token("PANEL"))
-        for shp in shadow_shapes:
+        # draw_panel returns [edge, body, shine]. The HUD alphas go on the edge and the body only; the shine strip
+        # keeps the soft alpha draw_panel gave it, so it does not sit over the HULL and SCORE labels.
+        for shp in shadow_shapes[:2]:
             shp.opacity = PANEL_SHADOW_ALPHA
-        for shp in edge_shapes:
+        for shp in edge_shapes[:2]:
             shp.opacity = PANEL_EDGE_ALPHA
-        for shp in fill_shapes:
+        for shp in fill_shapes[:2]:
             shp.opacity = PANEL_FILL_ALPHA
         self._frames[key] = shadow_shapes + edge_shapes + fill_shapes
 
@@ -674,6 +678,8 @@ class HUD:
         """Queue a toast. Toasts show one at a time, in order, each for TOAST_SECONDS."""
         self.toasts.push(title, subtitle)
         self._sync_toast()
+        if callable(self.on_toast):
+            self.on_toast()
 
     def push_achievement_toasts(self, achievement_ids) -> int:
         """Queue one toast per newly earned achievement id (the list achievements.evaluate returns).

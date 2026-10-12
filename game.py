@@ -11,7 +11,9 @@ from pyglet import shapes
 pyglet.options["shadow_window"] = False
 
 import config
+import audio_cues
 import daily
+import replay
 from config import SCREEN_W, SCREEN_H, FPS, MAP_CIRCLE, ENEMY_COLORS
 
 from map import Room
@@ -46,6 +48,8 @@ from rpg import (
 from hazards import LaserBeam
 from layout import generate_obstacles
 from logic import BalanceLogic
+import mutators
+from mutators import RunRules
 from player import Player, perform_dash
 
 from fsm import StateMachine
@@ -76,7 +80,11 @@ from states import (
 class Game(pyglet.window.Window):
     """Main game window and logic."""
 
-    def __init__(self):
+    def __init__(self, record_runs: bool = False):
+        # Run recording (replay.py) is off unless asked for: the --record flag turns it on for every run.
+        self.record_runs = bool(record_runs)
+        self.recorder = None  # replay.Recorder while a run plays and recording is on
+        self.forced_seed = None  # set by replay.start_run so a replay gets the recorded seed
         super().__init__(width=SCREEN_W, height=SCREEN_H, caption="PLOUTO // Stellar Survival", vsync=True)
         for event_name in ("on_activate", "on_deactivate"):
             type(self).register_event_type(event_name)
@@ -113,8 +121,19 @@ class Game(pyglet.window.Window):
         self.settings.update(access)
         self._windowed_size = (self.width, self.height)
 
+        # Opt-in run mutators: the title-screen selection (saved), and the snapshot the current run plays with.
+        self.mutator_ids: tuple[str, ...] = mutators.load_selection()
+        self.run_mutators: tuple[str, ...] = ()
+        self.run_rules: RunRules = RunRules()
+        self._shield_regen_carry = 0.0
+
         # Menu system
-        self.main_menu = Menu(self.width, self.height)
+        self.main_menu = Menu(
+            self.width,
+            self.height,
+            mutator_ids=self.mutator_ids,
+            on_mutator_toggle=self._toggle_mutator,
+        )
         self.settings_menu = SettingsMenu(
             self.width,
             self.height,
@@ -237,22 +256,38 @@ class Game(pyglet.window.Window):
                 return False
             raise
     
-    def _init_game(self):
-        """Initialize game objects."""
+    def _init_game(self, mutator_ids=None):
+        """Initialize game objects. The run plays with mutator_ids (default: the title-screen selection), fixed until the next run."""
         # Start Game and Try Again both begin with auto-fire on (the Guide and status line say so).
         self.auto_shoot = True
         self.batch = pyglet.graphics.Batch()
         self.groups = GroupCache()
         self.room = Room(self.batch, self.width, self.height, map_type=self.settings.get("map_type", MAP_CIRCLE))
 
+        # The only place mutators are applied: the run keeps this snapshot for its whole duration.
+        self.run_mutators = mutators.normalize_selection(self.mutator_ids if mutator_ids is None else mutator_ids)
+        self.run_rules = mutators.apply_mutators(self.run_mutators)
+
         difficulty = str(self.settings.get("difficulty", "normal")).lower()
-        self.state = GameStateData(difficulty=difficulty, map_type=self.settings.get("map_type", MAP_CIRCLE))
+        self.state = GameStateData(
+            difficulty=difficulty,
+            map_type=self.settings.get("map_type", MAP_CIRCLE),
+            rules=self.run_rules,
+        )
         # Deterministic RNG for this run (seed stored on state for reproducibility). A daily run seeds the run RNG
         # and the module RNG (enemy AI and boss picks draw from it) with the date's seed, so every player gets the same setup.
         run_seed = daily.daily_seed(self.daily_date) if self.daily_date else None
+        if self.forced_seed is not None:  # a replay plays the recorded seed (replay.start_run)
+            run_seed = int(self.forced_seed)
         self.state.init_rng(run_seed)
         if run_seed is not None:
             random.seed(run_seed)
+        # Record this run when recording is on. The recorder is attached here, before the first step.
+        self.recorder = None
+        if self.record_runs and self.forced_seed is None:
+            self.recorder = replay.Recorder(
+                self.state.seed, difficulty, skin=current_skin_name(), mutators=self.run_mutators,
+            )
 
         # Base per-wave head count lives in logic.py's difficulty table (the wave ramp is applied in level.spawn_wave).
         self.state.max_enemies = int(get_difficulty_mods(difficulty).get("max_enemies", 12))
@@ -272,6 +307,9 @@ class Game(pyglet.window.Window):
             self.state.obstacles = []
         self.player = Player(pos=Vec2(0.0, 0.0))
         self.player.current_weapon = get_weapon_for_wave(1)
+        self.player.max_hp = mutators.scaled_max_hp(self.player.max_hp, self.run_rules)
+        self.player.hp = self.player.max_hp
+        self._shield_regen_carry = 0.0
         self._active_temp_rewards: list[dict] = []
         self._run_permanent_rewards: list[str] = []
         self._last_reward_temp_key = ""
@@ -295,9 +333,13 @@ class Game(pyglet.window.Window):
         self.popups = DamagePopups()
         self._hitstop = 0.0
 
-        self.score = ScoreTracker(difficulty=difficulty)
+        self.score = ScoreTracker(
+            difficulty=difficulty,
+            score_mult=mutators.combined_score_multiplier(self.run_mutators),
+        )
         self.run_stats = RunStats()
         self.hud = HUD(self.width, self.height)
+        self.hud.on_toast = self._play_toast_cue
         self.hud.set_skin_name(current_skin_name())
 
     def _start_daily_run(self, today=None):
@@ -315,13 +357,16 @@ class Game(pyglet.window.Window):
             # starts, with no mutator, instead of raising from the title screen.
             picked = None
         self.run_mutator_ids = (picked,) if picked is not None else ()
-        self._init_game()
+        # The daily run plays with its own one-mutator list, not the saved title-screen selection.
+        self._init_game(mutator_ids=self.run_mutator_ids)
 
     def _effective_player_damage(self) -> int:
         if not self.player:
             return 0
         # Half-up rounding (not round(), which is banker's rounding at .5) so the 1.28 Overdrive multiplier lands predictably.
-        return max(1, math.floor(float(self.player.damage) * float(getattr(self, "_temp_damage_mult", 1.0)) + 0.5))
+        run_rules = getattr(self, "run_rules", None)
+        run_mult = float(run_rules.player_damage_mult) if run_rules is not None else 1.0  # Glass Cannon and other run rules
+        return max(1, math.floor(float(self.player.damage) * float(getattr(self, "_temp_damage_mult", 1.0)) * run_mult + 0.5))
 
     def _effective_player_speed(self) -> float:
         if not self.player:
@@ -583,6 +628,8 @@ class Game(pyglet.window.Window):
     def _dash(self):
         if not self.state or not self.player:
             return
+        if self.recorder is not None and self._is_playing():
+            self.recorder.note_dash(self)  # the dash reads the keys and aim it is made with, so note them now
         world_mouse = iso_to_world(self.mouse_xy)
         did_dash = perform_dash(
             self.player, self.state.time, self.balance,
@@ -615,6 +662,17 @@ class Game(pyglet.window.Window):
     def _persist_audio_settings(self):
         """Write the current music/SFX volumes to user_settings.json (called when leaving Settings)."""
         save_audio_settings(float(self.settings.get("music_volume", 0.5)), float(self.settings.get("sfx_volume", 0.8)))
+
+    def _toggle_mutator(self, mutator_id: str) -> None:
+        """Title-screen chip click: switch one mutator on or off and save the selection."""
+        self.mutator_ids = mutators.toggle_selection(self.mutator_ids, mutator_id)
+        mutators.save_selection(self.mutator_ids)
+        self.main_menu.set_mutator_selection(self.mutator_ids)
+        audio_cues.cue(self.audio, "mutator_toggle")
+
+    def _play_toast_cue(self) -> None:
+        """Called by the HUD each time a toast is queued."""
+        audio_cues.cue(self.audio, "toast")
 
     def _quit_game(self):
         """Quit the game."""
@@ -810,7 +868,14 @@ class Game(pyglet.window.Window):
             survived=float(self.state.time),
             best_combo=float(score_obj.best_combo) if score_obj else None,
         )
-        self.last_run_summary = meta_progress.end_run(run)
+        # The run's progress goes to the same file the daily record uses (progress_path, or the store default).
+        self.last_run_summary = meta_progress.end_run(run, path=self.progress_path)
+        if self.last_run_summary.get("new_achievements"):
+            audio_cues.cue(self.audio, "achievement")
+        if self.recorder is not None:
+            # --record: keep the finished run's inputs and hashes in replays/last_run.json.
+            replay.save_recording(self.recorder.recording(), replay.DEFAULT_PATH)
+            self.recorder = None
         return self.last_run_summary
 
     def on_mouse_motion(self, x, y, dx, dy):
@@ -840,6 +905,19 @@ class Game(pyglet.window.Window):
         self._finish_meta_run()  # a run still in progress is saved rather than lost
         self._schedule_app_close()
         return True
+
+    def _move_player(self, desired_vel: Vec2, dt: float) -> None:
+        """Step the player toward desired_vel. Stock steering is instant; the Drift mutator eases it."""
+        self.player.move_vel = mutators.steer_velocity(self.player.move_vel, desired_vel, dt, self.run_rules)
+        self.player.pos = self.player.pos + self.player.move_vel * dt
+
+    def _tick_shield_regen(self, dt: float) -> None:
+        """Passive shield recharge from the run's rules (Iron Man). A no-op for every other run."""
+        if not self.player:
+            return
+        self._shield_regen_carry = mutators.tick_shield_regen(
+            self.player, self._shield_regen_carry, dt, self.run_rules, float(config.SHIELD_MAX),
+        )
 
     def _input_dir(self) -> Vec2:
         """Get input direction from keyboard.
@@ -879,12 +957,25 @@ class Game(pyglet.window.Window):
         self._accumulator += frame_dt
         steps = 0
         while self._accumulator >= self._fixed_dt and steps < self._max_catchup_steps:
-            self.fsm.update(self._fixed_dt)
+            self._fixed_step()
             self._accumulator -= self._fixed_dt
             steps += 1
         if steps >= self._max_catchup_steps:
             # Drop extra accumulated time to avoid spiral-of-death stalls.
             self._accumulator = 0.0
+
+    def _is_playing(self) -> bool:
+        return type(self.fsm.current_state).__name__ == "PlayingState"
+
+    def _fixed_step(self):
+        """One fixed simulation step. While a run is recorded, its inputs are noted before the step and its hash after."""
+        rec = self.recorder
+        recording_now = rec is not None and self._is_playing()
+        if recording_now:
+            rec.before_step(self)
+        self.fsm.update(self._fixed_dt)
+        if recording_now:
+            rec.after_step(self)
 
     def on_draw(self):
         """Render the game."""
@@ -902,9 +993,11 @@ class Game(pyglet.window.Window):
 
 
 def main():
-    """Start the game."""
+    """Start the game. ``--record`` saves every finished run's inputs to replays/last_run.json (off by default)."""
+    import sys
+    record = "--record" in sys.argv[1:]
     try:
-        _ = Game()
+        _ = Game(record_runs=record)
         pyglet.app.run()
     except KeyboardInterrupt:
         pass

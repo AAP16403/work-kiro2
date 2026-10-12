@@ -17,6 +17,7 @@ from pyglet import shapes
 from pyglet.graphics import Group
 
 import achievements
+import audio_cues
 import skins
 from hangar_rules import TAB_ACHIEVEMENTS, TAB_SKINS, describe_unlock, grid_step, page_step
 from menu import MenuButton, UI_FONT_BODY, UI_FONT_HEAD, UI_FONT_META, _sync_label_style_if_ready, _ui_scale
@@ -63,6 +64,7 @@ class HangarMenu:
         self.screen_height = height
         self.progress_path = progress_path
         self.progress = load_progress(progress_path)
+        self.audio = None  # the game's audio manager, set by the Hangar state; cues are silent without it
         self.tab = TAB_SKINS
         self.cursor = 0
         self.ach_page = 0
@@ -203,6 +205,7 @@ class HangarMenu:
             return False
         save_progress(self.progress, self.progress_path)
         self._flash(f"{skin.name} selected", SUCCESS)
+        audio_cues.cue(self.audio, "skin_select")
         return True
 
     # ------------------------------------------------------------------ layout
@@ -449,6 +452,8 @@ class HangarMenu:
         if self.tab == TAB_SKINS:
             hit = self._hit_card(x, y)
             if hit is not None:
+                if hit != self.cursor:
+                    audio_cues.cue(self.audio, "hangar_move")
                 self.cursor = hit
                 if self.choose(self._cards[hit][4]):
                     self._rebuild()
@@ -473,7 +478,10 @@ class HangarMenu:
         direction = {key.LEFT: "left", key.RIGHT: "right", key.UP: "up", key.DOWN: "down"}.get(symbol)
         if self.tab == TAB_SKINS:
             if direction is not None:
+                before = self.cursor
                 self.cursor = grid_step(self.cursor, direction, len(self.skin_ids), self._cols)
+                if self.cursor != before:
+                    audio_cues.cue(self.audio, "hangar_move")
                 self._build_ring()
             elif symbol in (key.ENTER, key.NUM_ENTER):
                 if self.choose(self.skin_ids[self.cursor]):

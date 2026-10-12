@@ -4,6 +4,8 @@
 Run from anywhere:
     D:\\work kiro2\\.venv\\Scripts\\python.exe tools\\bench.py
     D:\\work kiro2\\.venv\\Scripts\\python.exe tools\\bench.py --wave 20 30 --frames 300 --repeats 5
+    D:\\work kiro2\\.venv\\Scripts\\python.exe tools\\bench.py --out bench.json
+  --out writes a JSON report: the medians for each count and the top 15 cProfile entries of one profiled pass.
 
 Each sample builds a forced wave of mixed non-boss enemies (all nine regular behaviours,
 round-robin) on a headless Game, then drives update_enemy() over the whole list once per
@@ -20,9 +22,12 @@ not in the worktree the column prints [SKIP requires-wave1] instead of a number.
 """
 
 import argparse
+import cProfile
 import importlib.util
+import json
 import math
 import os
+import pstats
 import random
 import statistics
 import sys
@@ -127,12 +132,37 @@ def measure(game, count: int, frames: int = 300, repeats: int = 5, seed: int = 1
     }
 
 
+PROFILE_TOP_N = 15
+
+
+def top_cumulative(profiler, top_n: int = PROFILE_TOP_N) -> list:
+    """The top ``top_n`` functions by cumulative time from a finished cProfile run, as plain dicts."""
+    stats = pstats.Stats(profiler)
+    rows = []
+    for (path, line, name), (_cc, calls, own, cumulative, _callers) in stats.stats.items():
+        rows.append({
+            "function": f"{os.path.basename(path)}:{line}({name})",
+            "calls": int(calls),
+            "own_s": float(own),
+            "cumulative_s": float(cumulative),
+        })
+    rows.sort(key=lambda row: row["cumulative_s"], reverse=True)
+    return rows[:top_n]
+
+
+def write_report(path: str, report: dict) -> None:
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Forced large-wave enemy AI benchmark.")
     parser.add_argument("--wave", type=int, nargs="+", default=[20, 30], help="enemy counts to force (default: 20 30)")
     parser.add_argument("--frames", type=int, default=300, help="timed frames per repeat (default: 300)")
     parser.add_argument("--repeats", type=int, default=5, help="repeats; the median is reported (default: 5)")
+    parser.add_argument("--out", default="", help="write a JSON report: the medians per count and the top 15 cProfile entries")
     args = parser.parse_args(argv)
+    out_path = os.path.abspath(args.out) if args.out else ""  # resolved before the chdir below
 
     os.chdir(ROOT)
     from game import Game
@@ -142,13 +172,30 @@ def main(argv=None) -> int:
     try:
         print(f"forced wave {WAVE_NUMBER}, enemy AI update per frame, {args.frames} timed frames x {args.repeats} repeats")
         print(f"{'enemies':>8} {'serial median ms':>17} {'serial mean ms':>15}  parallel")
+        results = []
         for count in args.wave:
             r = measure(game, count, frames=args.frames, repeats=args.repeats)
+            results.append(r)
             if parallel_available():
                 par = "[SKIP requires-wave1] parallel path not wired into this bench revision"
             else:
                 par = "[SKIP requires-wave1] parallel.py not in this worktree"
             print(f"{r['count']:>8} {r['median_ms']:>17.3f} {r['mean_ms']:>15.3f}  {par}")
+        if out_path:
+            # One profiled pass over the largest forced wave, so the report names where the AI time goes.
+            profiler = cProfile.Profile()
+            profiler.enable()
+            run_frames(game, max(args.wave), args.frames, seed=1)
+            profiler.disable()
+            report = {
+                "wave_number": WAVE_NUMBER,
+                "frames": int(args.frames),
+                "repeats": int(args.repeats),
+                "results": results,
+                "top_cumulative": top_cumulative(profiler, PROFILE_TOP_N),
+            }
+            write_report(out_path, report)
+            print(f"wrote {out_path} ({len(report['top_cumulative'])} cProfile entries)")
     finally:
         game.close()
     return 0

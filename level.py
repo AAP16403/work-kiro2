@@ -9,6 +9,7 @@ from enemy import Enemy
 from hazards import Trap, LaserBeam, ThunderLine
 from layout import Obstacle
 from logic import EnemySpawnLogic, EnemyTuningLogic
+from mutators import RunRules
 from projectile import Projectile
 from powerup import PowerUp
 from utils import Vec2, random_spawn_map_edge
@@ -44,6 +45,8 @@ class GameState:
     enemy_combo_value: int = 0
     enemy_combo_text: str = ""
     arena_event: object | None = None  # Running arena event (events.py), or None
+    # Run rules from the run's mutators (stock by default). Set once by Game._init_game.
+    rules: RunRules = field(default_factory=RunRules, repr=False)
 
     def init_rng(self, seed: int | None = None) -> None:
         """Initialize or reseed the deterministic RNG used for reproducible runs."""
@@ -55,6 +58,24 @@ class GameState:
 
 _TUNING_LOGIC = EnemyTuningLogic()
 _SPAWN_LOGIC = EnemySpawnLogic(_TUNING_LOGIC)
+_STOCK_RULES = RunRules()
+
+
+def _run_rules(state) -> RunRules:
+    """The state's run rules, or stock rules for state objects that predate them."""
+    rules = getattr(state, "rules", None)
+    return rules if isinstance(rules, RunRules) else _STOCK_RULES
+
+
+# Elite affixes and their weights. volatile/swift/shielded are the wave-1 affixes; splitter and reflector are wave 2.
+ELITE_AFFIX_WEIGHTS = (("volatile", 3), ("swift", 3), ("shielded", 3), ("splitter", 2), ("reflector", 2))
+
+
+def _choose_affix(rng: random.Random) -> str:
+    """Pick one elite affix by weight from the run RNG, so the same seed gives the same affixes."""
+    ids = [affix for affix, _ in ELITE_AFFIX_WEIGHTS]
+    weights = [float(weight) for _, weight in ELITE_AFFIX_WEIGHTS]
+    return rng.choices(ids, weights=weights, k=1)[0]
 
 
 def get_difficulty_mods(difficulty: str) -> dict:
@@ -70,6 +91,7 @@ def spawn_wave(state: GameState, center: Vec2):
     if state.wave % config.BOSS_WAVE_EVERY == 0:
         behavior_name = get_boss_for_wave(state.wave)
         hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
+        speed *= float(_run_rules(state).enemy_speed_mult)
         pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type, rng=state.rng)
         e = Enemy(pos=pos, hp=hp, speed=speed, behavior=behavior_name, max_hp=hp)
         lo, hi = _TUNING_LOGIC.spawn_attack_cd_range(behavior_name)
@@ -83,13 +105,14 @@ def spawn_wave(state: GameState, center: Vec2):
 
     # Boss adds keep using the base state.max_enemies; only the regular wave head count ramps up.
     wave_cap = _SPAWN_LOGIC.wave_cap(state.wave, state.max_enemies)
-    plan = _SPAWN_LOGIC.plan_wave(state.wave, state.difficulty, wave_cap)
+    plan = _SPAWN_LOGIC.plan_wave(state.wave, state.difficulty, wave_cap, size_mult=_run_rules(state).spawn_size_mult)
     state.enemy_combo_value = int(plan.combo_value)
     state.enemy_combo_text = str(plan.combo_text)
 
     for behavior_name, behavior_count in plan.behavior_counts.items():
         for _ in range(int(behavior_count)):
             hp, speed, attack_mult = _get_enemy_stats(behavior_name, state.wave, state.difficulty)
+            speed *= float(_run_rules(state).enemy_speed_mult)
             pos = random_spawn_map_edge(center, config.ROOM_RADIUS, state.map_type, rng=state.rng)
             
             # Elite enemies roll on wave 3+
@@ -101,7 +124,7 @@ def spawn_wave(state: GameState, center: Vec2):
                 chance = min(0.35, float(getattr(config, "ELITE_SPAWN_CHANCE", 0.14)) + (state.wave - elite_min_wave) * 0.015)
                 if state.rng.random() < chance:
                     is_elite = True
-                    affix = state.rng.choice(["volatile", "swift", "shielded"])
+                    affix = _choose_affix(state.rng)
                     hp = int(round(hp * float(getattr(config, "ELITE_HP_MULT", 2.2))))
                     if affix == "swift":
                         speed *= float(config.ELITE_SWIFT_SPEED_MULT)
@@ -133,6 +156,8 @@ def _get_enemy_stats(behavior: str, wave: int, difficulty: str = "normal") -> tu
 
 def maybe_spawn_powerup(state: GameState, center: Vec2):
     """Randomly spawn a powerup."""
+    if not _run_rules(state).pickups_enabled:
+        return
     min_wave = int(getattr(config, "ULTRA_SPAWN_MIN_WAVE", 4))
     gap = int(getattr(config, "ULTRA_GUARANTEE_WAVE_GAP", 4))
     last_ultra_wave = int(getattr(state, "_last_ultra_wave", 0))
@@ -150,6 +175,8 @@ def maybe_spawn_powerup(state: GameState, center: Vec2):
 
 def spawn_powerup_on_kill(state: GameState, center: Vec2):
     """Spawn a powerup when an enemy dies."""
+    if not _run_rules(state).pickups_enabled:
+        return
     state._kills_since_ultra = int(getattr(state, "_kills_since_ultra", 0)) + 1
     pity_threshold = int(getattr(config, "ULTRA_KILL_PITY_THRESHOLD", 30))
     force_ultra = int(state.wave) >= int(getattr(config, "ULTRA_SPAWN_MIN_WAVE", 4)) and int(getattr(state, "_kills_since_ultra", 0)) >= max(8, pity_threshold)
@@ -166,6 +193,8 @@ def spawn_powerup_on_kill(state: GameState, center: Vec2):
 
 def spawn_loot_on_enemy_death(state: GameState, behavior: str, center: Vec2, current_weapon: Weapon | None = None):
     """Spawn loot when an enemy dies (bosses drop better rewards)."""
+    if not _run_rules(state).pickups_enabled:
+        return  # Iron Man: no pickups of any kind, boss drops included
     b = str(behavior or "")
     if b.startswith("boss_"):
         # Bosses always drop a weapon (an upgrade over current_weapon when one exists) and at least one regular powerup.

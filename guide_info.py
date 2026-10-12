@@ -13,6 +13,7 @@ Entry shape, as used by menu.GuideMenu:
 from __future__ import annotations
 
 import importlib
+from dataclasses import fields as dataclass_fields
 from typing import Any
 
 import config
@@ -99,9 +100,53 @@ def _stat_label(key: str) -> str:
     return str(key).upper().removesuffix("_MULT").lower().replace("_", " ")
 
 
-def _mutator_what(mutator: Any, base: dict) -> str:
+# Plain labels for the RunRules fields that mutators.py changes.
+_RULE_LABELS = {
+    "player_damage_mult": "damage",
+    "player_max_hp_mult": "max HP",
+    "player_accel": "steering ease",
+    "player_decel": "slide after input",
+    "enemy_projectile_speed_mult": "enemy bullet speed",
+    "enemy_volley_extra": "enemy shots per volley",
+    "enemy_speed_mult": "enemy speed",
+    "spawn_size_mult": "wave size",
+    "pickups_enabled": "pickups",
+    "shield_regen_per_s": "shield regen",
+}
+
+
+def _mutator_what_rules(mutator: Any, rules_cls: Any) -> str:
+    """Score multiplier plus the RunRules fields the mutator changes. The stock RunRules is the base."""
+    stock = rules_cls()
+    after_rules = mutator.apply(stock)
+    parts = []
+    for f in dataclass_fields(stock):
+        before = getattr(stock, f.name)
+        after = getattr(after_rules, f.name)
+        if after == before:
+            continue
+        label = _RULE_LABELS.get(f.name, f.name.replace("_", " "))
+        if isinstance(after, bool):
+            parts.append(f"{label} {'on' if after else 'off'}")
+        elif f.name.endswith("_mult"):
+            parts.append(f"{label} x{float(after):g}")
+        elif f.name == "enemy_volley_extra":
+            parts.append(f"{label} +{int(after)}")
+        else:
+            parts.append(f"{label} {float(after):g}")
+    text = f"Score x{float(mutator.score_mult):g}."
+    if parts:
+        stats = ", ".join(parts)
+        text += " " + stats[0].upper() + stats[1:] + "."
+    return text
+
+
+def _mutator_what(mutator: Any, base: dict, rules_cls: Any = None) -> str:
     """Score multiplier plus the values the mutator changes, read from its own apply().
-    A value that is not in config is shown as a multiplier when its key ends in _MULT."""
+    With a RunRules class (mutators.py) the change is read from the RunRules fields. Otherwise apply() gets a
+    config dict, and a value that is not in config is shown as a multiplier when its key ends in _MULT."""
+    if rules_cls is not None:
+        return _mutator_what_rules(mutator, rules_cls)
     changed = dict(mutator.apply(dict(base)) or {})
     parts = []
     for key, after in changed.items():
@@ -126,15 +171,18 @@ def _mutator_what(mutator: Any, base: dict) -> str:
     return text
 
 
-def _skin_deal(rule: Any) -> str:
+def _skin_deal(rule: Any, skins_module: Any = None) -> str:
     """The unlock line for a skin. Numbers come from the rule itself."""
-    if not rule:
+    if not rule or getattr(rule, "kind", None) == "default":
         return "Open from the start."
-    return f"Unlock by {_unlock_text(rule)}."
+    return f"Unlock by {_unlock_text(rule, skins_module)}."
 
 
-def _unlock_text(rule: Any) -> str:
-    """Plain text for a non-empty skin unlock rule, e.g. 'best wave 10'."""
+def _unlock_text(rule: Any, skins_module: Any = None) -> str:
+    """Plain text for a non-empty skin unlock rule, e.g. 'best wave 10'.
+
+    A skins.UnlockRule is worded by skins.unlock_rule_text, the same source the Hangar's cards use.
+    """
     if isinstance(rule, str):
         return rule
     if isinstance(rule, dict):
@@ -146,6 +194,11 @@ def _unlock_text(rule: Any) -> str:
             value = f"{v:g}" if _is_number(v) else str(v)
             pieces.append(f"{str(k).replace('_', ' ')} {value}")
         return ", ".join(pieces)
+    kind = getattr(rule, "kind", None)
+    if kind is not None:
+        worded = getattr(skins_module, "unlock_rule_text", None) if skins_module is not None else None
+        text = worded(rule) if callable(worded) else f"{str(kind).replace('_', ' ')} {getattr(rule, 'value', '')}".strip()
+        return text[:1].lower() + text[1:]
     return str(rule)
 
 
@@ -228,7 +281,7 @@ def skin_entries(skins_module: Any) -> list[dict]:
         {
             "key": f"skin_{skin.id}", "name": f"Skin: {skin.name}", "icon": "SK",
             "what": str(skin.description),
-            "deal": _skin_deal(skin.unlock),
+            "deal": _skin_deal(skin.unlock, skins_module),
             "lore": "Recolours your ship and its bullets.",
         }
         for skin in skins_module.SKINS.values()
@@ -248,13 +301,17 @@ def mutator_entries(mutators_module: Any) -> list[dict]:
     if mutators_module is None:
         return []
     base = _config_numbers()
+    rules_cls = getattr(mutators_module, "RunRules", None)
     out = []
-    for mutator in mutators_module.MUTATORS.values():
+    table = getattr(mutators_module, "MUTATORS", ())
+    # mutators.MUTATORS is a tuple of Mutator records in canonical order; a mapping of id to record also works.
+    records = table.values() if isinstance(table, dict) else table
+    for mutator in records:
         mid = str(mutator.id)
         out.append({
             "key": mid, "name": str(mutator.name),
             "icon": MUTATOR_ICONS.get(mid, str(mutator.name)[:2].upper()),
-            "what": _mutator_what(mutator, base),
+            "what": _mutator_what(mutator, base, rules_cls),
             "deal": "Opt-in: toggle it on the title screen before you start.",
             "lore": str(mutator.description),
         })

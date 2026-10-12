@@ -421,20 +421,26 @@ def test_splitter_death_plays_split_and_others_do_not(g):
           "(splitter plays split; volatile and plain enemies do not)")
 
 
-def test_owner_call_sites_for_waves_1_and_2():
+def test_every_cue_key_is_played_by_a_call_site():
+    # A CUE_SPECS key counts as played only if a call site reaches it: a literal cue(audio, "name") in project
+    # code, or one of the two tables that a call site drives (POWERUP_CUES through play_pickup, and
+    # ELITE_DEATH_CUES through play_elite_death). Anything else is a sound that never plays.
     sites = _cue_call_sites()
-    for name in WAVE1_CUES + WAVE2_CUES:
-        wave = "wave1" if name in WAVE1_CUES else "wave2"
-        if name in sites:
-            print(f"[PASS] test_cue_call_site_{name} passed (cue() called from project code)")
-        else:
-            print(f"[SKIP requires-{wave}] {name}: its event lives in the {wave} owner module, "
-                  f"which is not in this worktree; add audio_cues.cue(audio, \"{name}\") there")
-    for name in UNOWNED_CUES:
-        if name in sites:
-            print(f"[PASS] test_cue_call_site_{name} passed (cue() called from project code)")
-        else:
-            print(f"[SKIP unowned] {name}: no owner module in the contract and no victory state in this worktree")
+    table_played = set(audio_cues.POWERUP_CUES.values()) | set(audio_cues.ELITE_DEATH_CUES.values())
+    unplayed = sorted(set(audio_cues.CUE_SPECS) - sites - table_played)
+    assert not unplayed, f"CUE_SPECS keys that no call site plays: {unplayed}"
+    print(f"[PASS] test_every_cue_key_is_played_by_a_call_site passed "
+          f"({len(audio_cues.CUE_SPECS)} cue keys, all reached by a call site)")
+
+
+def test_owner_call_sites_for_waves_1_and_2():
+    # Every cue of the new sound set must be played by a real event site. A missing hook fails the build;
+    # it is never reported as a skip, because a skipped hook is a sound that never plays.
+    sites = _cue_call_sites()
+    missing = [name for name in WAVE1_CUES + WAVE2_CUES + UNOWNED_CUES if name not in sites]
+    assert not missing, f"cues with no audio_cues.cue(audio, \"<name>\") call in project code: {missing}"
+    print(f"[PASS] test_owner_call_sites_for_waves_1_and_2 passed "
+          f"({len(WAVE1_CUES) + len(WAVE2_CUES) + len(UNOWNED_CUES)} cues each have a call site)")
 
 
 def run_all():
@@ -448,6 +454,7 @@ def run_all():
         test_all_cues_fit_the_voice_budget,
         test_nebula_hum_is_spaced_by_its_long_gap,
         test_cue_helper_is_silent_on_bad_input,
+        test_every_cue_key_is_played_by_a_call_site,
     )
     for test in pure:
         test()

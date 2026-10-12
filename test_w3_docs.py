@@ -54,7 +54,14 @@ def _has(text, needle):
     return needle.lower() in _flat(text).lower()
 
 
+# The integration pass (run_all) sets STRICT. Then a check that needs an owned file or item and cannot find it
+# fails the run; it is never counted as a pass. Outside the integration pass a missing item is a printed skip.
+STRICT = False
+
+
 def _skip(owner, what):
+    if STRICT:
+        raise AssertionError(f"[MISSING requires-{owner}] {what}")
     SKIPS.append(what)
     print(f"[SKIP requires-{owner}] {what}")
 
@@ -136,10 +143,10 @@ def test_mutator_catalogue_matches_docs():
         _skip("wave1", "mutators.py not in this worktree: mutator ids and names not cross-checked")
         return
     mod = importlib.import_module("mutators")
-    ids = set(mod.MUTATORS.keys())
+    ids = {m.id for m in mod.MUTATORS}
     expected = {"glass_cannon", "bullet_hell", "drift", "frenzy", "iron_man"}
     assert ids == expected, f"mutator ids differ from the contract: {sorted(ids)}"
-    for mut in mod.MUTATORS.values():
+    for mut in mod.MUTATORS:
         assert _has(CHANGELOG, mut.name), f"CHANGELOG does not name mutator {mut.name!r}"
     print(f"[PASS] test_mutator_catalogue_matches_docs passed ({len(ids)} mutators, names documented)")
 
@@ -246,7 +253,8 @@ def test_readme_controls_match_code():
 
 def test_readme_hangar_and_daily_buttons():
     menu_src = _source("menu.py")
-    for label, owner in (("Hangar", "wave2"), ("Daily", "wave2")):
+    # The title buttons are labelled exactly as menu.py draws them: "Daily Run", not "Daily".
+    for label, owner in (("Hangar", "wave2"), ("Daily Run", "wave2")):
         if f'"{label}"' in menu_src or f"'{label}'" in menu_src:
             print(f"[PASS] title-screen label {label} present in menu.py")
         else:
@@ -335,6 +343,8 @@ def test_readme_test_command_runs_every_file():
 
 
 def run_all():
+    global STRICT
+    STRICT = True
     test_changelog_has_release_groups()
     test_docs_are_plain_ascii_and_placeholder_free()
     test_changelog_names_every_new_system_and_plan_item()

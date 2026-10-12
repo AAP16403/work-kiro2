@@ -9,11 +9,9 @@ HIGH_CONTRAST_HUD). The colour-blind palette is applied by swapping the entries 
 in place, so every module that imported that dict sees the change without being edited.
 """
 
-import json
-import os
-
 import audio as _audio
 import config
+import savefile
 
 REDUCED_MOTION_KEY = "reduced_motion"
 COLORBLIND_KEY = "colorblind_palette"
@@ -47,43 +45,33 @@ def coerce_access_value(key: str, value) -> bool:
 
 
 def load_access_settings() -> dict:
-    """Return {key: bool} for the three Accessibility options. Missing or unreadable data reads as the config defaults."""
+    """Return {key: bool} for the three Accessibility options. Missing or unreadable data reads as the config defaults.
+
+    Reads through savefile.load_settings, so a corrupt user_settings.json is quarantined and never half-used.
+    """
     values = _config_defaults()
     try:
-        with open(_audio._SETTINGS_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            for key in ACCESS_KEYS:
-                values[key] = _coerce_bool(data.get(key), values[key])
+        data = savefile.load_settings(_audio._SETTINGS_PATH)
+        for key in ACCESS_KEYS:
+            values[key] = _coerce_bool(data.get(key), values[key])
     except Exception:
         pass
     return values
 
 
 def save_access_settings(values: dict) -> None:
-    """Write the Accessibility keys present in ``values`` to user_settings.json, keeping other keys. Never raises."""
-    path = _audio._SETTINGS_PATH
-    tmp = path + ".tmp"
+    """Write the Accessibility keys present in ``values`` to user_settings.json, keeping every other key. Never raises.
+
+    The write goes through savefile.update_settings, the same versioned, atomic helper audio and shake_prefs use,
+    so a corrupt file is quarantined rather than overwritten and the write is all-or-nothing.
+    """
+    changes = {key: coerce_access_value(key, values[key]) for key in ACCESS_KEYS if key in values}
+    if not changes:
+        return
     try:
-        data = {}
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                existing = json.load(fh)
-            if isinstance(existing, dict):
-                data = existing
-        except Exception:
-            data = {}
-        for key in ACCESS_KEYS:
-            if key in values:
-                data[key] = coerce_access_value(key, values[key])
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-        os.replace(tmp, path)
+        savefile.update_settings(_audio._SETTINGS_PATH, changes)
     except Exception:
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
+        pass
 
 
 def set_colorblind_palette(on: bool) -> None:

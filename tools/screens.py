@@ -415,6 +415,8 @@ def run_capture(out_dir: str, sizes=SIZES, game=None) -> dict:
     scratch = tempfile.mkdtemp(prefix="plouto_screens_")
     real_score_file = score_mod.HIGH_SCORE_FILE
     own_game = game is None
+    redirected = False
+    real_progress_path = None
     report = {
         "sizes": [f"{w}x{h}" for w, h in sizes],
         "overlap_eps_px": OVERLAP_EPS,
@@ -428,6 +430,10 @@ def run_capture(out_dir: str, sizes=SIZES, game=None) -> dict:
         if own_game:
             game = Game()
         game.set_visible(False)
+        # The game-over screen ends a run, which saves meta-progress: keep that write in the scratch folder.
+        real_progress_path = game.progress_path  # may be None: the store's default
+        game.progress_path = os.path.join(scratch, "progress.json")
+        redirected = True
         specs, skipped = screen_specs(game)
         report["skipped"] = skipped
         for width, height in sizes:
@@ -464,6 +470,8 @@ def run_capture(out_dir: str, sizes=SIZES, game=None) -> dict:
                 report["total_overlaps"] += len(overlaps)
     finally:
         score_mod.HIGH_SCORE_FILE = real_score_file
+        if redirected:
+            game.progress_path = real_progress_path
         if own_game and game is not None:
             game.close()
         shutil.rmtree(scratch, ignore_errors=True)

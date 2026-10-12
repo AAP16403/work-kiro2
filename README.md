@@ -64,7 +64,7 @@ Run tools from the project root with the project venv. The bench, playtest and s
 
 | Tool | Purpose | Example |
 | --- | --- | --- |
-| `tools\bench.py` | Seeded headless benchmark of waves 1, 8, 15, 22 and 29. Writes per-frame update and draw times and the top 15 cProfile entries to a JSON report, and prints a summary. | `.\.venv\Scripts\python.exe tools\bench.py --out bench.json` |
+| `tools\bench.py` | Seeded headless benchmark of the enemy AI update on forced waves (20 and 30 enemies by default). Prints median and mean frame times. `--out` also writes a JSON report with those medians and the top 15 cProfile entries. | `.\.venv\Scripts\python.exe tools\bench.py --out bench.json` |
 | `tools\playtest.py` | Headless bot that plays seeded runs at easy, normal and hard. It checks invariants every frame and records waves, kills, power-ups and mutators used. | `.\.venv\Scripts\python.exe tools\playtest.py --runs 3 --out playtest.json` |
 | `tools\screens.py` | Captures the title, settings, Guide, combat, pause, reward, Game Over and Hangar screens at 980x620 and 1920x1080. It checks for overlapping labels and writes `overlaps.json`. | `.\.venv\Scripts\python.exe tools\screens.py --out screens` |
 | `tools\balance_sim.py` | Offline balance tables from the real weapon, enemy and wave code: damage per second, time to clear each wave, power-up value and the effect of each skin and mutator. | `.\.venv\Scripts\python.exe tools\balance_sim.py --csv balance.csv` |
@@ -73,7 +73,7 @@ Run tools from the project root with the project venv. The bench, playtest and s
 
 - `tools\playtest.py` exits non-zero if a run crashes, breaks an invariant or softlocks (no damage dealt for 60 seconds of game time while enemies remain).
 - `tools\screens.py` exits non-zero when it finds overlapping labels, unless `--allow-overlaps` is passed.
-- `replay.py` records a run's seed, difficulty, skin, mutators and inputs so the run can be replayed to the same state. Recording is off by default and is turned on in **Settings** or with a flag.
+- `replay.py` records a run's seed, difficulty, skin, mutators and per-step inputs so the run can be replayed to the same state. Recording is off by default. Start the game with `--record` (`.\.venv\Scripts\python.exe main.py --record`) and each finished run is saved to `replays/last_run.json`.
 
 ## Tests
 

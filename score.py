@@ -52,9 +52,11 @@ MAX_HIGH_SCORES = 5
 class ScoreTracker:
     """Tracks score, combo multiplier, and high scores for a single run."""
 
-    def __init__(self, difficulty: str = "normal"):
+    def __init__(self, difficulty: str = "normal", score_mult: float = 1.0):
         self.score: int = 0
         self.combo: float = 1.0
+        # Run-wide score multiplier from the run's mutators (1.0 for a stock run).
+        self.score_mult: float = float(score_mult)
         self._combo_timer: float = 0.0  # time since last kill
         self.difficulty: str = difficulty
         self.kills: int = 0
@@ -71,7 +73,7 @@ class ScoreTracker:
     def on_enemy_kill(self, behavior: str, multiplier: float = 1.0) -> int:
         """Record an enemy kill.  Returns points awarded."""
         base = KILL_POINTS.get(behavior, 100)
-        points = int(base * self.combo * multiplier)
+        points = int(base * self.combo * multiplier * self.score_mult)
         self.score += points
         self.kills += 1
 
@@ -87,7 +89,7 @@ class ScoreTracker:
         bonus = WAVE_CLEAR_BASE + wave * WAVE_CLEAR_PER_WAVE
         if is_boss:
             bonus += BOSS_WAVE_BONUS
-        bonus = int(bonus * self.combo)
+        bonus = int(bonus * self.combo * self.score_mult)
         self.score += bonus
         return bonus
 

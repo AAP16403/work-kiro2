@@ -127,9 +127,10 @@ def test_every_boss_enters_rage_once_with_one_banner_and_warning():
             _tick_boss(boss, state, game, frames=3)
         titles = [b[0] for b in game.hud.banners]
         assert titles == ["BOSS RAGE"], f"{name}: banner requests {titles}"
-        assert [p[0] for p in game.audio.plays] == ["boss_warn"], f"{name}: sounds {game.audio.plays}"
+        # The rage warning is the wave-3 "rage_warn" cue (audio_cues.CUE_SPECS), one sound per rage.
+        assert [p[0] for p in game.audio.plays] == ["rage_warn"], f"{name}: sounds {game.audio.plays}"
         assert name[5:].replace("_", " ").upper() in game.hud.banners[0][1], f"{name}: subtitle {game.hud.banners[0][1]!r}"
-    print(f"[PASS] test_every_boss_enters_rage_once_with_one_banner_and_warning passed ({len(BOSSES)} bosses, one banner and one boss_warn each)")
+    print(f"[PASS] test_every_boss_enters_rage_once_with_one_banner_and_warning passed ({len(BOSSES)} bosses, one banner and one rage_warn each)")
 
 
 def _cooldown_after_one_volley(name, raged):
@@ -296,7 +297,9 @@ def test_boss_kill_flashes_and_plays_fanfare(g):
     finally:
         del g.audio.play
     assert g.advanced_fx._boss_flash > 0.9, f"boss kill flash {g.advanced_fx._boss_flash}"
-    assert ("wave_clear", FANFARE_MIN_GAP) in played, f"fanfare not played: {played}"
+    # The victory fanfare is its own cue ("victory_fanfare", wave 3); the wave-clear chirp is skipped on this frame.
+    assert any(name == "victory_fanfare" for name, _gap in played), f"fanfare not played: {played}"
+    assert not any(name == "wave_clear" for name, _gap in played), f"chirp doubled the fanfare: {played}"
     assert ("boss_die", 0.0) in played, f"boss_die not played: {played}"
     assert FANFARE_MIN_GAP > 0.0, "fanfare needs a minimum gap so the same-frame wave clear is dropped"
     print("[PASS] test_boss_kill_flashes_and_plays_fanfare passed (camera flash and victory fanfare on a boss kill)")

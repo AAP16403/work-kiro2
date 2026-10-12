@@ -154,7 +154,7 @@ def test_unserialisable_data_keeps_the_previous_file():
 
 
 def test_every_writer_goes_through_the_helper():
-    for name in ("audio.py", "shake_prefs.py", "score.py"):
+    for name in ("audio.py", "shake_prefs.py", "score.py", "access_prefs.py"):
         with open(os.path.join(HERE, name), "r", encoding="utf-8") as fh:
             src = fh.read()
         assert "os.replace(" not in src, f"{name} must not call os.replace itself"

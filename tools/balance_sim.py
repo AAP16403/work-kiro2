@@ -368,6 +368,30 @@ def _optional_module(name):
         return None, str(exc)
 
 
+def _mutator_records(mod):
+    """(id, mutator) pairs. mutators.MUTATORS is a tuple of records; a mapping of id to record also works."""
+    table = mod.MUTATORS
+    if isinstance(table, dict):
+        return list(table.items())
+    return [(m.id, m) for m in table]
+
+
+def _rules_change(mod, mut):
+    """Field-by-field difference from the stock RunRules, and the player damage multiplier.
+
+    A wave-1 mutator maps a RunRules to a RunRules. Every rule it changes is listed, so the table shows
+    the enemy, pickup and steering effects as well as the damage change.
+    """
+    stock = mod.RunRules()
+    rules = mut.apply(stock)
+    diffs = []
+    for name in stock.__dataclass_fields__:
+        before, after = getattr(stock, name), getattr(rules, name)
+        if before != after:
+            diffs.append(f"{name} {before} -> {after}")
+    return diffs, float(rules.player_damage_mult), float(rules.player_max_hp_mult)
+
+
 def mutator_rows(damage, fire_rate):
     """Score multiplier and implied difficulty change per mutator. Returns (rows, skip_note)."""
     mod, _ = _optional_module("mutators")
@@ -376,15 +400,22 @@ def mutator_rows(damage, fire_rate):
     base = config_snapshot()
     base_dps = weapon_dps(WEAPONS["basic"], damage, fire_rate)
     rows = []
-    for mid, mut in mod.MUTATORS.items():
-        changed = mut.apply(dict(base))
-        diffs = []
-        for key in sorted(changed):
-            if key in base and changed[key] != base[key]:
-                diffs.append(f"{key} {base[key]} -> {changed[key]}")
-        if "PLAYER_DAMAGE" in changed or "PLAYER_FIRE_RATE" in changed:
-            new_dmg = int(changed.get("PLAYER_DAMAGE", base["PLAYER_DAMAGE"]))
+    for mid, mut in _mutator_records(mod):
+        if hasattr(mod, "RunRules"):
+            diffs, dmg_mult, _hp_mult = _rules_change(mod, mut)
+            # The basic gun's DPS moves with the damage multiplier; fire rate is not changed by any mutator.
+            new_dmg, new_rate = float(damage) * dmg_mult, float(fire_rate)
+            moves_dps = dmg_mult != 1.0
+        else:
+            changed = mut.apply(dict(base))
+            diffs = []
+            for key in sorted(changed):
+                if key in base and changed[key] != base[key]:
+                    diffs.append(f"{key} {base[key]} -> {changed[key]}")
+            moves_dps = "PLAYER_DAMAGE" in changed or "PLAYER_FIRE_RATE" in changed
+            new_dmg = float(changed.get("PLAYER_DAMAGE", base["PLAYER_DAMAGE"]))
             new_rate = float(changed.get("PLAYER_FIRE_RATE", base["PLAYER_FIRE_RATE"]))
+        if moves_dps:
             ratio = weapon_dps(WEAPONS["basic"], new_dmg, new_rate) / base_dps
             diffs.append(f"basic-gun DPS x{ratio:.2f}")
         rows.append({

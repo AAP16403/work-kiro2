@@ -105,6 +105,24 @@ MAGNET_RADIUS_MULT = 3.0      # multiplies the pickup magnet radius
 MAGNET_PULL_MULT = 1.5        # multiplies the pickup pull speed
 RICOCHET_BOUNCES = 1          # bounces per bullet while Ricochet runs (shot_mods reads it; the Guide too)
 
+# Chain Lightning (chain.py). A rare timed powerup; picking it up again refreshes the timer.
+CHAIN_DURATION = 8.0          # seconds of chain per pickup
+CHAIN_RANGE = 160.0           # world units: an arc reaches the nearest other live enemy within this of the kill
+CHAIN_DAMAGE_PERCENT = 30     # arc damage = this percent of the player's damage, rounded half up
+CHAIN_COLOR = (200, 245, 255) # pickup decoration and the arc glow; POWERUP_COLORS["chain"] should point here
+CHAIN_ARC_COLOR = (235, 252, 255)  # bright core of each arc
+CHAIN_ARC_CORE_WIDTH = 3.0    # core line thickness, screen px
+CHAIN_ARC_GLOW_WIDTH = 9.0    # soft glow line under the core, screen px
+CHAIN_ARC_GLOW_OPACITY = 150  # glow opacity at the start of the fade (0-255)
+CHAIN_ARC_SECONDS = 0.22      # each arc fades out over this long
+CHAIN_ARC_POOL = 12           # arcs drawn at once; a new arc reuses the oldest slot when all are busy
+CHAIN_ARC_SEGMENTS = 5        # straight pieces per arc, so it reads as a jagged bolt
+CHAIN_ARC_JITTER = 7.0        # max sideways offset of each interior point, world units
+CHAIN_FLICKER_SECONDS = 0.05  # normal motion re-rolls the jagged shape this often; REDUCE_MOTION never re-rolls
+CHAIN_PICKUP_DOT = 2.6        # pickup decoration: radius of each dot in the zigzag ring
+CHAIN_PICKUP_RING_NEAR = 7.0  # dot distance beyond the orb edge on the even dots
+CHAIN_PICKUP_RING_FAR = 12.0  # dot distance beyond the orb edge on the odd dots
+
 # Boost / Overdrive mechanic (LSHIFT key)
 BOOST_SPEED_MULT = 1.65
 BOOST_MAX_ENERGY = 100.0

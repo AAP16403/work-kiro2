@@ -230,7 +230,7 @@ def enemy_entries() -> list[dict]:
 
 
 def powerup_entries() -> list[dict]:
-    """Ricochet, homing, time slow and magnet. Shown on the Powerups tab."""
+    """Ricochet, homing, time slow, magnet and chain lightning. Shown on the Powerups tab."""
     bounce = "once" if int(config.RICOCHET_BOUNCES) == 1 else f"{int(config.RICOCHET_BOUNCES)} times"
     return [
         {
@@ -256,6 +256,15 @@ def powerup_entries() -> list[dict]:
             "what": f"Pickups are pulled from {config.MAGNET_RADIUS_MULT:g}x as far, and faster, for {config.MAGNET_DURATION:g}s.",
             "deal": "Clear the field, then sweep up distant loot.",
             "lore": "Drops pulled in like filings to a lodestone.",
+        },
+        {
+            "key": "chain", "name": "Chain Lightning (Z)", "icon": "Z",
+            "what": (
+                f"Rare. Each kill throws an arc to the nearest enemy within {config.CHAIN_RANGE:g} px for "
+                f"{config.CHAIN_DURATION:g}s, dealing {config.CHAIN_DAMAGE_PERCENT:g}% of your damage."
+            ),
+            "deal": "Kills in a pack start more kills; keep the packs close.",
+            "lore": "A capacitor that discharges into the next nearest target.",
         },
     ]
 

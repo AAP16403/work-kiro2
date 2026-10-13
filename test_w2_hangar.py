@@ -299,25 +299,18 @@ def test_each_card_previews_its_own_palette(g):
         return
     import hangar as H
     import skins
+    from skin_apply import complete_palette
 
-    class RecordingArt:
-        def __init__(self, batch, group):
-            self.palette = None
-
-        def sync(self, player, shake, t, aim_dir, palette=None):
-            self.palette = palette
-
+    # Wave 6: each card holds its own CharacterPreview, so the check reads the palette that preview draws.
     d, path = _temp_progress_dir()
-    original = H.PlayerArt
-    H.PlayerArt = RecordingArt
     try:
         menu = H.HangarMenu(980, 620, progress_path=path)
         menu.open()
         menu.update(0.1)
         for sid in menu.skin_ids:
-            assert menu._arts[sid].palette == skins.get(sid).palette, f"card '{sid}' does not preview its own palette"
+            expected = complete_palette(skins.get(sid).palette)
+            assert menu._previews[sid].palette == expected, f"card '{sid}' does not preview its own palette"
     finally:
-        H.PlayerArt = original
         shutil.rmtree(d, ignore_errors=True)
     print(f"[PASS] test_each_card_previews_its_own_palette passed ({len(menu.skin_ids)} cards, one palette each)")
 

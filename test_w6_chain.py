@@ -371,7 +371,8 @@ def test_guide_entry_reads_config():
     assert "within 220 px" in changed and "for 5.5s" in changed and "45% of your damage" in changed, changed
     tab_keys = [e["key"] for e in GuideMenu.POWERUP_INFO]
     assert "chain" in tab_keys and "drone" in tab_keys, tab_keys
-    assert guide_info.powerup_entries()[-1]["key"] == "chain"
+    entry_keys = [e["key"] for e in guide_info.powerup_entries()]
+    assert entry_keys[-2:] == ["chain", "repulsor"], entry_keys  # repulsor was added after chain at the merge
     print("[PASS] test_guide_entry_reads_config passed (the Powerups tab lists Chain Lightning, numbers from config)")
 
 

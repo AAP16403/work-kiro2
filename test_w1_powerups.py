@@ -528,8 +528,8 @@ def test_pickup_visuals_follow_the_orb_and_are_removed_with_it():
 
 def test_guide_powerups_tab_documents_the_new_kinds():
     entries = GuideMenu.POWERUP_INFO
-    # 14 wave-1 kinds (10 original + 4 new) plus the wave-2 drone entry.
-    assert len(entries) == 15, f"Powerups tab should have 15 entries, got {len(entries)}"
+    # 14 wave-1 kinds (10 original + 4 new), the wave-2 drone entry, and the wave-6 chain and repulsor entries.
+    assert len(entries) == 17, f"Powerups tab should have 17 entries, got {len(entries)}"
     by_key = {e["key"]: e for e in entries}
     for kind in NEW_KINDS:
         assert kind in by_key, f"Guide has no {kind} entry"

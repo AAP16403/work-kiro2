@@ -185,3 +185,20 @@ Acceptance:
 Expected reality, to check against the numbers and not to claim in advance: the draw step (25 to 34 ms median) is main-thread OpenGL and is not affected by any of these three. The steering pool can only help if the crossover is below the enemy counts a real wave reaches. Gains are most likely in simulation spikes, arena rebuilds and startup.
 
 Decision still open: enabling batched steering by default changes gameplay results, so it stays off until the user approves.
+
+## Batch status: wf_d40f1ba7-c16 (animation, bomb, optimization, weapon timers, steering pool)
+
+Base: main 63cab47 via wave4/base. Stages and branches:
+
+- Foundation (1): wave4/base, anim.py and test_w4_anim.py.
+- Implement (6, parallel, each in its own worktree): wave4/player, wave4/enemies, wave4/fx (auto-fire lag, Flak Battery rework, per-weapon bullet effects), wave4/ui, wave4/perf (draw-path churn, static map batch, HUD label updates), wave4/weapontimer.
+- Integrate (1): wave4/integration. Enables the steering pool with a stable per-run ordering index in place of id(enemy), so batched runs repeat. PARALLEL_STEER_ENABLED becomes True with a comment giving the reason.
+- Verify (1): all test files in four parallel groups, then bench before and after on the same machine.
+- Visual (1): screens before and after at 980x620 and 1920x1080, each PNG inspected.
+
+Not claimed in advance. Results go into this file when the batch reports.
+
+Known from earlier measurements, left off by default:
+
+- Arena geometry worker (wave5/geometry): no measurable gain. Off.
+- Asset preload (wave5/loading): no measurable gain. Off.

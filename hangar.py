@@ -1,7 +1,8 @@
 """The Hangar: browse and select skins with live previews, and review achievements.
 
-Built on the wave-1 progress, skins, achievements, player_art and ui_theme modules. All colours,
-panels and chips come from ui_theme. The cursor, paging and unlock wording live in hangar_rules.
+Built on the wave-1 progress, skins, achievements and ui_theme modules, and on skin_preview for the
+character on each card, so a card shows the same look the next run draws. All colours, panels and
+chips come from ui_theme. The cursor, paging and unlock wording live in hangar_rules.
 states.HangarState builds this menu on the first visit, so the rest of the game does not import it.
 
 Drawing layers, back to front: background, tab panel, cursor ring, tab content, chrome. Moving the
@@ -21,11 +22,9 @@ import audio_cues
 import skins
 from hangar_rules import TAB_ACHIEVEMENTS, TAB_SKINS, describe_unlock, grid_step, page_step
 from menu import MenuButton, UI_FONT_BODY, UI_FONT_HEAD, UI_FONT_META, _sync_label_style_if_ready, _ui_scale
-from player import Player
-from player_art import PlayerArt
 import progress as meta_progress
+from skin_preview import CharacterPreview
 from ui_theme import ACCENT, BG, DANGER, MUTED, PANEL, SUCCESS, TEXT, draw_panel, draw_tag, font_size
-from utils import Vec2, to_iso
 
 
 MESSAGE_SECONDS = 2.5
@@ -93,9 +92,6 @@ class HangarMenu:
         self.skin_ids = _ordered_skin_ids()
         self._achievement_names = {a.id: a.name for a in achievements.ACHIEVEMENTS}
         self._unlock_text = {sid: describe_unlock(skins.get(sid), self._achievement_names) for sid in self.skin_ids}
-        self._palettes = {sid: skins.get(sid).palette for sid in self.skin_ids}
-        self._player = Player(pos=Vec2(0.0, 0.0))  # fixed character for every preview
-        self._aim = Vec2(1.0, 0.0)
 
         self._bg_batch = pyglet.graphics.Batch()
         self._panel_batch = pyglet.graphics.Batch()
@@ -108,8 +104,7 @@ class HangarMenu:
         self._ring_shapes: list = []      # cursor ring, rebuilt on cursor moves
         self._content: list = []          # cards or rows and their labels, rebuilt with the tab
         self._cards: list[tuple[float, float, float, float, str]] = []
-        self._arts: dict[str, PlayerArt] = {}
-        self._art_shakes: dict[str, Vec2] = {}
+        self._previews: dict[str, CharacterPreview] = {}  # one character per skin card, made once and kept
         self._area = (0.0, 0.0, 0.0, 0.0)
         self._panel_rect = (0.0, 0.0, 0.0, 0.0)
 
@@ -129,7 +124,9 @@ class HangarMenu:
             b.ensure(self._ui_batch)
 
         for sid in self.skin_ids:
-            self._arts[sid] = PlayerArt(self._skin_batch, self._art_group)
+            self._previews[sid] = CharacterPreview(self._skin_batch, self._art_group, palette=skins.get(sid).palette)
+        # The palette each card shows, copied from its helper. The helper owns the look; this is a record for reference.
+        self._palettes = {sid: preview.palette for sid, preview in self._previews.items()}
 
         self._layout(width, height)  # geometry only; open() or resize() fills the panel
 
@@ -163,11 +160,13 @@ class HangarMenu:
         return "unlocked" if skins.unlocked(self.progress, sid) else "locked"
 
     def _earned(self) -> dict:
+        """Earned achievement ids mapped to a date text. progress.py stores a plain list of ids, with no dates, so each text is ""."""
         data = self.progress.get("achievements") if isinstance(self.progress, dict) else None
-        return data if isinstance(data, dict) else {}
-
-    def _sync_art(self, sid: str) -> None:
-        self._arts[sid].sync(self._player, self._art_shakes[sid], self._t, self._aim, palette=self._palettes[sid])
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            return {aid: "" for aid in data}
+        return {}
 
     def _flash(self, text: str, color) -> None:
         self._message = text
@@ -388,12 +387,10 @@ class HangarMenu:
 
         self._content.extend(draw_panel(batch, plate_x, plate_bottom, plate_w, plate_h, fill=BG))
 
-        # Preview: the dummy player sits at world origin, so shake carries it to the plate centre.
-        ox, oy = to_iso(Vec2(0.0, 0.0), Vec2(0.0, 0.0))
-        centre_x = plate_x + plate_w / 2.0
-        centre_y = plate_bottom + plate_h / 2.0
-        self._art_shakes[sid] = Vec2(centre_x - ox, centre_y - oy)
-        self._sync_art(sid)
+        # Preview: this skin's character, centred on the plate. skin_preview draws the look the next run uses.
+        preview = self._previews[sid]
+        preview.place(plate_x + plate_w / 2.0, plate_bottom + plate_h / 2.0)
+        preview.update(self._t)
 
         self._content.append(self._label(batch, self._unlock_text[sid], x + pad, y + int(10 * s),
                                          _px(11, s), MUTED, anchor_x="left", anchor_y="bottom",
@@ -528,8 +525,8 @@ class HangarMenu:
                 self._message = ""
                 self._sync_footer()
         if self.tab == TAB_SKINS:
-            for sid in self.skin_ids:
-                self._sync_art(sid)
+            for preview in self._previews.values():
+                preview.update(self._t)
 
     def draw(self) -> None:
         self._bg_batch.draw()

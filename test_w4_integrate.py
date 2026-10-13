@@ -157,6 +157,7 @@ def _child_record(path):
     import parallel
     import replay
 
+    config.PARALLEL_STEER_ENABLED = True  # the default is serial; this child tests the batch path
     tmp = tempfile.mkdtemp(prefix="w4_integrate_rec_")
     g = _open_game(tmp)
     original = replay.start_run
@@ -182,6 +183,7 @@ def _child_replay(path):
     import parallel
     import replay
 
+    config.PARALLEL_STEER_ENABLED = True  # the recording was made on the batch path
     tmp = tempfile.mkdtemp(prefix="w4_integrate_play_")
     g = _open_game(tmp)
     original = replay.start_run
@@ -214,7 +216,7 @@ def _run_child(mode, path):
 
 def test_batched_replay_repeats_in_a_second_process():
     """A recording made with batch steering on replays with every state hash equal, in another process."""
-    assert config.PARALLEL_STEER_ENABLED is True, "this check is about the batch path, which must be on"
+    assert config.PARALLEL_STEER_ENABLED is False, "the shipped default is serial; the child processes switch the batch path on"
     fd, path = tempfile.mkstemp(suffix=".json", prefix="w4_integrate_")
     os.close(fd)
     try:

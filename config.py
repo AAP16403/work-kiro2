@@ -237,17 +237,20 @@ EVENT_NEBULA_SHIELD = 24            # shield an enemy gains on entering the clou
 # PARALLEL_MIN_ENEMIES = 16 is the smallest count at which the pool was faster in every run.
 # A spawned worker takes about 0.45 s to start on Windows. warm() starts the workers during the first
 # small frames, and the first big fight does not wait for them.
-# PARALLEL_STEER_ENABLED is on. Two sweeps of tools/bench_steer.py --counts 22,29 --workers 3 (300 timed
-# frames, 30 warm-up, median ms per frame, serial / pool of 3 workers). Serial timings moved between sweeps:
-#   22 enemies: sweep 1 1.47 / 0.88, sweep 2 1.42 / 1.02   (pool faster in both sweeps)
-#   29 enemies: sweep 1 3.06 / 1.56, sweep 2 10.06 / 2.28  (pool faster in both sweeps)
+# PARALLEL_STEER_ENABLED is off. Earlier sweeps (22 and 29 enemies, pool faster in both) were not repeated
+# on a quiet machine. Quiet bench, tools/bench.py --wave 15 22 29 --frames 300 --repeats 5, median ms per
+# frame, serial / inline batch / pool of 3 workers:
+#   15 enemies: 1.93 / 2.01 / 2.39   (pool slower)
+#   22 enemies: 3.45 / 3.46 / 3.25   (pool about 6% faster)
+#   29 enemies: 4.68 / 4.72 / 4.62   (within noise)
+# No clear win, so the default stays serial. The batch path stays available behind this flag.
 # The threshold stays at 16, the smallest count the pool won in every measured run above.
 # Batched steering is not the serial loop: phase 1 moves every enemy before coordination is applied, so
 # enemy movement at 16 or more live enemies differs from the interleaved default. Measured on one seeded
 # 587-step run (20 enemies, swarm included): enemy positions differ on 522 of 587 frames, by up to 43 px.
 # Units are ordered by their per-run spawn index, not their address, so a batched run repeats for a seed.
 PARALLEL_MIN_ENEMIES = 16           # live enemy count at which the batch path runs (measured above)
-PARALLEL_STEER_ENABLED = True       # True: batch enemy steering may run in a process pool
+PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a process pool (see above)
 PARALLEL_STEER_MIN_ENEMIES = PARALLEL_MIN_ENEMIES
 PARALLEL_STEER_WORKERS = 3          # process-pool size when enabled
 PARALLEL_LOADER_WORKERS = 4         # threads for I/O-bound asset reads

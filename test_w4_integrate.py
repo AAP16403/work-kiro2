@@ -216,7 +216,7 @@ def _run_child(mode, path):
 
 def test_batched_replay_repeats_in_a_second_process():
     """A recording made with batch steering on replays with every state hash equal, in another process."""
-    assert config.PARALLEL_STEER_ENABLED is False, "the shipped default is serial; the child processes switch the batch path on"
+    assert config.PARALLEL_STEER_ENABLED is True, "the shipped default is batched (user-enabled); the child processes force the flag on either way"
     fd, path = tempfile.mkstemp(suffix=".json", prefix="w4_integrate_")
     os.close(fd)
     try:

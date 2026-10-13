@@ -25,8 +25,64 @@ def _set_opacity(shape, value: int) -> None:
 
 
 def _worker_enabled() -> bool:
-    """config.ARENA_GEOMETRY_WORKER switches the worker on. It is off by default (geometry_build.WORKER_ENABLED_DEFAULT)."""
+    """config.ARENA_GEOMETRY_WORKER switches the worker on (geometry_build.WORKER_ENABLED_DEFAULT is the fallback)."""
     return bool(getattr(config, "ARENA_GEOMETRY_WORKER", geometry_build.WORKER_ENABLED_DEFAULT))
+
+
+# One prefetcher for the whole process, shared by every Room. The menu queues the arena the next run uses
+# (prefetch_next_arena), and the Room built for that run takes the worker's result. Created on first use.
+_prefetcher = None
+
+
+def arena_spec(map_type: str, width, height):
+    """The floor spec for one arena. Room and prefetch_next_arena both build it here, so they always agree."""
+    return geometry_build.ArenaSpec(
+        map_type=map_type,
+        radius=float(config.ROOM_RADIUS),
+        width=width,
+        height=height,
+        view_w=utils.VIEW_W,
+        view_h=utils.VIEW_H,
+        iso_x=utils.ISO_SCALE_X,
+        iso_y=utils.ISO_SCALE_Y,
+        floor_main=FLOOR_MAIN,
+        floor_edge=FLOOR_EDGE,
+        floor_grid=FLOOR_GRID,
+    )
+
+
+def _shared_prefetcher() -> geometry_build.FloorPrefetcher:
+    global _prefetcher
+    if _prefetcher is None:
+        _prefetcher = geometry_build.FloorPrefetcher()
+    return _prefetcher
+
+
+def prefetch_next_arena(map_type: str, width, height) -> bool:
+    """Queue the arena the next run will build. Call it at the menu, with the window size the run will use.
+
+    Does nothing unless config.ARENA_GEOMETRY_WORKER is on. Never raises: when the request cannot be queued,
+    the next Room builds its floor in-process, as it does with the worker off. Returns True when a request
+    for this arena is queued.
+    """
+    if not _worker_enabled():
+        return False
+    try:
+        spec = arena_spec(map_type, width, height)
+        prefetcher = _shared_prefetcher()
+        if prefetcher.seed_for(spec) is not None:
+            return True  # already queued for this arena (the menu was entered again)
+        return prefetcher.submit(spec)
+    except Exception:
+        return False
+
+
+def reset_prefetch() -> None:
+    """Drop the shared prefetcher and its queued request, and stop its worker. Safe to call again."""
+    global _prefetcher
+    prefetcher, _prefetcher = _prefetcher, None
+    if prefetcher is not None:
+        prefetcher.close()
 
 
 def _make_shape(rec, batch, group=None):
@@ -67,7 +123,6 @@ class Room:
         self._t = 0.0
         self._w = width
         self._h = height
-        self._prefetcher = None
 
         # Combat intensity overlay (0 = calm cool tint, 1 = boss warm tint).
         self._combat_intensity = 0.0
@@ -89,7 +144,17 @@ class Room:
         self._vignette: list[tuple[shapes.Circle, float]] = []
         self._bg_grid: list[tuple[shapes.Line, int, float]] = []
         self._build_ambient()
-        self._build_floor()
+        self._build_floor(self._rebuild_ops())  # a floor queued at the menu for this arena, else None (in-process)
+
+    @property
+    def _prefetcher(self):
+        """The shared prefetcher (see prefetch_next_arena). Settable, so tests can inject an executor."""
+        return _prefetcher
+
+    @_prefetcher.setter
+    def _prefetcher(self, value):
+        global _prefetcher
+        _prefetcher = value
 
     def _build_ambient(self):
         for target, rec, aux in geometry_build.ambient_ops(self._w, self._h, random):
@@ -122,40 +187,29 @@ class Room:
         self._rebuild_floor()
 
     def prefetch_arena(self, map_type: str = None, width: int = None, height: int = None) -> bool:
-        """Start one arena's floor geometry in a worker process, for the next rebuild to pick up.
+        """Queue one arena's floor geometry in the shared worker, for the next rebuild or Room to pick up.
 
-        Call it at wave start for the arena that comes next. It does nothing unless
-        config.ARENA_GEOMETRY_WORKER is true. A rebuild for exactly this arena uses the worker's result if
-        it has finished. Otherwise the rebuild builds the same geometry in-process. Returns True if a request
-        was queued.
+        It does nothing unless config.ARENA_GEOMETRY_WORKER is true. A build for exactly this arena uses the
+        worker's result if it has finished. Otherwise it builds the same geometry in-process. Returns True if a
+        request was queued. MenuState uses the module-level prefetch_next_arena for the next run's arena.
         """
         if not _worker_enabled():
             return False
-        if self._prefetcher is None:
-            self._prefetcher = geometry_build.FloorPrefetcher()
-        return self._prefetcher.submit(self._arena_spec(map_type, width, height))
+        return _shared_prefetcher().submit(self._arena_spec(map_type, width, height))
 
     def _arena_spec(self, map_type: str = None, width: int = None, height: int = None):
-        return geometry_build.ArenaSpec(
-            map_type=self.map_type if map_type is None else map_type,
-            radius=float(config.ROOM_RADIUS),
-            width=self._w if width is None else width,
-            height=self._h if height is None else height,
-            view_w=utils.VIEW_W,
-            view_h=utils.VIEW_H,
-            iso_x=utils.ISO_SCALE_X,
-            iso_y=utils.ISO_SCALE_Y,
-            floor_main=FLOOR_MAIN,
-            floor_edge=FLOOR_EDGE,
-            floor_grid=FLOOR_GRID,
+        return arena_spec(
+            self.map_type if map_type is None else map_type,
+            self._w if width is None else width,
+            self._h if height is None else height,
         )
 
     def _rebuild_ops(self):
         """Floor ops for a rebuild. None means build in-process from the module RNG (the default path).
 
-        With the worker on, a request queued by prefetch_arena() for this exact arena is used once it has
-        finished. Otherwise the same ops are built in-process from that request's seed, so the result is
-        the same whichever path produced it.
+        With the worker on, a request queued for this exact arena (by prefetch_next_arena at the menu, or by
+        prefetch_arena) is used once it has finished. Otherwise the same ops are built in-process from that
+        request's seed, so the result is the same whichever path produced it.
         """
         if not _worker_enabled() or self._prefetcher is None:
             return None

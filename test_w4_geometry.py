@@ -11,7 +11,9 @@ What is checked:
    matches the base code run under random.seed(seed).
 3. Fallback. When the worker fails, or is not ready, or cannot be submitted to, the rebuild still produces the
    same geometry as the in-process build.
-4. The default is off. With ARENA_GEOMETRY_WORKER unset, no worker process starts.
+4. The worker is on in config.py. With ARENA_GEOMETRY_WORKER off, no worker process starts and prefetch does nothing.
+5. The menu. MenuState.enter queues the run's arena (map.prefetch_next_arena, same window size). The Map built
+   after it uses the worker's floor, and a Map whose result is not ready builds the same floor in-process.
 
 Shapes are replaced by recording fakes, so the comparison does not depend on the GL state.
 Windows note: the worker uses the spawn start method, so the child re-imports this file as __mp_main__.
@@ -484,6 +486,116 @@ def _spec(map_type, width, height):
     )
 
 
+class _MenuAudio:
+    def play_music(self, name, fade=0.8):
+        self.played = name
+
+
+class _MenuGame:
+    """The few Game attributes that MenuState.enter reads."""
+
+    def __init__(self, width, height, map_type):
+        self.width = width
+        self.height = height
+        self.settings = {"map_type": map_type}
+        self.audio = _MenuAudio()
+
+    def _reset_input_flags(self):
+        pass
+
+
+def test_menu_prefetch_is_used_by_the_next_map():
+    """A floor queued at the menu is the one the Map built after it uses. A Map that misses builds the same data."""
+    import map as new_map
+
+    width, height, map_type = 1280, 800, config.MAP_CROSS
+    with _FlagSet(True), _RadiusPinned(width, height):
+        restore = _patched(new_map)
+        try:
+            new_map.reset_prefetch()
+            assert new_map.prefetch_next_arena(map_type, width, height) is True, "the menu must queue the arena"
+            spec = new_map.arena_spec(map_type, width, height)
+            prefetcher = new_map._shared_prefetcher()
+            seed = prefetcher.seed_for(spec)
+            assert seed is not None, "the queued request is not for the menu's arena"
+            prefetcher._pending[2].result(timeout=120)  # test-only: wait until the worker has finished
+            random.seed(11)
+            _REGISTRY.clear()
+            hit_room = new_map.Room(None, width, height, map_type=map_type)
+            hit = (_state(hit_room, ROOM_ATTRS), _trace())
+            assert len(hit_room._floor_polys) > 0
+            assert prefetcher.seed_for(spec) is None, "the Map built after the menu must consume the request"
+
+            # The same Map when the worker's result is not available: the in-process build from the same seed.
+            new_map.reset_prefetch()
+            new_map._prefetcher = geometry_build.FloorPrefetcher(executor_factory=_NeverReadyExecutor)
+            assert new_map._prefetcher.submit(spec, seed=seed), "the miss case needs its request queued"
+            random.seed(11)
+            _REGISTRY.clear()
+            miss_room = new_map.Room(None, width, height, map_type=map_type)
+            miss = (_state(miss_room, ROOM_ATTRS), _trace())
+            assert new_map._prefetcher.seed_for(spec) is None, "the miss must consume its request too"
+        finally:
+            new_map.reset_prefetch()
+            restore()
+    assert hit == miss, "a Map that misses the worker builds different vertex data from one that hits"
+    print("[PASS] menu prefetch used by the next Map; a miss builds the same vertex data")
+
+
+def test_menu_enter_queues_the_run_arena():
+    """MenuState.enter queues the arena of the next run: the map type setting at the window size the run uses."""
+    import map as new_map
+    import states
+
+    width, height = 980, 620
+    with _FlagSet(True), _RadiusPinned(width, height):
+        new_map.reset_prefetch()
+        try:
+            game = _MenuGame(width, height, config.MAP_DONUT)
+            states.MenuState(game).enter()
+            assert game.audio.played == "menu"
+            spec = new_map.arena_spec(config.MAP_DONUT, width, height)
+            assert new_map._shared_prefetcher().seed_for(spec) is not None, "menu enter did not queue the run's arena"
+            other = new_map.arena_spec(config.MAP_DONUT, 1280, 800)
+            assert new_map._shared_prefetcher().seed_for(other) is None, "a different window size must not match"
+        finally:
+            new_map.reset_prefetch()
+    with _FlagSet(False), _RadiusPinned(width, height):
+        game = _MenuGame(width, height, config.MAP_DONUT)
+        states.MenuState(game).enter()
+        assert new_map._prefetcher is None, "menu enter started a worker with the flag off"
+    print("[PASS] MenuState.enter queues the run's arena (map type and window size); nothing with the flag off")
+
+
+def test_menu_enter_survives_a_worker_that_cannot_start():
+    """A worker that cannot start leaves the menu working, and the next Map builds its floor in-process."""
+    import map as new_map
+    import states
+
+    def cannot_start():
+        raise OSError("simulated: no process pool")
+
+    width, height = 980, 620
+    with _FlagSet(True), _RadiusPinned(width, height):
+        restore = _patched(new_map)
+        try:
+            new_map.reset_prefetch()
+            new_map._prefetcher = geometry_build.FloorPrefetcher(executor_factory=cannot_start)
+            game = _MenuGame(width, height, config.MAP_CIRCLE)
+            states.MenuState(game).enter()  # must not raise
+            assert game.audio.played == "menu"
+            spec = new_map.arena_spec(config.MAP_CIRCLE, width, height)
+            assert new_map._prefetcher.seed_for(spec) is None, "a refused request must not stay pending"
+            random.seed(7)
+            _REGISTRY.clear()
+            room = new_map.Room(None, width, height, map_type=config.MAP_CIRCLE)
+            assert len(room._floor_polys) > 0, "the Map did not build its floor after the worker failed"
+        finally:
+            new_map.reset_prefetch()
+            restore()
+    print("[PASS] menu survives a worker that cannot start; the Map builds its floor in-process")
+
+
 # ---------------------------------------------------------------- runner
 
 def _run_all():
@@ -497,6 +609,9 @@ def _run_all():
         test_fallback_when_worker_future_fails,
         test_fallback_when_worker_not_ready,
         test_fallback_when_pool_cannot_submit,
+        test_menu_prefetch_is_used_by_the_next_map,
+        test_menu_enter_queues_the_run_arena,
+        test_menu_enter_survives_a_worker_that_cannot_start,
     ]
     failed = 0
     for test in tests:

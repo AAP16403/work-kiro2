@@ -21,7 +21,7 @@ import replay
 import parallel
 from config import SCREEN_W, SCREEN_H, FPS, MAP_CIRCLE, ENEMY_COLORS
 
-from map import Room
+from map import Room, reset_prefetch
 from level import GameState as GameStateData, get_difficulty_mods, spawn_loot_on_enemy_death
 
 from utils import set_view_size, compute_room_radius, Vec2, clamp_to_map, enemy_behavior_name, iso_to_world, dist, point_segment_distance
@@ -923,6 +923,7 @@ class Game(pyglet.window.Window):
         """Handle window close event."""
         self._finish_meta_run()  # a run still in progress is saved rather than lost
         parallel.close_batcher()  # the steering pool's worker processes stop with the window
+        reset_prefetch()  # so does the arena geometry worker, and any floor it queued
         self._schedule_app_close()
         return True
 

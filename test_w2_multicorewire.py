@@ -107,10 +107,13 @@ def test_bench_measure_reports_both_sizes(g):
 
 
 def test_no_multiprocessing_children_left_after_bench(g):
+    # The menu's arena-geometry worker (map.prefetch_next_arena, started by MenuState.enter when the Game is
+    # built) is a child the game owns until the window closes. Only children the bench itself started count here.
+    before = set(multiprocessing.active_children())
     bench.measure(g, 20, frames=5, repeats=1)
-    leftover = multiprocessing.active_children()
+    leftover = [p for p in multiprocessing.active_children() if p not in before]
     assert not leftover, f"{len(leftover)} worker process(es) left after the bench run"
-    print("[PASS] test_no_multiprocessing_children_left_after_bench passed (0 child processes after bench)")
+    print("[PASS] test_no_multiprocessing_children_left_after_bench passed (no child started by the bench is left)")
 
 
 def test_parallel_threshold_is_a_named_config_value(g):

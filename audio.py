@@ -167,6 +167,9 @@ class AudioManager:
         except Exception:
             self.available = False
             self._media = None
+        if not self.available:
+            # Without a driver no load ever joins the preload job, so its worker would idle until exit. Stop it now.
+            shutdown_preload()
 
     # ----- sound effects -------------------------------------------------
 
@@ -381,9 +384,10 @@ class AudioManager:
 # joins the worker job. A worker failure returns None, and the caller then does the same
 # media.load it did before, so a missing or unreadable file is handled as it was without preload.
 
-# Off by default. Measured in wave 4: starting the worker costs the main thread about 30 ms, while the
-# decode it moves is about 3 ms, so the default startup is not made faster. See test_w4_loading.py.
-PRELOAD_STARTUP_MUSIC = False
+# On. The user enabled it with the rest of the multicore work. Measured in wave 4 (test_w4_loading.py):
+# starting the worker costs the main thread about 30 ms, while the decode it moves is about 3 ms, so the
+# startup is not made faster by it. A missing audio driver or a failed worker leaves every load synchronous.
+PRELOAD_STARTUP_MUSIC = True
 _JOIN_TIMEOUT_S = 10.0
 _preload_pool = None
 _preload = {}  # path -> Future of _decode_wav_worker(path)

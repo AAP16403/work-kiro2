@@ -118,11 +118,15 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def test_default_is_off_and_start_does_nothing():
-    assert audio.PRELOAD_STARTUP_MUSIC is False, "the preload must ship switched off"
-    assert audio.start_preload() is False
+def test_default_is_on_and_start_launches_worker():
+    assert audio.PRELOAD_STARTUP_MUSIC is True, "the preload ships switched on (user-enabled, see audio.py)"
+    try:
+        assert audio.start_preload() is True
+        assert audio._preload_pool is not None and MENU_WAV in audio._preload, "menu music was not queued"
+    finally:
+        audio.shutdown_preload()
     assert audio._preload_pool is None and not audio._preload
-    print("[PASS] test_default_is_off_and_start_does_nothing passed (flag off, no worker, no futures)")
+    print("[PASS] test_default_is_on_and_start_launches_worker passed (flag on, one worker queued, shut down after)")
 
 
 def test_worker_decode_matches_sync_load_for_every_shipped_wav():
@@ -335,7 +339,7 @@ def test_entry_script_starts_preload_under_main_guard():
 
 def run_all():
     tests = (
-        test_default_is_off_and_start_does_nothing,
+        test_default_is_on_and_start_launches_worker,
         test_worker_decode_matches_sync_load_for_every_shipped_wav,
         test_preloaded_menu_music_equals_sync_load_and_skips_media_load,
         test_game_menu_music_comes_from_preload_and_matches_sync,

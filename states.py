@@ -27,6 +27,7 @@ from level import spawn_wave, maybe_spawn_powerup, spawn_loot_on_enemy_death, ge
 from enemy import Enemy, update_enemy
 from boss_rage import celebrate_boss_death, FANFARE_MIN_GAP
 from parallel import maybe_update_enemies
+from map import prefetch_next_arena
 from powerup import (
     apply_powerup, enemy_time_scale, equip_permanent_weapon, expire_timed_effects, expire_weapon_pickup,
     format_timed_powerups_hud, is_rare_powerup, pickup_magnet_mods, powerup_popup_name, timed_active,
@@ -207,6 +208,9 @@ class MenuState(State):
     def enter(self):
         self.game._reset_input_flags()
         self.game.audio.play_music("menu")
+        # Queue the arena the next run builds, in the geometry worker, at the window size that run will use.
+        # The run's Room takes the worker's floor if it is ready. prefetch_next_arena never raises.
+        prefetch_next_arena(self.game.settings.get("map_type", config.MAP_CIRCLE), self.game.width, self.game.height)
 
     def on_mouse_press(self, x, y, button, modifiers):
         action = self.game.main_menu.on_mouse_press(x, y, button)

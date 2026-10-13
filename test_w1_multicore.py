@@ -2,7 +2,7 @@
 
 Covers: the steering kernel against the live serial coordination path, serial against pooled
 steering on the same snapshots, pool determinism on live game frames, threshold gating and the
-default-off setting, the coordinate flag on update_enemy, the threaded loader, and byte identity of
+default-on setting (user-enabled), the coordinate flag on update_enemy, the threaded loader, and byte identity of
 --jobs output in the synth tools.
 
 Pool workers are started with spawn, which re-imports this file as __mp_main__. Every entry point
@@ -235,14 +235,16 @@ def test_inline_batch_runs_the_game_without_a_pool(g):
     print("[PASS] test_inline_batch_runs_the_game_without_a_pool passed")
 
 
-def test_default_is_off_and_serial_path_is_used(g):
-    """With the shipped config the batch hook does nothing, so the default loop runs unchanged."""
-    assert config.PARALLEL_STEER_ENABLED is False
+def test_default_is_on_and_serial_path_below_threshold(g):
+    """The shipped config turns the batch hook on (user-enabled). It still gates on the live count: below 16 the serial loop runs."""
+    assert config.PARALLEL_STEER_ENABLED is True
     parallel.set_batcher(None)
-    assert parallel.active_batcher() is None
-    s = _start_run(g, 5, 40)
+    batcher = parallel.active_batcher()
+    assert batcher is not None and batcher.min_enemies == 16 and batcher.workers == 3
+    s = _start_run(g, 5, 15)
     assert parallel.maybe_update_enemies(s, g, DT, g.player.pos, Vec2(0.0, 0.0)) is None
-    print("[PASS] test_default_is_off_and_serial_path_is_used passed (shipped config keeps the serial path)")
+    parallel.close_batcher()  # warm() may have started the pool on this small frame
+    print("[PASS] test_default_is_on_and_serial_path_below_threshold passed (shipped config: batcher on, 15 enemies stay serial)")
 
 
 def test_threshold_gates_batch_path(g):
@@ -364,7 +366,7 @@ def run_all():
         test_chunk_ranges_cover_in_order()
         test_pool_failure_falls_back_to_inline()
         test_chunking_and_pool_match_inline_on_snapshots()
-        test_default_is_off_and_serial_path_is_used(g)
+        test_default_is_on_and_serial_path_below_threshold(g)
         test_threshold_gates_batch_path(g)
         test_coordinate_flag_controls_steering_pass(g)
         test_inline_batch_runs_the_game_without_a_pool(g)

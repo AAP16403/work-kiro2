@@ -110,6 +110,21 @@ class _MusicTrack:
         self.rate = rate
 
 
+_TOOL_SCRIPTS = frozenset({"bench.py", "playtest.py", "screens.py", "balance_sim.py"})
+
+
+def _silent_requested() -> bool:
+    """Tests and tool scripts use pyglet's silent driver, so no sound reaches the speakers.
+
+    The AudioManager logic still runs (voices, min_gap, volumes), so the audio tests keep their
+    coverage. PLOUTO_SILENT=1 forces the same for any run.
+    """
+    if os.environ.get("PLOUTO_SILENT", "0") not in ("", "0"):
+        return True
+    script = os.path.basename(sys.argv[0] or "")
+    return script.startswith("test_") or script in _TOOL_SCRIPTS
+
+
 class AudioManager:
     """Plays sound effects (voices) and crossfading looped music.
 
@@ -135,12 +150,18 @@ class AudioManager:
         self._duck_target = 1.0
         self._duck_rate = 0.0
 
+        silent = _silent_requested()
         try:
             from pyglet import media
 
+            if silent:
+                import pyglet
+
+                pyglet.options["audio"] = ("silent",)
             driver = media.get_audio_driver()
-            # pyglet substitutes a silent driver when no real output opens.
-            if driver is not None and "silent" not in type(driver).__module__:
+            # pyglet substitutes a silent driver when no real output opens. Silent mode keeps the
+            # same code path on purpose: the logic runs, nothing is played.
+            if driver is not None and (silent or "silent" not in type(driver).__module__):
                 self._media = media
                 self.available = True
         except Exception:

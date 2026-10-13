@@ -9,7 +9,7 @@ Uncommitted at report time (not touched here): CHANGELOG.md, README.md, WEAPON_S
 
 1. Final run: 43 test files, 650 PASS, 0 FAIL, 0 SKIP, 0 Traceback, across six groups.
 2. One failure was found and fixed in this pass: test_w3_smokeexe.py expected pyglet 2.1.16 while requirements.txt pins 2.1.19. The test expectation was changed to 2.1.19; the file then passes 12 of 12.
-3. Headless smoke passed (six title paths, two 600-frame runs to Game Over, Quit closes). Exe smoke passed (Plouto.exe alive for 8 s, 50 referenced assets present in _internal). The exe build exit code is 0 (build_exe.ps1 in this worktree, 55 WAV files in distPlouto_internalssetsudio).
+3. Headless smoke passed (six title paths, two 600-frame runs to Game Over, Quit closes). Exe smoke passed (Plouto.exe alive for 8 s, 50 referenced assets present in _internal). The exe build exit code is 0 (build_exe.ps1 in this worktree, 55 WAV files in dist/Plouto/_internal/assets/audio).
 4. Spec items: 30 total. DONE 19, PARTIAL 11, NOT DELIVERED 0. Nothing was checked by eye or ear in this pass.
 5. Not measured in this pass: perf before/after at waves 15 and 29, multicore crossover at 8, 16 and 32 enemies, the 20- and 30-enemy timings, and the frame-cost budgets for graphics (2 ms) and juicev2 (1.5 ms).
 6. Release risks: the docs test predates the last README and CHANGELOG edits; the tested exe was built before the pyglet 2.1.19 pin; vercel_site still has literal 120 shield caps and lacks the new systems.

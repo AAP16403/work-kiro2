@@ -33,6 +33,7 @@ Importing this module does no I/O.
 from dataclasses import dataclass
 
 import achievements
+import config
 
 
 DEFAULT_SKIN_ID = "classic"
@@ -154,6 +155,33 @@ _SKIN_LIST: tuple[Skin, ...] = (
         UnlockRule("achievement", "no_damage_wave"),
     ),
 )
+
+# wave8 neon-obsidian: two skins that unlock by play. They join the catalogue only while
+# config.ENABLE_NEON_OBSIDIAN is on. With the switch off, the Hangar, the Guide and the selection path
+# see the ten original skins. The palettes are checked against the arena floor in test_w8_neon-obsidian.py.
+_NEON_OBSIDIAN_SKINS: tuple[Skin, ...] = (
+    Skin(
+        # Named "Neon Surge" because the "neon" skin above is already called Neon Pod.
+        "neon_surge", "Neon Surge Pod", "Electric lime shell that crackles with magenta sparks.",
+        {
+            "body": (190, 255, 70), "accent": (255, 60, 190), "eye": (20, 22, 34),
+            "glow": (150, 255, 60), "trail": (190, 255, 110), "bullet": (235, 255, 160),
+            "cheek": (255, 110, 210),
+        },
+        UnlockRule("wave", config.NEON_SURGE_UNLOCK_WAVE),
+    ),
+    Skin(
+        "obsidian", "Obsidian Pod", "Volcanic glass with a violet sheen and a cold cyan glint.",
+        {
+            "body": (132, 124, 164), "accent": (120, 240, 255), "eye": (226, 232, 255),
+            "glow": (150, 100, 255), "trail": (160, 120, 255), "bullet": (210, 190, 255),
+            "cheek": (255, 110, 170),
+        },
+        UnlockRule("score", config.OBSIDIAN_UNLOCK_SCORE),
+    ),
+)
+if config.ENABLE_NEON_OBSIDIAN:
+    _SKIN_LIST = _SKIN_LIST + _NEON_OBSIDIAN_SKINS
 
 # The contract's shape: skin id -> Skin, in menu order (the default first).
 SKINS: dict[str, Skin] = {skin.id: skin for skin in _SKIN_LIST}

@@ -359,3 +359,9 @@ SIG_BOSS_RING = 15.0                # boss ring radius at rest, screen px
 SIG_RING_PULSE = 0.18               # a pulse ring swells and shrinks by this fraction of its radius (0 under REDUCE_MOTION)
 SIG_PULSE_RATE = 9.0                # pulse rate in radians per second of shot ttl (frozen under REDUCE_MOTION)
 SIG_GLOW_OPACITY = 110              # head glow of a signed shot
+# wave8 neon-obsidian
+# Two more pod skins, in skins.py. Neon Surge Pod unlocks at a best wave, Obsidian Pod at a best score in one run.
+# ENABLE_NEON_OBSIDIAN False hides both skins: they leave the Hangar, cannot be selected, and drop out of the Guide.
+ENABLE_NEON_OBSIDIAN = True
+NEON_SURGE_UNLOCK_WAVE = 15         # progress best_wave at which Neon Surge Pod unlocks
+OBSIDIAN_UNLOCK_SCORE = 20000       # progress best_score (one run) at which Obsidian Pod unlocks

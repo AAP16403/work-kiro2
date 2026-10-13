@@ -6,7 +6,7 @@ The game is written in Python with pyglet 2.1.19 (pinned in `requirements.txt`).
 
 ## What is in this release
 
-- **Hangar** (title screen button). Ten pod skins. The selected skin recolours the pod, your shots and trails, and the dash afterimage. Nine skins unlock by play: scores, waves, kills, boss defeats or an achievement. The Hangar also lists the 20 achievements, which are checked when a run ends. See `skins.py` and `achievements.py` for the rules.
+- **Hangar** (title screen button). Twelve pod skins. The selected skin recolours the pod, your shots and trails, and the dash afterimage. Eleven skins unlock by play: scores, waves, kills, boss defeats or an achievement. Set `ENABLE_NEON_OBSIDIAN` to `False` in `config.py` to hide the two newest skins. The Hangar also lists the 20 achievements, which are checked when a run ends. See `skins.py` and `achievements.py` for the rules.
 - **Daily Run** (title screen button). One run per local date. Everyone gets the same seed and the same single mutator for that date. The best score and wave for each date are saved in `progress.json`. Try Again replays the same daily until you return to the menu.
 - **Mutators** (opt-in). Five rule changes that you switch on by clicking their chips on the title screen. Each one adds a score multiplier. Glass Cannon, Bullet Hell, Drift, Frenzy and Iron Man. Details are in `WEAPON_SYSTEM_SUMMARY.md`.
 - **Power-ups**: Ricochet (bullets bounce once off the edge), Homing (bullets steer to the nearest enemy), Time Slow (enemies run at half speed), Magnet (wider and faster pickup pull), and the rare Drone (a companion that fires for you).

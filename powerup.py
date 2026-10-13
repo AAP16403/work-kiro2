@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import config
+from chain import expire_chain, start_chain
 from config import BOOST_OVERDRIVE_SECONDS, PLAYER_HP, SHIELD_MAX
 from drone import DRONE_DURATION
 from utils import Vec2
@@ -18,12 +19,12 @@ if TYPE_CHECKING:
 class PowerUp:
     """PowerUp entity."""
     pos: Vec2
-    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon", "ultra", "boost", "drone", "ricochet", "homing", "time_slow", "magnet"
+    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon", "ultra", "boost", "drone", "ricochet", "homing", "time_slow", "magnet", "chain"
     data: str | None = None
 
 
 # Kinds whose pickup plays the rare sound and the pickup ring.
-RARE_POWERUP_KINDS = frozenset({"ultra", "weapon", "vortex", "laser", "drone", "homing", "time_slow"})
+RARE_POWERUP_KINDS = frozenset({"ultra", "weapon", "vortex", "laser", "drone", "homing", "time_slow", "chain"})
 
 # Popup names for kinds whose name is not just the upper-cased kind.
 POWERUP_NAMES = {
@@ -40,6 +41,8 @@ TIMED_POWERUPS = {
     "time_slow": ("time_slow_until", "TIME_SLOW_DURATION"),
     "magnet": ("magnet_until", "MAGNET_DURATION"),
 }
+# Chain Lightning keeps the same rules (refresh, never stack) but lives in chain.py: start_chain and expire_chain
+# below, and its own HUD label in format_timed_powerups_hud. Its Player field is read with a default.
 
 
 def is_rare_powerup(kind: str) -> bool:
@@ -64,6 +67,7 @@ def expire_timed_effects(player: "Player", now: float) -> None:
         until = float(getattr(player, field, 0.0))
         if until > 0.0 and float(now) >= until:
             setattr(player, field, 0.0)
+    expire_chain(player, now)
 
 
 def expire_weapon_pickup(player: "Player", now: float) -> None:
@@ -124,6 +128,7 @@ def format_timed_powerups_hud(player: "Player", now: float) -> str:
         ("homing_until", "Homing"),
         ("time_slow_until", "Time Slow"),
         ("magnet_until", "Magnet"),
+        ("chain_until", "Chain"),
     )
     parts = []
     for field, label in labels:
@@ -174,6 +179,9 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
     elif p.kind == "drone":
         # Rare companion: one drone orbits for DRONE_DURATION. Re-picking only refreshes the timer; drones never stack.
         player.drone_until = max(float(getattr(player, "drone_until", 0.0)), now + DRONE_DURATION)
+    elif p.kind == "chain":
+        # Chain Lightning: refreshes, never stacks. The rules live in chain.py.
+        start_chain(player, now)
     elif p.kind in TIMED_POWERUPS:
         # Refresh, never stack: picking one up again restarts its full duration.
         field, duration_name = TIMED_POWERUPS[p.kind]

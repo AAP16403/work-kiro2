@@ -26,6 +26,10 @@ class Particle:
     kind: str = "dot"
     # Rings/glows: seconds before the effect becomes visible (for staggering).
     delay: float = 0.0
+    # Rings: width/height ratio of the drawn ring. 1.0 is a screen circle; ground rings use the iso ratio.
+    aspect: float = 1.0
+    # Rings: False holds the ring at full size and only fades it (reduced motion), instead of growing it.
+    grow: bool = True
 
 _RING_TEX_SIZE = 128
 _GLOW_TEX_SIZE = 64
@@ -237,7 +241,8 @@ class ParticleSystem:
             p = pos + Vec2(math.cos(ang) * r, math.sin(ang) * r)
             self.emit(p, color, count=1, speed=25.0, life=0.35, size=2.0)
 
-    def _add_ring(self, pos: Vec2, color: tuple[int, int, int], max_radius: float, ttl: float, delay: float = 0.0):
+    def _add_ring(self, pos: Vec2, color: tuple[int, int, int], max_radius: float, ttl: float, delay: float = 0.0,
+                  aspect: float = 1.0, grow: bool = True):
         """Queue one expanding ring. It takes a single particle slot and never moves."""
         if self._capped_count(1) <= 0:
             return
@@ -254,7 +259,21 @@ class ParticleSystem:
             decay=False,
             kind="ring",
             delay=delay,
+            aspect=float(aspect),
+            grow=bool(grow),
         ))
+
+    def add_ground_ring(self, pos: Vec2, color: tuple[int, int, int], world_radius: float, ttl: float,
+                        delay: float = 0.0, grow: bool = True):
+        """Ring on the iso ground: the screen image of a world circle of ``world_radius``.
+
+        A world circle projects to an ellipse with horizontal semi-axis world_radius * sqrt(2) * ISO_SCALE_X and
+        vertical semi-axis world_radius * sqrt(2) * ISO_SCALE_Y, so the drawn ring matches the world radius exactly.
+        """
+        sx = float(config.ISO_SCALE_X)
+        aspect = float(config.ISO_SCALE_Y) / sx if sx > 0.0 else 1.0
+        screen_r = float(world_radius) * math.sqrt(2.0) * sx
+        self._add_ring(pos, color, screen_r, ttl, delay=delay, aspect=aspect, grow=grow)
 
     def _add_glow(self, pos: Vec2, color: tuple[int, int, int], radius: float, ttl: float):
         """Queue one short soft glow disc (flash). It takes a single particle slot."""
@@ -410,20 +429,27 @@ class ParticleSystem:
                 fade = 1.0 - prog
                 sx, sy = to_iso(p.pos, shake)
                 if kind == "ring":
-                    radius = p.size * (1.0 - fade * fade)  # ease-out growth
+                    if p.grow:
+                        radius = p.size * (1.0 - fade * fade)  # ease-out growth
+                    else:
+                        radius = p.size  # reduced motion: the ring holds its size and fades
                     sp = self._pooled_sprite(self._ring_sprites, ring_i, "ring")
                     ring_i += 1
                     scale = radius / _RING_PEAK_PX
                     alpha = fade ** 0.8
+                    sp.x = sx
+                    sp.y = sy
+                    sp.scale_x = max(0.02, scale)
+                    sp.scale_y = max(0.02, scale * p.aspect)
                 else:
                     radius = p.size * (0.55 + 0.45 * prog)  # quick swell
                     sp = self._pooled_sprite(self._glow_sprites, glow_i, "glow")
                     glow_i += 1
                     scale = radius / _GLOW_PEAK_PX
                     alpha = fade ** 1.5
-                sp.x = sx
-                sp.y = sy
-                sp.scale = max(0.02, scale)
+                    sp.x = sx
+                    sp.y = sy
+                    sp.scale = max(0.02, scale)
                 sp.opacity = int(255 * alpha)
                 sp.color = p.color
 

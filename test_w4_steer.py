@@ -291,11 +291,20 @@ def test_dead_worker_falls_back_and_releases_everything():
 
 
 def test_default_is_off_and_threshold_is_measured():
-    assert config.PARALLEL_STEER_ENABLED is False, "the batch path must stay off by default"
+    # The batch path ships off (config.py: quiet bench, no clear win). The threshold is still the measured
+    # crossover. The pool itself starts lazily, so asking for the batcher starts no worker.
+    assert config.PARALLEL_STEER_ENABLED is False, "the batch path ships off until a quiet bench shows a win"
     assert config.PARALLEL_MIN_ENEMIES == 16 == config.PARALLEL_STEER_MIN_ENEMIES
     parallel.set_batcher(None)
-    assert parallel.active_batcher() is None
-    print("[PASS] test_default_is_off_and_threshold_is_measured passed (flag off, threshold 16)")
+    assert parallel.active_batcher() is None, "with the flag off the game must not get a batcher"
+    config.PARALLEL_STEER_ENABLED = True
+    try:
+        parallel.set_batcher(None)
+        assert parallel.active_batcher() is not None, "with the flag on the batcher is created lazily"
+    finally:
+        config.PARALLEL_STEER_ENABLED = False
+        parallel.close_batcher()
+    print("[PASS] test_default_is_off_and_threshold_is_measured passed (flag off, threshold 16, batcher on demand)")
 
 
 def test_shutdown_leaves_no_worker_or_segment():

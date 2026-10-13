@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import functools
 import math
 import random
+import time
 
 import pyglet
 from pyglet import shapes
@@ -11,18 +13,23 @@ from pyglet.graphics import Group
 
 import config
 import utils
+from anim import Pool, clamp, tween
 from config import ENEMY_COLORS, POWERUP_COLORS, SCREEN_H, SHIELD_MAX
 from drone_art import DroneArt
 from enemy import brute_charge_lane
+from enemy_behaviors.chase import LUNGE_WINDUP_S
+from enemy_behaviors.charger import Charger
+from enemy_behaviors.flyer import Flyer
 from event_visuals import ArenaEventFx
 from glow import DashAfterimage, GlowPool, projectile_glow
-from juice import JuiceOverlay, apply_hit_squash
+from juice import SQUASH_STEP, JuiceOverlay, squash_level
 from player_art import DEFAULT_PALETTE, PlayerArt
 from powerup_art import make_pickup_art, place_pickup_art
-from projectile_art import ProjectileVisual
+from projectile_art import ProjectileVisual, ShotBank
 from skin_apply import LEGACY_PALETTE, aura_outer, complete_palette
 from starfield import Starfield
 from utils import to_iso, Vec2, enemy_behavior_name
+from anim import Pool
 import motion
 
 # Reduce group churn by bucketing depth values.
@@ -34,16 +41,55 @@ DEPTH_BUCKET = 16
 RADIUS_STEP = 0.5
 
 
-def _set_radius(shape, value: float) -> None:
-    """Write a shape's radius only when its quantised value changes. Never writes zero for a positive value."""
+def _quantise_radius(value: float) -> float:
+    """The radius a shape is written with: a RADIUS_STEP multiple, never zero for a positive value."""
     value = float(value)
     quantised = round(value / RADIUS_STEP) * RADIUS_STEP
     if quantised <= 0.0 < value:
         quantised = RADIUS_STEP
+    return quantised
+
+
+def _set_radius(shape, value: float) -> None:
+    """Write a shape's radius only when its quantised value changes. Never writes zero for a positive value."""
+    quantised = _quantise_radius(value)
     if getattr(shape, "_written_radius", None) == quantised:
         return
     shape._written_radius = quantised
     shape.radius = quantised
+
+
+# Built Arc vertex lists for the scene rings, keyed by (ring index, quantised radius). pyglet builds an Arc's
+# quads in pure Python (about 3 ms for 128 segments), and each ring's pulse only ever lands on a few dozen
+# quantised radii, so every geometry is built once and copied into the vertex list after that. The list is what
+# Arc._get_vertices() returns for that radius, so the drawn geometry is unchanged.
+_SCENE_RING_VERTS: dict[tuple[int, float], list] = {}
+
+
+def _set_scene_ring_radius(ring, index: int, value: float) -> None:
+    """_set_radius for a scene ring, reusing the cached vertex list for a radius it has already built."""
+    quantised = _quantise_radius(value)
+    if getattr(ring, "_written_radius", None) == quantised:
+        return
+    ring._written_radius = quantised
+    ring._radius = quantised  # what the radius setter stores before it rebuilds the vertices
+    key = (index, quantised)
+    verts = _SCENE_RING_VERTS.get(key)
+    if verts is None:
+        verts = _SCENE_RING_VERTS[key] = ring._get_vertices()
+    ring._vertex_list.position[:] = verts
+
+
+def _set_opacity(shape, value: int) -> None:
+    """Write opacity only when it changes. Every opacity write re-uploads the shape's colour buffer."""
+    if shape.opacity != value:
+        shape.opacity = value
+
+
+def _set_position(shape, x: float, y: float) -> None:
+    """Write a shape's position in one upload, and only when it moved."""
+    if shape.x != x or shape.y != y:
+        shape.position = (x, y)
 
 
 # Indexes of the eye shapes inside each enemy handle (see Visuals.ensure_enemy). The eye glows read them.
@@ -61,6 +107,278 @@ def _eye_slots(behavior: str) -> tuple:
     return _EYE_SLOTS.get(behavior, _GENERIC_EYE_SLOTS)
 
 
+# ---------------------------------------------------------------- enemy animation
+# Visual only. Everything below reads enemy state and draws it; none of it writes back to the enemy.
+# Reduced motion (config.REDUCE_MOTION) stops the oscillators (motion.clock gives 0), skips the spawn
+# ease and the death motes, and removes the hit squash. The windup tint and scale stay as a fixed pose,
+# so the telegraph is still drawn.
+
+SPAWN_TIME_S = 0.32          # enemy.t seconds over which a new enemy pops in
+SPAWN_FROM_SCALE = 0.3       # body scale at spawn, eased up with out_back (a small overshoot, then settles)
+WINDUP_SCALE_GAIN = 0.10     # body grows by up to this share over a windup
+WINDUP_PULSE_GAIN = 0.04     # extra growth on each pulse
+WINDUP_TINT_STEPS = 8        # tints are precomputed in this many steps, so a frame indexes a tuple
+WINDUP_WARN_COLOUR = (255, 120, 70)
+ATTACK_WINDOW_S = 0.3        # attack_cd inside this window (before the shot) reads as a windup
+BRUTE_TELEGRAPH_S = 1.0      # brute_timer when its telegraph starts (enemy.py)
+LASER_CHARGE_S = 0.75        # laser_timer during the laser's charge (enemy.py)
+CHARGER_WINDUP_S = Charger().windup_time
+FLYER_WINDUP_S = Flyer().windup_time
+
+# Idle bob per enemy type: (angular speed rad/s, amplitude px). The original single bob is the default.
+_BOB_DEFAULT = (6.0, 1.5)
+_BOB = {
+    "chaser": (7.5, 1.6),
+    "charger": (9.0, 1.4),
+    "flyer": (5.0, 3.0),
+    "tank": (3.0, 1.0),
+    "swarm": (11.0, 1.2),
+    "bomber": (4.0, 2.2),
+    "spitter": (4.5, 1.2),
+    "ranged": (3.5, 0.9),
+    "engineer": (5.5, 1.0),
+    "egg_sac": (2.5, 1.0),
+    "boss_thunder": (3.0, 2.2),
+    "boss_laser": (3.0, 2.2),
+    "boss_trapmaster": (3.0, 2.2),
+    "boss_swarmqueen": (3.0, 2.2),
+    "boss_brute": (3.0, 2.2),
+}
+
+DISSOLVE_CAP = 96            # pooled motes shared by every dying enemy; a death past the cap skips its motes
+DISSOLVE_ORDER = 14500       # above enemies and projectiles (14000), below the Ultra flash (15500)
+_MOTE_SEGMENTS = 6
+_MOTE_DRAG = 2.5             # per-second drag on a mote's velocity
+_MOTE_MAX_DT = 0.05          # a frame hitch must not fling motes across the screen
+
+
+def _idle_bob(behavior: str, et: float) -> float:
+    freq, amp = _BOB.get(behavior, _BOB_DEFAULT)
+    return math.sin(et * freq) * amp
+
+
+def _windup_ramp(remaining: float, duration: float) -> float:
+    """0 when a windup has just started, 1 when its timer is about to release the attack."""
+    if duration <= 0.0:
+        return 1.0
+    return clamp(1.0 - float(remaining) / duration, 0.0, 1.0)
+
+
+def _windup_strength(enemy, behavior: str, ai: dict) -> float:
+    """How far an enemy is into its attack windup, 0 to 1. Read-only: it reads the timers the AI already keeps."""
+    if behavior == "chaser":
+        w = float(ai.get("lunge_windup", 0.0))
+        return _windup_ramp(w, LUNGE_WINDUP_S) if w > 0.0 else 0.0
+    if behavior == "charger" and ai.get("state") == "WINDUP":
+        return _windup_ramp(ai.get("state_timer", 0.0), CHARGER_WINDUP_S)
+    if behavior == "flyer" and ai.get("state") == "WINDUP":
+        return _windup_ramp(ai.get("state_timer", 0.0), FLYER_WINDUP_S)
+    if behavior == "boss_brute" and ai.get("brute_state") == "telegraph":
+        return _windup_ramp(ai.get("brute_timer", 0.0), BRUTE_TELEGRAPH_S)
+    if behavior == "boss_laser" and ai.get("laser_state") == "charge":
+        return _windup_ramp(ai.get("laser_timer", 0.0), LASER_CHARGE_S)
+    if behavior == "bomber" and ai.get("bomber_exploding"):
+        return 1.0
+    # Ranged, spitter, engineer, tank and bomber fire when attack_cd runs out. The last moments before
+    # that shot are their windup.
+    cd = float(getattr(enemy, "attack_cd", 0.0))
+    if 0.0 < cd <= ATTACK_WINDOW_S:
+        return 1.0 - cd / ATTACK_WINDOW_S
+    return 0.0
+
+
+def _mix(a, b, f: float) -> tuple:
+    """Colour f of the way from a to b, as an RGB tuple. Used only at enemy creation, to build tint tables."""
+    return (
+        int(round(a[0] + (b[0] - a[0]) * f)),
+        int(round(a[1] + (b[1] - a[1]) * f)),
+        int(round(a[2] + (b[2] - a[2]) * f)),
+    )
+
+
+@functools.lru_cache(maxsize=1024)
+def _body_positions(segments: int, radius: float, level: int, anchor_x: float, anchor_y: float) -> tuple:
+    """Vertex positions of a pyglet Circle at ``radius``, squashed by ``level`` (juice's SQUASH_STEP units).
+
+    Same triangle-fan layout as pyglet's Circle._get_vertices, with the squash applied the way juice's
+    hit squash applies it (width up, height down by the reciprocal, so the area holds). Level 0 is the rest
+    shape. Cached on its inputs, so a radius or squash that comes back costs a lookup, not a rebuild.
+    """
+    s = level * SQUASH_STEP
+    sx = 1.0 + s
+    sy = 1.0 / sx
+    x0 = -anchor_x
+    y0 = -anchor_y
+    step = math.tau / segments
+    pts = [(x0 + radius * sx * math.cos(i * step), y0 + radius * sy * math.sin(i * step)) for i in range(segments)]
+    verts: list[float] = []
+    for i in range(segments):
+        px, py = pts[i - 1]
+        cx, cy = pts[i]
+        verts.extend((x0, y0, px, py, cx, cy))
+    return tuple(verts)
+
+
+def _write_body(shape, pose, radius: float, level: int) -> None:
+    """Draw a Circle body at ``radius`` with ``level`` squash, writing its vertices only when that changes.
+
+    pyglet's radius setter rebuilds the circle with trigonometry on every call, so a scale that changes
+    each frame pays that for every enemy. This writes a cached vertex tuple instead, and keeps the shape's
+    ``radius`` in step, so pyglet's own readers still see the drawn size. Radii are quantised like
+    _set_radius, so a pulse does not rewrite the body on every frame.
+    """
+    r = round(float(radius) / RADIUS_STEP) * RADIUS_STEP
+    if r <= 0.0 < radius:
+        r = RADIUS_STEP
+    if pose.drawn_r == r and pose.drawn_level == level:
+        return
+    pose.drawn_r = r
+    pose.drawn_level = level
+    shape._radius = r
+    if shape._visible:
+        shape._vertex_list.position[:] = _body_positions(shape._segments, r, level, float(shape._anchor_x), float(shape._anchor_y))
+
+
+class _EnemyPose:
+    """Animation state kept beside an enemy's shapes. Built once in ensure_enemy; a frame only writes fields.
+
+    ``body`` is the shape that scales and squashes. ``body_r`` is its rest radius. ``drawn_r``/``drawn_level``
+    are what the body was last written with, so an unchanged frame writes nothing. ``warn_tints`` is the
+    windup colour ramp for this enemy's base colour. ``col`` is the colour drawn last frame, which a death
+    reuses for its motes. ``cx``/``cy`` is the body centre, and ``reach`` its radius, for the same reason.
+    """
+
+    __slots__ = ("body", "body_r", "drawn_r", "drawn_level", "warn_tints", "col", "cx", "cy", "reach")
+
+    def __init__(self, body, base, cx: float, cy: float):
+        self.body = body
+        self.body_r = float(body.radius)
+        self.drawn_r = None
+        self.drawn_level = None
+        self.warn_tints = tuple(_mix(base, WINDUP_WARN_COLOUR, i / float(WINDUP_TINT_STEPS)) for i in range(WINDUP_TINT_STEPS + 1))
+        self.col = base
+        self.cx = float(cx)
+        self.cy = float(cy)
+        self.reach = self.body_r
+
+
+class _Mote:
+    """One dissolve particle. Its shape is created once and reused through the pool."""
+
+    __slots__ = ("shape", "x", "y", "vx", "vy", "age", "life", "r0", "alpha")
+
+    def __init__(self, shape):
+        self.shape = shape
+        self.x = 0.0
+        self.y = 0.0
+        self.vx = 0.0
+        self.vy = 0.0
+        self.age = 0.0
+        self.life = 1.0
+        self.r0 = 1.0
+        self.alpha = -1
+
+
+class _EnemyDissolve:
+    """Death dissolve: a burst of pooled motes that drift out and fade.
+
+    Motes are created lazily, up to DISSOLVE_CAP, and reused afterwards, so a burst allocates no shapes
+    once the pool is warm. The motes move in real time on pyglet's clock. That clock only runs while
+    motes are alive, so an idle game schedules nothing. A private RNG keeps the gameplay RNG untouched.
+    """
+
+    def __init__(self, batch):
+        self._batch = batch
+        self._group = Group(order=DISSOLVE_ORDER)
+        self._rng = random.Random(0x0D155)
+        self._pool = Pool(self._make_mote, DISSOLVE_CAP, reset=self._hide_mote)
+        self._live: list[_Mote] = []
+        self._armed = False
+
+    @property
+    def pool(self) -> Pool:
+        return self._pool
+
+    @property
+    def live_count(self) -> int:
+        return len(self._live)
+
+    def _make_mote(self) -> _Mote:
+        sh = shapes.Circle(0.0, 0.0, 2.0, segments=_MOTE_SEGMENTS, color=(255, 255, 255), batch=self._batch, group=self._group)
+        sh.opacity = 0
+        return _Mote(sh)
+
+    @staticmethod
+    def _hide_mote(m: _Mote) -> None:
+        m.shape.opacity = 0
+        m.alpha = -1
+
+    def burst(self, x: float, y: float, color, count: int, reach: float, boost: float = 1.0) -> int:
+        """Start up to ``count`` motes at (x, y). Returns how many the pool could give."""
+        rng = self._rng
+        started = 0
+        for _ in range(int(count)):
+            m = self._pool.acquire()
+            if m is None:
+                break
+            theta = rng.uniform(0.0, math.tau)
+            speed = rng.uniform(40.0, 120.0) * boost
+            m.x = x + rng.uniform(-reach, reach) * 0.7
+            m.y = y + rng.uniform(-reach, reach) * 0.7
+            m.vx = math.cos(theta) * speed
+            m.vy = math.sin(theta) * speed * 0.6 + 35.0
+            m.age = 0.0
+            m.life = rng.uniform(0.34, 0.55)
+            m.r0 = rng.uniform(1.6, 3.4) * (1.25 if boost > 1.0 else 1.0)
+            sh = m.shape
+            sh.color = color
+            sh.position = (m.x, m.y)
+            _set_radius(sh, m.r0)
+            sh.opacity = 255
+            m.alpha = 255
+            self._live.append(m)
+            started += 1
+        if started and not self._armed:
+            pyglet.clock.schedule(self.tick)
+            self._armed = True
+        return started
+
+    def tick(self, dt: float) -> None:
+        """Advance every live mote by dt seconds. Scheduled on pyglet's clock while any mote is alive."""
+        live = self._live
+        if motion.reduced():
+            self._pool.release_all()
+            live.clear()
+        dt = min(max(0.0, float(dt)), _MOTE_MAX_DT)
+        i = 0
+        while i < len(live):
+            m = live[i]
+            m.age += dt
+            if m.age >= m.life:
+                self._pool.release(m)
+                last = live.pop()  # swap-remove keeps the list in place, with no new list per frame
+                if i < len(live):
+                    live[i] = last
+                continue
+            m.x += m.vx * dt
+            m.y += m.vy * dt
+            drag = 1.0 - _MOTE_DRAG * dt
+            m.vx *= drag
+            m.vy *= drag
+            p = m.age / m.life
+            sh = m.shape
+            sh.position = (m.x, m.y)  # one translation write per frame, not one per axis
+            _set_radius(sh, m.r0 * (1.0 - 0.6 * p))
+            alpha = int(255.0 * (1.0 - p) * (1.0 - p)) & ~15  # 16 alpha steps: a colour rewrite is costly
+            if alpha != m.alpha:
+                sh.opacity = alpha
+                m.alpha = alpha
+            i += 1
+        if not live and self._armed:
+            pyglet.clock.unschedule(self.tick)
+            self._armed = False
+
+
 class GroupCache:
     """Cache for rendering groups for depth sorting."""
 
@@ -75,12 +393,84 @@ class GroupCache:
         return g
 
 
+# Shape attributes a pooled handle restores when it is taken again. Positions are included so a shape the sync
+# code does not place each frame still starts where a new shape would.
+_REST_ATTRS = ("x", "y", "x2", "y2", "x3", "y3", "rotation", "anchor_x", "anchor_y",
+               "radius", "thickness", "width", "height", "opacity", "color")
+_POOL_CAP = 4096  # per recipe; a pool that reaches it falls back to building an unpooled handle
+
+# Enemy handles are pooled only when this is True. A pooled handle keeps its old place in the batch's vertex
+# buffer, and pyglet draws same-depth-bucket shapes in buffer order, so pooling enemies changes which of two
+# overlapping enemies' thin shapes draws on top. On the scripted runs of tools/bench_frames.py (waves 1, 8, 15,
+# 22, 29; 600 frames each) that changed 161 of 3000 frames, by 13 to 21 pixels each. Off keeps every frame
+# identical to the wave 4 base.
+POOL_ENEMY_HANDLES = False
+# Powerup handles, label included, follow the same rule: pooled handles keep their old buffer slots. Off by
+# default. A pooled pickup skips about 3.5 ms of pyglet Label construction on each spawn.
+POOL_POWERUP_HANDLES = False
+
+
+def _rest_state(shape) -> dict:
+    """The creation-time values of a shape's public state, read once when its handle is first built."""
+    rest = {}
+    for name in _REST_ATTRS:
+        try:
+            rest[name] = getattr(shape, name)
+        except AttributeError:
+            pass  # not a property on this shape type
+    return rest
+
+
+def _apply_rest(shape, rest: dict) -> None:
+    """Put a shape back in its creation state. Only values that differ are written, so an unchanged geometry
+    is not rebuilt. A radius a hit squash overwrote is rebuilt even when the radius itself is unchanged."""
+    for name, value in rest.items():
+        try:
+            if getattr(shape, name) != value:
+                setattr(shape, name, value)
+        except AttributeError:
+            pass  # a read-only property (a label's width, for one)
+    if getattr(shape, "_juice_level", 0):
+        shape._juice_level = 0
+        shape.radius = shape.radius  # the squash wrote the vertices directly; the radius setter rebuilds them
+    if "_written_radius" in vars(shape):
+        del shape._written_radius  # the next _set_radius writes again, as it would on a new shape
+
+
+def _hide_handle(h: RenderHandle) -> None:
+    """Pool reset: make every shape draw nothing. Alpha 0 leaves the framebuffer as it was under the blend
+    the shapes use, and it costs one colour write per shape. The handle is restored when it is next taken."""
+    h.dirty = True
+    for shape in h.objs:
+        if shape.opacity != 0:
+            shape.opacity = 0
+    pose = getattr(h, "pose", None)
+    if pose is not None:
+        # The next life starts from rest: _write_body must write again, and the body's hit squash is undone
+        # here, since the radius setter rebuilds the vertices that _write_body wrote directly.
+        pose.drawn_r = None
+        pose.drawn_level = None
+        pose.body.radius = pose.body_r
+
+
+def _make_pooled(build):
+    """The factory for a recipe's pool: build a handle and capture its creation state."""
+    def make():
+        h = build()
+        h.rest = [_rest_state(shape) for shape in h.objs]
+        return h
+    return make
+
+
 class RenderHandle:
     """Handle for managing render objects."""
 
     def __init__(self, *objs):
         self.objs = list(objs)
         self._depth_order = None
+        self.pool = None   # the anim.Pool that owns this handle, when it was taken from one
+        self.rest = None   # each shape's creation state, captured once when a pooled handle is built
+        self.dirty = False  # True once a pooled handle has been released and must be restored before reuse
 
     def set_group(self, group):
         if group is None:
@@ -112,7 +502,9 @@ class Visuals:
         self._flash_group = Group(order=15500)  # Ultra flash: above the particle rings (15000)
 
         self._enemy_handles: dict[int, RenderHandle] = {}
+        self._handle_pools: dict[str, Pool] = {}  # one pool per enemy behaviour and per powerup kind
         self._proj_handles: dict[int, RenderHandle] = {}
+        self._shot_bank = ShotBank(self.batch)  # projectile quads: pooled, so a new shot creates no GPU objects
         self._power_handles: dict[int, RenderHandle] = {}
         self._obstacle_handles: dict[int, RenderHandle] = {}
         self._trap_handles: dict[int, RenderHandle] = {}
@@ -136,6 +528,7 @@ class Visuals:
         self._starfield = Starfield(batch, order=config.STARFIELD_LAYER_ORDER) if config.ENABLE_PARALLAX_STARS else None
         self._glow_pool = GlowPool(batch, cap=config.GLOW_POOL_CAP, order=config.GLOW_LAYER_ORDER)
         self._afterimage = DashAfterimage()
+        self._dissolve = _EnemyDissolve(self.batch)  # enemy death motes (pooled, see _EnemyDissolve)
 
     def _init_scene_fx(self) -> None:
         self._scene_glows = [
@@ -177,6 +570,33 @@ class Visuals:
             vg = shapes.Rectangle(0, 0, 1, 1, color=(0, 0, 0), batch=self.batch, group=self._overlay_group)
             vg.opacity = 0
             self._vignette.append(vg)
+        self._vignette_placed = False  # sync_scene writes the bars' geometry once, on its first call
+
+    def _take(self, key: str, build) -> RenderHandle:
+        """A handle for ``key``: a released one from its pool when there is one, otherwise a new one.
+
+        A reused handle is restored to its creation state, then its sync call places and colours it, exactly
+        as it would place a new handle. ``build`` makes a new handle when the pool is empty or full.
+        """
+        pool = self._handle_pools.get(key)
+        if pool is None:
+            pool = self._handle_pools[key] = Pool(_make_pooled(build), cap=_POOL_CAP, reset=_hide_handle)
+        h = pool.acquire()
+        if h is None:
+            return build()
+        h.pool = pool
+        if h.dirty:
+            for shape, rest in zip(h.objs, h.rest):
+                _apply_rest(shape, rest)
+            h.dirty = False
+        return h
+
+    def _give_back(self, h: RenderHandle) -> None:
+        """Release a handle: back to its pool when it has one, deleted otherwise."""
+        if h.pool is None:
+            h.delete()
+        else:
+            h.pool.release(h)
 
     def _set_depth(self, handle: RenderHandle, y: float, shake: Vec2) -> None:
         # ``y`` is the shaken screen y. Remove the frame's shake offset first so depth
@@ -191,42 +611,47 @@ class Visuals:
         center_x, center_y = to_iso(Vec2(0.0, 0.0), shake)
         ci = max(0.0, min(1.0, float(combat_intensity)))
 
+        # Every write below is skipped when the value is unchanged, and each shape that moves gets one position
+        # write instead of two. Skipping a write that would store the same value leaves the same vertex data.
         offsets = ((-220.0, 120.0), (210.0, -60.0), (30.0, 190.0))
         for i, glow in enumerate(self._scene_glows):
             ox, oy = offsets[i]
-            glow.x = center_x + ox + math.sin(ta * (0.25 + i * 0.07)) * 30.0
-            glow.y = center_y + oy + math.cos(ta * (0.22 + i * 0.09)) * 24.0
-            glow.opacity = int((14 + i * 6) + (16 + i * 4) * (0.5 + 0.5 * math.sin(ta * (0.7 + i * 0.2))))
+            _set_position(glow, center_x + ox + math.sin(ta * (0.25 + i * 0.07)) * 30.0,
+                          center_y + oy + math.cos(ta * (0.22 + i * 0.09)) * 24.0)
+            _set_opacity(glow, int((14 + i * 6) + (16 + i * 4) * (0.5 + 0.5 * math.sin(ta * (0.7 + i * 0.2)))))
 
         for i, ring in enumerate(self._scene_rings):
-            ring.x = center_x
-            ring.y = center_y
-            _set_radius(ring, (180 + i * 42) + 6.0 * math.sin(ta * (0.8 + i * 0.3)))
-            ring.opacity = int(16 + 10 * i + (8 + 10 * ci) * (0.5 + 0.5 * math.sin(ta * (1.1 + i * 0.15))))
+            _set_position(ring, center_x, center_y)
+            _set_scene_ring_radius(ring, i, (180 + i * 42) + 6.0 * math.sin(ta * (0.8 + i * 0.3)))
+            _set_opacity(ring, int(16 + 10 * i + (8 + 10 * ci) * (0.5 + 0.5 * math.sin(ta * (1.1 + i * 0.15)))))
 
         for star, vx, vy, phase in self._scene_stars:
-            star.x += vx * (0.22 + ci * 0.6) * drift
-            star.y += vy * (0.22 + ci * 0.6) * drift
-            if star.x < -24:
-                star.x = 1944
-            elif star.x > 1944:
-                star.x = -24
-            if star.y < -24:
-                star.y = 1104
-            elif star.y > 1104:
-                star.y = -24
-            star.opacity = int(14 + 64 * (0.5 + 0.5 * math.sin(ta * 1.4 + phase)))
+            x = star.x + vx * (0.22 + ci * 0.6) * drift
+            y = star.y + vy * (0.22 + ci * 0.6) * drift
+            if x < -24:
+                x = 1944
+            elif x > 1944:
+                x = -24
+            if y < -24:
+                y = 1104
+            elif y > 1104:
+                y = -24
+            _set_position(star, x, y)
+            _set_opacity(star, int(14 + 64 * (0.5 + 0.5 * math.sin(ta * 1.4 + phase))))
 
+        # The vignette bars never move or resize: their geometry is written on the first sync only.
         top, bot, left, right = self._vignette
-        top.x, top.y, top.width, top.height = 0, 1048, 1920, 32
-        bot.x, bot.y, bot.width, bot.height = 0, 0, 1920, 32
-        left.x, left.y, left.width, left.height = 0, 0, 38, 1080
-        right.x, right.y, right.width, right.height = 1882, 0, 38, 1080
+        if not self._vignette_placed:
+            top.x, top.y, top.width, top.height = 0, 1048, 1920, 32
+            bot.x, bot.y, bot.width, bot.height = 0, 0, 1920, 32
+            left.x, left.y, left.width, left.height = 0, 0, 38, 1080
+            right.x, right.y, right.width, right.height = 1882, 0, 38, 1080
+            self._vignette_placed = True
         v_op = int(22 + 18 * ci)
-        top.opacity = v_op
-        bot.opacity = v_op
-        left.opacity = int(v_op * 0.8)
-        right.opacity = int(v_op * 0.8)
+        _set_opacity(top, v_op)
+        _set_opacity(bot, v_op)
+        _set_opacity(left, int(v_op * 0.8))
+        _set_opacity(right, int(v_op * 0.8))
 
     def apply_skin(self, run_skin) -> None:
         """Dress the character and the player's shots in the run's skin (skin_apply.RunSkin).
@@ -264,6 +689,8 @@ class Visuals:
         """Emit this frame's additive glows: projectile heads, pickups, enemy eyes, the player thruster
         and the dash afterimage. Call it after the other sync_* calls so the glows read final positions.
         ENABLE_GLOW and ENABLE_DASH_AFTERIMAGE switch the two groups off separately."""
+        # Upload the projectile quads once, after every projectile sync this frame has run.
+        self._shot_bank.flush()
         pool = self._glow_pool
         pool.begin_frame()
         if config.ENABLE_GLOW:
@@ -390,8 +817,13 @@ class Visuals:
             self.make_player()
         ta = motion.clock(t)  # visual pulses only; the laser check below keeps the real time
         if self._player_art is not None:
-            cx, cy = self._player_art.sync(player, shake, t=ta, aim_dir=aim_dir, palette=self.player_palette)
-            self._set_depth(self._player_handle, cy, shake)
+            # PlayerArt scales its own idle pulses with motion.clock, and needs the game clock for dashes and
+            # the laser. real_t is wall time, so the death dissolve runs even though the game clock stops at game over.
+            self._player_art.sync(player, shake, t=t, aim_dir=aim_dir, palette=self.player_palette,
+                                  real_t=time.perf_counter())
+            # Depth follows the ground point. The body bobs and recoils, so sorting by its y would move the
+            # handle across depth buckets on every bob near an edge, and each move migrates the handle's shapes.
+            self._set_depth(self._player_handle, self._player_art.ground_y, shake)
             return
         assert self._player_handle is not None
         (
@@ -520,12 +952,30 @@ class Visuals:
             self._set_depth(self._drone_handle, cy, shake)
 
     def ensure_enemy(self, enemy):
-        """Ensure enemy visual exists."""
+        """Ensure enemy visual exists, with the pose that drives its spawn-in, windup and dissolve.
+        With POOL_ENEMY_HANDLES the handle comes from its behaviour's pool."""
         if id(enemy) in self._enemy_handles:
             return
         behavior = enemy_behavior_name(enemy)
-        base = ENEMY_COLORS.get(behavior, (200, 120, 120))
+        if POOL_ENEMY_HANDLES:
+            h = self._take("enemy:" + behavior, lambda: self._build_enemy(behavior))
+        else:
+            h = self._build_enemy(behavior)
+        cx, cy = to_iso(enemy.pos, Vec2(0.0, 0.0))  # the death motes start here until the first sync
+        h.pose.cx = float(cx)
+        h.pose.cy = float(cy)
+        self._enemy_handles[id(enemy)] = h
 
+    def _build_enemy(self, behavior: str) -> RenderHandle:
+        """Create one enemy's shapes and the pose that animates them. ensure_enemy hands them out through the pool."""
+        base = ENEMY_COLORS.get(behavior, (200, 120, 120))
+        h = self._build_enemy_shapes(behavior, base)
+        body = h.objs[4 if behavior.startswith("boss_") else 1]
+        h.pose = _EnemyPose(body, base, 0.0, 0.0)
+        return h
+
+    def _build_enemy_shapes(self, behavior: str, base) -> RenderHandle:
+        """Create the shapes for one enemy type and return its handle (see _build_enemy)."""
         sh = shapes.Ellipse(0, 0, 20, 7, color=(0, 0, 0), batch=self.batch)
         sh.opacity = 110
 
@@ -543,17 +993,17 @@ class Visuals:
             if behavior == "boss_thunder":
                 sig = shapes.Line(0, 0, 0, 0, thickness=3, color=(200, 230, 255), batch=self.batch)
                 sig.opacity = 220
-                self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, sig)
+                return RenderHandle(sh, glow, ring, crown, body, sig)
             elif behavior == "boss_laser":
                 eye = shapes.Circle(0, 0, 6, color=(255, 255, 255), batch=self.batch)
                 eye.opacity = 200
                 iris = shapes.Circle(0, 0, 3, color=(255, 120, 255), batch=self.batch)
                 iris.opacity = 220
-                self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, eye, iris)
+                return RenderHandle(sh, glow, ring, crown, body, eye, iris)
             elif behavior == "boss_trapmaster":
                 gear = shapes.Arc(0, 0, 26, segments=32, thickness=5, color=(255, 210, 120), batch=self.batch)
                 gear.opacity = 120
-                self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, gear)
+                return RenderHandle(sh, glow, ring, crown, body, gear)
             elif behavior == "boss_swarmqueen":
                 orb1 = shapes.Circle(0, 0, 6, color=(255, 255, 255), batch=self.batch)
                 orb2 = shapes.Circle(0, 0, 6, color=(255, 255, 255), batch=self.batch)
@@ -561,7 +1011,7 @@ class Visuals:
                 orb1.opacity = 90
                 orb2.opacity = 90
                 orb3.opacity = 90
-                self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, orb1, orb2, orb3)
+                return RenderHandle(sh, glow, ring, crown, body, orb1, orb2, orb3)
             elif behavior == "boss_brute":
                 horn = shapes.Triangle(0, 0, 0, 0, 0, 0, color=(255, 250, 240), batch=self.batch)
                 horn.opacity = 220
@@ -570,10 +1020,9 @@ class Visuals:
                 # Charge lane: hidden except while the brute telegraphs its charge. Kept last so body_idx stays 4.
                 lane = shapes.Line(0, 0, 0, 0, thickness=4, color=(255, 70, 70), batch=self.batch)
                 lane.opacity = 0
-                self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body, horn, scar, lane)
+                return RenderHandle(sh, glow, ring, crown, body, horn, scar, lane)
             else:
-                self._enemy_handles[id(enemy)] = RenderHandle(sh, glow, ring, crown, body)
-            return
+                return RenderHandle(sh, glow, ring, crown, body)
 
         if behavior == "bomber":
             body = shapes.Circle(0, 0, 14, color=base, batch=self.batch)
@@ -584,8 +1033,7 @@ class Visuals:
             fuse.opacity = 220
             fuse_trail = shapes.Arc(0, 0, 16, segments=20, thickness=2, color=(255, 180, 80), batch=self.batch)
             fuse_trail.opacity = 60
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, core, fuse, fuse_trail)
-            return
+            return RenderHandle(sh, body, core, fuse, fuse_trail)
 
         if behavior == "tank":
             sh.width = 28
@@ -601,8 +1049,7 @@ class Visuals:
             # Rotating outer shield ring
             shield_ring = shapes.Arc(0, 0, 22, segments=24, thickness=3, color=(80, 180, 80), batch=self.batch)
             shield_ring.opacity = 70
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, armor, plate, eye, shield_ring)
-            return
+            return RenderHandle(sh, body, armor, plate, eye, shield_ring)
 
         if behavior == "ranged":
             body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
@@ -618,8 +1065,7 @@ class Visuals:
             scope_v = shapes.Line(0, 0, 0, 0, thickness=1, color=(180, 220, 255), batch=self.batch)
             scope_h.opacity = 100
             scope_v.opacity = 100
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, cannon, muzzle, eye, scope_h, scope_v)
-            return
+            return RenderHandle(sh, body, cannon, muzzle, eye, scope_h, scope_v)
 
         if behavior == "charger":
             body = shapes.Circle(0, 0, 13, color=base, batch=self.batch)
@@ -633,8 +1079,7 @@ class Visuals:
             trail2 = shapes.Line(0, 0, 0, 0, thickness=2, color=(255, 200, 100), batch=self.batch)
             trail1.opacity = 0
             trail2.opacity = 0
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, horn1, horn2, eye, trail1, trail2)
-            return
+            return RenderHandle(sh, body, horn1, horn2, eye, trail1, trail2)
 
         if behavior == "flyer":
             body = shapes.Circle(0, 0, 11, color=base, batch=self.batch)
@@ -648,8 +1093,7 @@ class Visuals:
             # Jet trail
             jet = shapes.Line(0, 0, 0, 0, thickness=3, color=(150, 200, 255), batch=self.batch)
             jet.opacity = 90
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, wing1, wing2, tail, eye, jet)
-            return
+            return RenderHandle(sh, body, wing1, wing2, tail, eye, jet)
 
         if behavior == "spitter":
             body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
@@ -662,8 +1106,7 @@ class Visuals:
             # Pulsing acid glow
             acid_glow = shapes.Circle(0, 0, 16, color=(180, 255, 80), batch=self.batch)
             acid_glow.opacity = 25
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, sac1, sac2, mouth, acid_glow)
-            return
+            return RenderHandle(sh, body, sac1, sac2, mouth, acid_glow)
 
         if behavior == "swarm":
             sh.width = 16
@@ -680,8 +1123,7 @@ class Visuals:
             ant2 = shapes.Line(0, 0, 0, 0, thickness=1, color=(255, 200, 255), batch=self.batch)
             ant1.opacity = 110
             ant2.opacity = 110
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, dot1, dot2, dot3, ant1, ant2)
-            return
+            return RenderHandle(sh, body, dot1, dot2, dot3, ant1, ant2)
 
         if behavior == "chaser":
             body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
@@ -696,8 +1138,7 @@ class Visuals:
             spike3.opacity = 160
             eye1 = shapes.Circle(0, 0, 2, color=(20, 20, 20), batch=self.batch)
             eye2 = shapes.Circle(0, 0, 2, color=(20, 20, 20), batch=self.batch)
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, aura, spike1, spike2, spike3, eye1, eye2)
-            return
+            return RenderHandle(sh, body, aura, spike1, spike2, spike3, eye1, eye2)
 
         if behavior == "engineer":
             body = shapes.Circle(0, 0, 13, color=base, batch=self.batch)
@@ -714,8 +1155,7 @@ class Visuals:
             # Rotating gear arc
             gear = shapes.Arc(0, 0, 17, segments=16, thickness=2, color=(80, 240, 180), batch=self.batch)
             gear.opacity = 60
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, backpack, visor, tool, tool2, gear)
-            return
+            return RenderHandle(sh, body, backpack, visor, tool, tool2, gear)
 
         if behavior == "egg_sac":
             # Organic pulsating sac
@@ -729,34 +1169,67 @@ class Visuals:
             vein2.opacity = 140
             core = shapes.Circle(0, 0, 6, color=(255, 100, 120), batch=self.batch)
             core.opacity = 180
-            self._enemy_handles[id(enemy)] = RenderHandle(sh, body, vein1, vein2, core)
-            return
+            return RenderHandle(sh, body, vein1, vein2, core)
 
         body = shapes.Circle(0, 0, 12, color=base, batch=self.batch)
         shine = shapes.Circle(0, 0, 7, color=(255, 255, 255), batch=self.batch)
         shine.opacity = 60
         eye1 = shapes.Circle(0, 0, 2, color=(20, 20, 20), batch=self.batch)
         eye2 = shapes.Circle(0, 0, 2, color=(20, 20, 20), batch=self.batch)
-        self._enemy_handles[id(enemy)] = RenderHandle(sh, body, shine, eye1, eye2)
+        return RenderHandle(sh, body, shine, eye1, eye2)
 
     def sync_enemy(self, enemy, shake: Vec2):
         """Update enemy visual position."""
         et = motion.clock(enemy.t)  # every enemy animation reads this, so reduced motion freezes it
         h = self._enemy_handles[id(enemy)]
+        pose = h.pose
+        ai = getattr(enemy, "ai", None) or {}
         behavior = enemy_behavior_name(enemy)
         base = ENEMY_COLORS.get(behavior, (200, 120, 120))
         sx, sy = to_iso(enemy.pos, shake)
-        bob = math.sin(et * 6.0) * 1.5
+        bob = _idle_bob(behavior, et)
 
-        # Hit flash & elite visual feedback
+        # Egg sacs breathe, so their body's nominal radius follows the same pulse their veins and core use.
+        if behavior == "egg_sac":
+            pulse = 0.8 + 0.2 * math.sin(et * 8.0)
+            if ai.get("hatch_timer", 0) < 1.0:
+                pulse = 0.8 + 0.3 * math.sin(et * 18.0)  # fast pulse before hatching
+            nominal = max(0.1, 15 * pulse)
+        else:
+            nominal = pose.body_r
+
+        # Spawn-in: the body eases up from SPAWN_FROM_SCALE over SPAWN_TIME_S of enemy time (gameplay time, so
+        # a paused or slowed frame does not pop it early). Reduced motion skips the ease.
+        k_spawn = 1.0
+        if enemy.t < SPAWN_TIME_S and not motion.reduced():
+            k_spawn = tween(SPAWN_FROM_SCALE, 1.0, clamp(float(enemy.t) / SPAWN_TIME_S, 0.0, 1.0), "out_back")
+
+        # Attack windup: a scale swell and a warning tint that grow as the attack nears. The tint and the
+        # scale stay on the body under reduced motion (only the pulse is removed), so the telegraph reads.
+        windup = _windup_strength(enemy, behavior, ai)
+        k_wind = 1.0
+        warn_idx = 0
+        if windup > 0.0:
+            wpulse = 0.5 + 0.5 * math.sin(et * 18.0)  # et is 0 under reduced motion, so this holds at 0.5
+            k_wind = 1.0 + WINDUP_SCALE_GAIN * windup + WINDUP_PULSE_GAIN * windup * wpulse
+            warn_idx = int((windup * (0.45 + 0.25 * wpulse)) * WINDUP_TINT_STEPS + 0.5)
+
+        # Hit flash & elite visual feedback. A hit always flashes white, and a windup tints the body.
         is_flashing = float(getattr(enemy, "hit_flash_timer", 0.0)) > 0
         is_elite = bool(getattr(enemy, "is_elite", False))
         if is_flashing:
             render_col = (255, 255, 255)
+        elif windup > 0.0:
+            render_col = pose.warn_tints[warn_idx]
         elif is_elite:
             render_col = (255, 215, 75)
         else:
             render_col = base
+        if not is_flashing:
+            pose.col = render_col  # a death's motes take the body's colour, not the white hit flash
+        pose.cx = sx
+        pose.cy = sy + bob
+        pose.reach = nominal
 
         body_idx = 4 if behavior.startswith("boss_") else 1
         if len(h.objs) > body_idx:
@@ -764,8 +1237,12 @@ class Visuals:
             # body.color is RGBA and render_col is RGB, so compare the channels or every body is rewritten each frame.
             if hasattr(body_obj, "color") and body_obj.color[:3] != render_col:
                 body_obj.color = render_col
-            # Hit reaction: squash the body while hit_flash_timer runs, then spring back to rest.
-            apply_hit_squash(body_obj, float(getattr(enemy, "hit_flash_timer", 0.0)))
+            # Hit reaction: the squash level is juice's own curve over hit_flash_timer, so it springs back to rest.
+            # Reduced motion passes a zero timer. The radius (spawn and windup scale) and the squash share one
+            # cached vertex write, see _write_body.
+            hit_t = float(getattr(enemy, "hit_flash_timer", 0.0))
+            level = squash_level(hit_t * motion.factor()) if hit_t > 0.0 else 0
+            _write_body(body_obj, pose, nominal * k_spawn * k_wind, level)
 
         if behavior.startswith("boss_"):
             sh = h.objs[0]
@@ -858,15 +1335,9 @@ class Visuals:
             sh, body, vein1, vein2, core = h.objs
             sh.x, sh.y = sx, sy - 18
             
-            # Heartbeat pulse
-            pulse = 0.8 + 0.2 * math.sin(et * 8.0)
-            if hasattr(enemy, "ai") and enemy.ai.get("hatch_timer", 0) < 1.0:
-                 # Fast pulse before hatching
-                 pulse = 0.8 + 0.3 * math.sin(et * 18.0)
-            
+            # The heartbeat pulse is computed above; the body's radius comes from the pose (nominal above).
             body.x, body.y = sx, sy + bob
-            _set_radius(body, max(0.1, 15 * pulse))
-            
+
             vein1.x, vein1.y = sx, sy + bob
             _set_radius(vein1, max(0.1, 14 * pulse))
             
@@ -1029,18 +1500,29 @@ class Visuals:
         self._set_depth(h, sy, shake)
 
     def drop_enemy(self, enemy):
-        """Remove enemy visual."""
+        """Remove enemy visual. Unless reduced motion is on, the body breaks into pooled motes where it died."""
         h = self._enemy_handles.pop(id(enemy), None)
         if h:
-            h.delete()
+            pose = getattr(h, "pose", None)
+            if pose is not None and not motion.reduced():
+                boss = enemy_behavior_name(enemy).startswith("boss_")
+                self._dissolve.burst(
+                    pose.cx,
+                    pose.cy,
+                    pose.col,
+                    count=14 if boss else 8,
+                    reach=pose.reach,
+                    boost=1.3 if boss else 1.0,
+                )
+            self._give_back(h)  # a pooled handle goes back to its pool; calling delete() here would strand it
 
     def ensure_projectile(self, proj):
         """Ensure projectile visual exists. The look comes from projectile_art, keyed by weapon."""
         if id(proj) in self._proj_handles:
             return
-        # Every shape is created in the unified projectile group, so projectiles never join
-        # the depth groups and never pay a batch migration after creation.
-        self._proj_handles[id(proj)] = ProjectileVisual(self.batch, self._projectile_group, proj, shot_palette=self.shot_palette)
+        # Pieces are pooled quads in the shot bank, in fixed draw layers, so projectiles never join the depth
+        # groups and a new shot takes free slots instead of creating GPU objects.
+        self._proj_handles[id(proj)] = ProjectileVisual(self._shot_bank, self._projectile_group, proj, shot_palette=self.shot_palette)
 
     def sync_projectile(self, proj, shake: Vec2):
         """Update projectile visual position and animation."""
@@ -1053,9 +1535,17 @@ class Visuals:
             h.delete()
 
     def ensure_powerup(self, p):
-        """Ensure powerup visual exists."""
+        """Ensure powerup visual exists. Its handle, label included, comes from the kind's pool when one is free."""
         if id(p) in self._power_handles:
             return
+        kind = str(p.kind)
+        if POOL_POWERUP_HANDLES:
+            self._power_handles[id(p)] = self._take("power:" + kind, lambda: self._build_powerup(kind))
+        else:
+            self._power_handles[id(p)] = self._build_powerup(kind)
+
+    def _build_powerup(self, kind: str) -> RenderHandle:
+        """Create one pickup's shapes and label. The look depends only on the kind, so the pool keeps one set per kind."""
         
         # Powerup type - distinct bright colors
         color, glyph, size = {
@@ -1074,7 +1564,7 @@ class Visuals:
             "homing": (POWERUP_COLORS["homing"], "H", 14),
             "time_slow": (POWERUP_COLORS["time_slow"], "~", 14),
             "magnet": (POWERUP_COLORS["magnet"], "M", 14),
-        }.get(p.kind, ((200, 200, 200), "?", 12))
+        }.get(kind, ((200, 200, 200), "?", 12))
 
         # Large, glowing center orb
         orb = shapes.Circle(0, 0, size, color=color, batch=self.batch)
@@ -1102,10 +1592,10 @@ class Visuals:
             batch=self.batch,
             color=(255, 255, 255, 255),
         )
-        art_shapes, art_offsets = make_pickup_art(p.kind, self.batch, color, size)
+        art_shapes, art_offsets = make_pickup_art(kind, self.batch, color, size)
         handle = RenderHandle(ring2, ring1, orb, core, label, *art_shapes)
         handle.art_offsets = art_offsets
-        self._power_handles[id(p)] = handle
+        return handle
 
     def sync_powerup(self, p, shake: Vec2):
         """Update powerup visual position."""
@@ -1124,7 +1614,7 @@ class Visuals:
         """Remove powerup visual."""
         h = self._power_handles.pop(id(p), None)
         if h:
-            h.delete()
+            self._give_back(h)
 
     def ensure_obstacle(self, ob):
         if id(ob) in self._obstacle_handles:

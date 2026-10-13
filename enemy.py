@@ -52,6 +52,7 @@ class Enemy:
     elite_affix: str = ""
     shield: int = 0
     hit_flash_timer: float = 0.0
+    spawn_index: int = -1  # per-run index, set by _assign_run_keys; not in ai, so ai restores never touch it
 
 
 def _lead_dir(shooter_pos: Vec2, target_pos: Vec2, target_vel: Vec2, proj_speed: float, mult: float = 0.75) -> Vec2:
@@ -246,9 +247,39 @@ def _slot_radius(key: str) -> float:
 
 
 def _unit_order_bias(enemy: Enemy) -> float:
+    """Order key in [0, 1) for a unit with no pinned bias.
+
+    It comes from the unit's per-run spawn index, never from its address: id(enemy) differs between runs,
+    so the batch and pool paths could not repeat for a seed. The 7919 step spreads consecutive spawns
+    across the range, so flank sides and arc slots are not decided by spawn order alone.
+    """
     if "formation_bias" not in enemy.ai:
-        enemy.ai["formation_bias"] = (float((id(enemy) % 997)) / 997.0)
+        enemy.ai["formation_bias"] = ((int(enemy.spawn_index) * 7919) % 997) / 997.0
     return float(enemy.ai["formation_bias"])
+
+
+_RUN_KEY_STEP = 7919          # spreads consecutive spawn indices over each key's range (prime, as the 997 bias)
+_SWARM_SLOTS = 127            # swarm.py's slot_bias range, as in the id(enemy) % 127 key it used to take
+_SWARM_RANKS = 97             # swarm.py's squad_rank range, as in the id(enemy) % 97 key it used to take
+
+
+def _assign_run_keys(enemy: Enemy, state) -> None:
+    """Give a unit its per-run spawn index, and the keys its behaviors derive from that index.
+
+    The index counts the units this run has seen, in the order they first tick or first appear in the
+    formation. The counter lives on the run's state, so each run starts again from 0, and a run with the
+    same seed gives every unit the same index. swarm.py takes slot_bias and squad_rank from id(enemy) only
+    when they are missing, so setting them here, from the index, keeps those keys off object addresses.
+    """
+    if enemy.spawn_index < 0:
+        index = int(getattr(state, "enemy_spawn_count", 0))
+        state.enemy_spawn_count = index + 1
+        enemy.spawn_index = index
+    ai = enemy.ai
+    if "slot_bias" not in ai:
+        ai["slot_bias"] = ((enemy.spawn_index * _RUN_KEY_STEP) % _SWARM_SLOTS) / float(_SWARM_SLOTS) * math.tau
+    if "squad_rank" not in ai:
+        ai["squad_rank"] = ((enemy.spawn_index * _RUN_KEY_STEP) % _SWARM_RANKS) / float(_SWARM_RANKS)
 
 
 def _build_role_formation(state, player_pos: Vec2, player_vel: Vec2) -> dict:
@@ -257,6 +288,8 @@ def _build_role_formation(state, player_pos: Vec2, player_vel: Vec2) -> dict:
     if cached and abs(float(cached.get("t", -999.0)) - now) <= 1e-8:
         return cached
 
+    for e in getattr(state, "enemies", []):
+        _assign_run_keys(e, state)  # a unit spawned since the last tick still gets its index before it is ordered
     enemies = [e for e in getattr(state, "enemies", []) if not _behavior_key(e).startswith("boss_")]
     prof = _formation_profile(state)
     slot_targets: dict[int, Vec2] = {}
@@ -962,6 +995,7 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
     enemy.t += dt
     if enemy.seed == 0.0:
         enemy.seed = state.rng.uniform(0.0, math.tau)
+    _assign_run_keys(enemy, state)  # before the behavior runs, so swarm.py finds its keys already set
 
     if isinstance(enemy.behavior, str):
         if enemy.behavior == "egg_sac":

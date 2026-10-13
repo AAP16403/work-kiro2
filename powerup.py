@@ -66,6 +66,43 @@ def expire_timed_effects(player: "Player", now: float) -> None:
             setattr(player, field, 0.0)
 
 
+def expire_weapon_pickup(player: "Player", now: float) -> None:
+    """Revert a timed weapon pickup to the weapon held before it, once its time has run out."""
+    until = float(getattr(player, "weapon_until", 0.0))
+    if until > 0.0 and float(now) >= until:
+        player.current_weapon = getattr(player, "weapon_base", None)
+        player.weapon_base = None
+        player.weapon_until = 0.0
+
+
+def equip_weapon_pickup(player: "Player", candidate, now: float) -> None:
+    """Equip a pickup weapon for WEAPON_PICKUP_SECONDS.
+
+    Only a pickup made with no timer running records the weapon to revert to. A pickup made while one runs
+    swaps the timed weapon and restarts the timer, and the base stays the weapon held before the first pickup.
+    """
+    if float(getattr(player, "weapon_until", 0.0)) <= 0.0:
+        player.weapon_base = getattr(player, "current_weapon", None)
+    player.current_weapon = candidate
+    player.weapon_until = float(now) + float(config.WEAPON_PICKUP_SECONDS)
+
+
+def equip_permanent_weapon(player: "Player", weapon) -> None:
+    """Equip a wave-clear upgrade for good. It cancels any running weapon timer, so the revert can never undo it.
+
+    A wave-clear upgrade outranks the weapon held when it is rolled, timed or not, so the base is never lost by this.
+    """
+    player.current_weapon = weapon
+    player.weapon_base = None
+    player.weapon_until = 0.0
+
+
+def weapon_pickup_secs_left(player: "Player", now: float) -> int:
+    """Whole seconds left on the timed weapon, rounded up like the status line. 0 when the weapon is permanent."""
+    left = float(getattr(player, "weapon_until", 0.0)) - float(now)
+    return math.ceil(left) if left > 0.0 else 0
+
+
 def enemy_time_scale(player: "Player", now: float) -> float:
     """The one scalar for enemy time. Enemies, their attacks and enemy projectiles advance by frame dt times this."""
     if timed_active(player, "time_slow_until", now):
@@ -117,11 +154,13 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
         # A damaging aura that swirls around the player.
         player.vortex_until = max(player.vortex_until, now + 10.0)
     elif p.kind == "weapon":
+        # Expire first, so a timer that ran out before this pickup reverts the weapon before it is compared.
+        expire_weapon_pickup(player, now)
         # Upgrade-only: equip the pickup only if it outranks the current weapon, otherwise it still pays off as a shield top-up.
         key = str(p.data or "basic").lower()
         candidate = WEAPONS.get(key)
         if candidate is not None and is_weapon_upgrade(getattr(player, "current_weapon", None), candidate):
-            player.current_weapon = candidate
+            equip_weapon_pickup(player, candidate, now)
         else:
             player.shield = min(SHIELD_MAX, int(getattr(player, "shield", 0)) + 20)
     elif p.kind == "ultra":

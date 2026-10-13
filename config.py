@@ -40,6 +40,7 @@ FIRE_RATE_CURVE = 0.85
 WAVE_COOLDOWN = 2.0
 MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter
 WEAPON_WAVE_UPGRADE_CHANCE = 0.5  # Chance per wave clear to roll a weapon; it is equipped only if it outranks the current one
+WEAPON_PICKUP_SECONDS = 20.0  # A weapon pickup equips for this long, then the player reverts to the weapon held before it
 
 # Game Over: the staged reveal runs this long, and input (click or key) unlocks when it ends.
 GAME_OVER_REVEAL_S = 1.0
@@ -236,11 +237,20 @@ EVENT_NEBULA_SHIELD = 24            # shield an enemy gains on entering the clou
 # PARALLEL_MIN_ENEMIES = 16 is the smallest count at which the pool was faster in every run.
 # A spawned worker takes about 0.45 s to start on Windows. warm() starts the workers during the first
 # small frames, and the first big fight does not wait for them.
-# PARALLEL_STEER_ENABLED stays False. The pool is a clear speed win, but batched steering is not the
-# serial loop: phase 1 moves every enemy before coordination is applied, so enemy movement changes.
-# That is a gameplay decision, not a performance-only switch, and the shipped default must not change.
+# PARALLEL_STEER_ENABLED is off. Earlier sweeps (22 and 29 enemies, pool faster in both) were not repeated
+# on a quiet machine. Quiet bench, tools/bench.py --wave 15 22 29 --frames 300 --repeats 5, median ms per
+# frame, serial / inline batch / pool of 3 workers:
+#   15 enemies: 1.93 / 2.01 / 2.39   (pool slower)
+#   22 enemies: 3.45 / 3.46 / 3.25   (pool about 6% faster)
+#   29 enemies: 4.68 / 4.72 / 4.62   (within noise)
+# No clear win, so the default stays serial. The batch path stays available behind this flag.
+# The threshold stays at 16, the smallest count the pool won in every measured run above.
+# Batched steering is not the serial loop: phase 1 moves every enemy before coordination is applied, so
+# enemy movement at 16 or more live enemies differs from the interleaved default. Measured on one seeded
+# 587-step run (20 enemies, swarm included): enemy positions differ on 522 of 587 frames, by up to 43 px.
+# Units are ordered by their per-run spawn index, not their address, so a batched run repeats for a seed.
 PARALLEL_MIN_ENEMIES = 16           # live enemy count at which the batch path runs (measured above)
-PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a process pool
+PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a process pool (see above)
 PARALLEL_STEER_MIN_ENEMIES = PARALLEL_MIN_ENEMIES
 PARALLEL_STEER_WORKERS = 3          # process-pool size when enabled
 PARALLEL_LOADER_WORKERS = 4         # threads for I/O-bound asset reads

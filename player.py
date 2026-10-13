@@ -34,6 +34,9 @@ class Player:
     homing_until: float = 0.0
     time_slow_until: float = 0.0
     magnet_until: float = 0.0
+    # Timed weapon pickup: run-clock expiry (0.0 = the weapon is permanent) and the weapon to revert to. See powerup.py.
+    weapon_until: float = 0.0
+    weapon_base: "Weapon" = field(default=None)
     ultra_charges: int = 0
     ultra_max_charges: int = ULTRA_MAX_CHARGES
     ultra_cd_until: float = 0.0

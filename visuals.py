@@ -682,13 +682,16 @@ class Visuals:
         the parallax starfield (placed by the player's position and the window size) and the glows."""
         if self._starfield is not None:
             camera = player.pos if player is not None else None
-            self._starfield.sync(t, float(utils.VIEW_W), float(utils.VIEW_H), camera=camera)
+            # The drift and the twinkle run on the clock, so reduced motion holds them at zero. The camera
+            # term (the player's own movement) is kept.
+            self._starfield.sync(motion.clock(t), float(utils.VIEW_W), float(utils.VIEW_H), camera=camera)
         self.sync_glow(state, player, shake, t=t, aim_dir=aim_dir)
 
     def sync_glow(self, state, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None) -> None:
         """Emit this frame's additive glows: projectile heads, pickups, enemy eyes, the player thruster
         and the dash afterimage. Call it after the other sync_* calls so the glows read final positions.
         ENABLE_GLOW and ENABLE_DASH_AFTERIMAGE switch the two groups off separately."""
+        ta = motion.clock(t)  # ambient pulses and bobs; reduced motion holds them at rest. The afterimage keeps t.
         # Upload the projectile quads once, after every projectile sync this frame has run.
         self._shot_bank.flush()
         pool = self._glow_pool
@@ -707,16 +710,16 @@ class Visuals:
                     continue
                 halo = h.objs[0]  # outer ring, already in the pickup's colour
                 sx, sy = to_iso(pu.pos, shake)
-                pulse = 0.75 + 0.25 * math.sin(t * 4.0 + pu.pos.x * 0.03)
+                pulse = 0.75 + 0.25 * math.sin(ta * 4.0 + pu.pos.x * 0.03)
                 pool.emit(("pu", id(pu)), sx, sy, 26.0, halo.color, int(120 * pulse))
 
             # Thruster and dash come before the eyes: when the pool is full, the eye glows are the ones dropped.
             if player is not None:
                 sx, sy = to_iso(player.pos, shake)
-                bob = math.sin(t * 6.0) * 1.5
+                bob = math.sin(ta * 6.0) * 1.5
                 aim = aim_dir if (aim_dir is not None and aim_dir.length() > 1e-6) else Vec2(1.0, 0.0)
                 boosting = bool(getattr(player, "is_boosting", False))
-                pulse = 0.5 + 0.5 * math.sin(t * (30.0 if boosting else 15.0))
+                pulse = 0.5 + 0.5 * math.sin(ta * (30.0 if boosting else 15.0))
                 color = (255, 180, 70) if boosting else (100, 220, 255)
                 radius = (13.0 if boosting else 9.0) + 3.0 * pulse
                 # Same spot sync_player draws the engine glow.
@@ -947,7 +950,7 @@ class Visuals:
         if self._drone_art is None:
             self._drone_art = DroneArt(self.batch)
             self._drone_handle = RenderHandle(*self._drone_art.parts)
-        cy = self._drone_art.sync(drone, shake, t)
+        cy = self._drone_art.sync(drone, shake, motion.clock(t))  # reduced motion holds the bob, pulse and rotor at rest
         if drone.active:
             self._set_depth(self._drone_handle, cy, shake)
 

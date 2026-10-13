@@ -2,7 +2,8 @@
 """Screen capture suite and label overlap checker for PLOUTO.
 
 Runs the real game in a hidden window, puts it on each screen in turn, reads the
-back buffer back as a PNG, and checks the text on that frame for overlaps.
+back buffer back as a PNG, and checks the text on that frame for overlaps. Each screen
+settles for at least the screen-fade length first, so the fade veil is gone in the PNG.
 
 Screens, each captured at 980x620 and 1920x1080:
     title, settings, guide_<tab>_<page> (every guide page), combat, pause,
@@ -21,7 +22,7 @@ Overlap checker
     they are counted as offscreen_labels so clipped text still shows in the report.
 
 Usage (any working directory):
-    python tools/screens.py --out <dir> [--allow-overlaps]
+    python tools/screens.py --out <dir> [--allow-overlaps] [--reduce-motion on|off]
 
 Output in <dir>:
     <W>x<H>/<screen>.png   one PNG per screen per size
@@ -63,6 +64,7 @@ import score as score_mod  # noqa: E402
 from game import Game  # noqa: E402
 from pyglet.graphics import Batch  # noqa: E402
 from pyglet.text.layout import TextLayout  # noqa: E402
+import states  # noqa: E402
 from states import GameStateName  # noqa: E402
 
 SIZES = ((980, 620), (1920, 1080))
@@ -286,7 +288,15 @@ class ScreenSpec:
 
 
 def _settle(game, seconds: float) -> None:
-    """Advance the normal update loop so menu and reward animations finish."""
+    """Advance the normal update loop so menu and reward animations finish.
+
+    A screen change starts its fade on the first draw of the new screen (states.ScreenFade.note_screen),
+    and the fade reads the render clock. Drawing once before the clock moves starts the fade where the
+    screen appears, so the settle time covers it. Without that draw the fade starts at capture time and
+    the screen comes out as a blank veil.
+    """
+    game.on_draw()
+    seconds = max(float(seconds), states.SCREEN_FADE_S + FRAME)
     for _ in range(max(1, int(round(seconds / FRAME)))):
         game.update(FRAME)
 
@@ -298,6 +308,11 @@ def _show_menu(game) -> None:
 
 def _show_settings(game) -> None:
     game.fsm.set_state(GameStateName.SETTINGS)
+    _settle(game, SETTLE_FRAMES * FRAME)
+
+
+def _show_hangar(game, hangar) -> None:
+    game.fsm.set_state(hangar)
     _settle(game, SETTLE_FRAMES * FRAME)
 
 
@@ -369,7 +384,7 @@ def screen_specs(game) -> tuple[list[ScreenSpec], list[dict]]:
     if hangar is None:
         skipped.append({"screen": "hangar", "reason": "this build defines no GameStateName.HANGAR"})
     else:
-        specs.append(ScreenSpec("hangar", partial(game.fsm.set_state, hangar)))
+        specs.append(ScreenSpec("hangar", partial(_show_hangar, game, hangar)))
     return specs, skipped
 
 
@@ -397,8 +412,18 @@ def _capture_frame(game, png_path: str) -> tuple[list[LabelInfo], list[Overlap],
         game.on_draw()
     infos, offscreen = collect_label_infos(painted_layouts(recorder), game.width, game.height)
     overlaps = find_overlaps(infos)
-    pyglet.image.get_buffer_manager().get_color_buffer().get_image_data().save(png_path)
+    _save_opaque_png(png_path)
     return infos, overlaps, offscreen
+
+
+def _save_opaque_png(png_path: str) -> None:
+    """Save the back buffer as a PNG with every alpha byte at 255. The read-back alpha was often below 255
+    in the captures, and a semi-transparent frame looks washed out in viewers that composite it over a
+    light background."""
+    image = pyglet.image.get_buffer_manager().get_color_buffer().get_image_data()
+    data = bytearray(image.get_data("RGBA", image.width * 4))
+    data[3::4] = bytes([255]) * (len(data) // 4)
+    pyglet.image.ImageData(image.width, image.height, "RGBA", bytes(data)).save(png_path)
 
 
 def _pair_json(pair: Overlap) -> dict:
@@ -408,8 +433,13 @@ def _pair_json(pair: Overlap) -> dict:
     return {"a": side(pair.a), "b": side(pair.b), "area": round(pair.area, 1)}
 
 
-def run_capture(out_dir: str, sizes=SIZES, game=None) -> dict:
-    """Capture every screen at every size into out_dir and return the report dict."""
+def run_capture(out_dir: str, sizes=SIZES, game=None, reduce_motion=None) -> dict:
+    """Capture every screen at every size into out_dir and return the report dict.
+
+    reduce_motion: True or False sets config.REDUCE_MOTION for this run after the game exists (the
+    game loads the saved Accessibility setting when it starts, which would otherwise decide it). None
+    keeps the value the game loaded.
+    """
     out_dir = os.path.abspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
     scratch = tempfile.mkdtemp(prefix="plouto_screens_")
@@ -417,9 +447,11 @@ def run_capture(out_dir: str, sizes=SIZES, game=None) -> dict:
     own_game = game is None
     redirected = False
     real_progress_path = None
+    real_reduce_motion = bool(config.REDUCE_MOTION)
     report = {
         "sizes": [f"{w}x{h}" for w, h in sizes],
         "overlap_eps_px": OVERLAP_EPS,
+        "reduce_motion": None,
         "screens": [],
         "skipped": [],
         "errors": [],
@@ -429,6 +461,9 @@ def run_capture(out_dir: str, sizes=SIZES, game=None) -> dict:
         score_mod.HIGH_SCORE_FILE = os.path.join(scratch, "high_scores.json")
         if own_game:
             game = Game()
+        if reduce_motion is not None:
+            config.REDUCE_MOTION = bool(reduce_motion)
+        report["reduce_motion"] = bool(config.REDUCE_MOTION)
         game.set_visible(False)
         # The game-over screen ends a run, which saves meta-progress: keep that write in the scratch folder.
         real_progress_path = game.progress_path  # may be None: the store's default
@@ -470,6 +505,7 @@ def run_capture(out_dir: str, sizes=SIZES, game=None) -> dict:
                 report["total_overlaps"] += len(overlaps)
     finally:
         score_mod.HIGH_SCORE_FILE = real_score_file
+        config.REDUCE_MOTION = real_reduce_motion
         if redirected:
             game.progress_path = real_progress_path
         if own_game and game is not None:
@@ -508,9 +544,14 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Capture every PLOUTO screen and check labels for overlaps.")
     parser.add_argument("--out", required=True, help="directory for the PNGs and overlaps.json")
     parser.add_argument("--allow-overlaps", action="store_true", help="report overlaps but exit 0")
+    parser.add_argument(
+        "--reduce-motion", choices=("on", "off"), default=None,
+        help="set config.REDUCE_MOTION for this run (default: keep the value the game loads)",
+    )
     args = parser.parse_args(argv)
 
-    report = run_capture(args.out)
+    reduce = None if args.reduce_motion is None else args.reduce_motion == "on"
+    report = run_capture(args.out, reduce_motion=reduce)
     report["allow_overlaps"] = bool(args.allow_overlaps)
     out_dir = os.path.abspath(args.out)
     with open(os.path.join(out_dir, "overlaps.json"), "w", encoding="utf-8") as f:

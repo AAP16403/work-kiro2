@@ -19,7 +19,7 @@ from glow import DashAfterimage, GlowPool, projectile_glow
 from juice import JuiceOverlay, apply_hit_squash
 from player_art import DEFAULT_PALETTE, PlayerArt
 from powerup_art import make_pickup_art, place_pickup_art
-from projectile_art import ProjectileVisual
+from projectile_art import ProjectileVisual, ShotBank
 from skin_apply import LEGACY_PALETTE, aura_outer, complete_palette
 from starfield import Starfield
 from utils import to_iso, Vec2, enemy_behavior_name
@@ -113,6 +113,7 @@ class Visuals:
 
         self._enemy_handles: dict[int, RenderHandle] = {}
         self._proj_handles: dict[int, RenderHandle] = {}
+        self._shot_bank = ShotBank(self.batch)  # projectile quads: pooled, so a new shot creates no GPU objects
         self._power_handles: dict[int, RenderHandle] = {}
         self._obstacle_handles: dict[int, RenderHandle] = {}
         self._trap_handles: dict[int, RenderHandle] = {}
@@ -264,6 +265,8 @@ class Visuals:
         """Emit this frame's additive glows: projectile heads, pickups, enemy eyes, the player thruster
         and the dash afterimage. Call it after the other sync_* calls so the glows read final positions.
         ENABLE_GLOW and ENABLE_DASH_AFTERIMAGE switch the two groups off separately."""
+        # Upload the projectile quads once, after every projectile sync this frame has run.
+        self._shot_bank.flush()
         pool = self._glow_pool
         pool.begin_frame()
         if config.ENABLE_GLOW:
@@ -1038,9 +1041,9 @@ class Visuals:
         """Ensure projectile visual exists. The look comes from projectile_art, keyed by weapon."""
         if id(proj) in self._proj_handles:
             return
-        # Every shape is created in the unified projectile group, so projectiles never join
-        # the depth groups and never pay a batch migration after creation.
-        self._proj_handles[id(proj)] = ProjectileVisual(self.batch, self._projectile_group, proj, shot_palette=self.shot_palette)
+        # Pieces are pooled quads in the shot bank, in fixed draw layers, so projectiles never join the depth
+        # groups and a new shot takes free slots instead of creating GPU objects.
+        self._proj_handles[id(proj)] = ProjectileVisual(self._shot_bank, self._projectile_group, proj, shot_palette=self.shot_palette)
 
     def sync_projectile(self, proj, shake: Vec2):
         """Update projectile visual position and animation."""

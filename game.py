@@ -3,7 +3,9 @@
 # Install: py -m pip install pyglet
 
 import math
+import os
 import random
+import sys
 
 import pyglet
 
@@ -82,6 +84,20 @@ from states import (
 
 
 
+# Tests and the headless tools never show the game window, so a test run opens no windows.
+# PLOUTO_HEADLESS=1 hides it for any run; PLOUTO_SHOW_WINDOW=1 shows it for a test that needs to look.
+HEADLESS_SCRIPTS = frozenset({"bench.py", "bench_frames.py", "bench_steer.py", "playtest.py", "balance_sim.py", "screens.py"})
+
+
+def headless_requested() -> bool:
+    if os.environ.get("PLOUTO_SHOW_WINDOW", "0") not in ("", "0"):
+        return False
+    if os.environ.get("PLOUTO_HEADLESS", "0") not in ("", "0"):
+        return True
+    script = os.path.basename(sys.argv[0] or "")
+    return script.startswith("test_") or script in HEADLESS_SCRIPTS
+
+
 # ============================
 # Main Game Class
 # ============================
@@ -93,7 +109,8 @@ class Game(pyglet.window.Window):
         self.record_runs = bool(record_runs)
         self.recorder = None  # replay.Recorder while a run plays and recording is on
         self.forced_seed = None  # set by replay.start_run so a replay gets the recorded seed
-        super().__init__(width=SCREEN_W, height=SCREEN_H, caption="PLOUTO // Stellar Survival", vsync=True)
+        super().__init__(width=SCREEN_W, height=SCREEN_H, caption="PLOUTO // Stellar Survival", vsync=True,
+                         visible=not headless_requested())
         for event_name in ("on_activate", "on_deactivate"):
             type(self).register_event_type(event_name)
         set_view_size(self.width, self.height)

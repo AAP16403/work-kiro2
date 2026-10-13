@@ -36,6 +36,7 @@ from powerup import (
 import shot_mods
 import chain
 import repulsor
+import shards
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
 from drone import drone_bullets
@@ -399,6 +400,15 @@ class PlayingState(State):
         if target.hp > 0:
             return False
         PlayingState._kill_enemy(game, s, target)
+        return True
+
+    def _shard_hit(self, target, amount: int) -> bool:
+        """One shard's damage. True when it kills the target, which is then removed and scored."""
+        game = self.game
+        PlayingState._damage_enemy(game, game.state, target, amount)
+        if target.hp > 0:
+            return False
+        PlayingState._kill_enemy(game, game.state, target)
         return True
 
     @staticmethod
@@ -842,6 +852,11 @@ class PlayingState(State):
                 self._remove_projectile(game, s, p)
                 continue
 
+        # Shards from critical hits move, hit and expire once per fixed step, beside the projectile update.
+        shard_pool = getattr(game, "shard_pool", None)
+        if shard_pool is not None and shard_pool.live_count:
+            shard_pool.step(s.enemies, dt, self._shard_hit, game._enemy_radius)
+
         for p in list(s.projectiles):
             pr = projectile_radius(p)
             p_prev = p.prev_pos or p.pos
@@ -892,6 +907,12 @@ class PlayingState(State):
                         behavior_name = getattr(e, "_behavior_name", enemy_behavior_name(e))
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
                         spawn_impact(game.particle_system, p, e.pos, enemy_color)
+
+                        if is_crit and getattr(game, "shard_pool", None) is not None:
+                            # A crit splits the bullet where it entered the enemy. That enemy is the shards' origin.
+                            ix, iy = shards.impact_point(p_prev, p.pos, e.pos, reach)
+                            tint = game.visuals.player_bullet_tint if game.visuals is not None else None
+                            shards.split_crit(game.shard_pool, p, ix, iy, e, tint=tint)
 
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e)
@@ -1096,6 +1117,8 @@ class PlayingState(State):
 
         game.visuals.sync_fx(game.state, game.player, shake, t=s.time, aim_dir=aim_dir)
         game.chain_pool.update(s.time, lambda x, y: to_iso(Vec2(x, y), shake))
+        if getattr(game, "shard_pool", None) is not None:
+            game.shard_pool.draw(s.time, shake.x, shake.y)
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:

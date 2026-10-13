@@ -290,12 +290,15 @@ def test_dead_worker_falls_back_and_releases_everything():
     print("[PASS] test_dead_worker_falls_back_and_releases_everything passed (frame finished inline, pool released)")
 
 
-def test_default_is_off_and_threshold_is_measured():
-    assert config.PARALLEL_STEER_ENABLED is False, "the batch path must stay off by default"
+def test_default_is_on_and_threshold_is_measured():
+    # The batch path ships on (config.py: 22 and 29 enemy bench, pool faster than serial). The pool itself
+    # starts lazily, so asking for the batcher starts no worker.
+    assert config.PARALLEL_STEER_ENABLED is True, "the batch path ships on, per the 22 and 29 enemy bench"
     assert config.PARALLEL_MIN_ENEMIES == 16 == config.PARALLEL_STEER_MIN_ENEMIES
     parallel.set_batcher(None)
-    assert parallel.active_batcher() is None
-    print("[PASS] test_default_is_off_and_threshold_is_measured passed (flag off, threshold 16)")
+    assert parallel.active_batcher() is not None
+    parallel.close_batcher()
+    print("[PASS] test_default_is_on_and_threshold_is_measured passed (flag on, threshold 16)")
 
 
 def test_shutdown_leaves_no_worker_or_segment():
@@ -394,7 +397,7 @@ def run_all():
     test_unpackable_and_oversized_batches_run_inline()
     test_warm_starts_workers_without_changing_results()
     test_dead_worker_falls_back_and_releases_everything()
-    test_default_is_off_and_threshold_is_measured()
+    test_default_is_on_and_threshold_is_measured()
     test_shutdown_leaves_no_worker_or_segment()
     test_close_batcher_releases_pool()
     test_pool_stopped_at_exit_without_close()

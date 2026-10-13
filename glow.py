@@ -1,13 +1,15 @@
 """Soft additive glows: one radial texture built once, a quad bank that draws them, and the dash afterimage.
 
 ``QuadBank`` holds a fixed number of textured quads in one pyglet vertex list. Callers edit per-quad values
-in Python lists, and ``flush`` copies them to the GPU once per frame. Editing a single pyglet sprite
-costs a GPU buffer update each time, so a bank is much cheaper once more than a few dozen glows move.
-A quad with zero scale is degenerate and draws nothing.
+in preallocated arrays, and ``flush`` copies the used part of those arrays to the GPU once per frame. Editing
+a single pyglet shape or sprite costs a GPU buffer update each time, so a bank is much cheaper once more than a
+few dozen pieces move. A quad with zero scale is degenerate and draws nothing. Editing a quad allocates nothing.
 
 ``GlowPool`` sits on a bank. Its glows are keyed by owner, so a glow keeps its quad while the owner is
 emitted each frame. A quad that is not emitted in a frame is hidden and returned to the free list.
 The pool never uses more than ``cap`` quads: once it is full, ``emit`` returns False and the glow is skipped.
+
+``alpha_texture`` builds the small textures the projectile banks draw with (solid lines, discs, thin rings).
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ GLOW_TEXTURE_SIZE = 64
 
 _glow_texture = None
 _quad_program = None
+
+# Offsets of the four corners inside one slot's 12 translate floats (x, y, z per corner).
+_CORNER_OFFSETS = (0, 3, 6, 9)
 
 
 def glow_texture():
@@ -59,6 +64,30 @@ def _build_glow_texture(size: int):
     return texture
 
 
+_ALPHA_STEPS = 512      # lookup resolution of alpha_texture over distance 0 .. 1.5 (in half-sizes)
+_ALPHA_RANGE = 1.5
+
+
+def alpha_texture(size: int, alpha_at):
+    """White square RGBA texture, centred anchor. ``alpha_at(d)`` gives the alpha at distance d from the centre,
+    where d = 1.0 at the edge midpoint (the half-size). It is sampled into a lookup table once, so the
+    per-pixel loop only indexes it. Built once per kind; needs a GL context."""
+    n = int(size)
+    half = n * 0.5
+    scale = _ALPHA_STEPS / _ALPHA_RANGE
+    lut = [int(255.0 * min(1.0, max(0.0, float(alpha_at(i / scale))))) for i in range(_ALPHA_STEPS + 1)]
+    chunks = [bytes((255, 255, 255, a)) for a in range(256)]
+    xs = [(col + 0.5 - half) / half for col in range(n)]
+    rows = []
+    for row in range(n):
+        dy2 = ((row + 0.5 - half) / half) ** 2
+        rows.append(b"".join([chunks[lut[min(_ALPHA_STEPS, int(math.sqrt(dx * dx + dy2) * scale))]] for dx in xs]))
+    texture = pyglet.image.ImageData(n, n, "RGBA", b"".join(rows)).get_texture()
+    texture.anchor_x = n // 2
+    texture.anchor_y = n // 2
+    return texture
+
+
 def _quad_shader():
     """The sprite shader, compiled once. Pyglet builds a new program on every call, so share this one."""
     global _quad_program
@@ -68,19 +97,22 @@ def _quad_shader():
 
 
 class QuadBank:
-    """Fixed-capacity bank of textured, additive quads drawn through one vertex list.
+    """Fixed-capacity bank of textured quads drawn through one vertex list.
 
     Slots are numbered 0 to capacity - 1. ``place`` moves a slot, ``style`` sets its size, rotation and
-    colour, and ``hide`` makes it draw nothing. Every edit only changes Python lists. ``flush`` copies the
-    used part of those lists to the GPU, so the work is one upload per frame however many quads moved.
+    colour, and ``hide`` makes it draw nothing. Every edit only writes preallocated arrays. ``flush`` copies the
+    used part of those arrays to the GPU, so the work is one upload per frame however many quads moved.
+
+    ``blend_dst`` picks the blend: GL_ONE (additive, the default, for glows) or GL_ONE_MINUS_SRC_ALPHA
+    (ordinary alpha, for solid trails and discs).
     """
 
-    def __init__(self, batch, capacity: int, order: int, texture=None) -> None:
+    def __init__(self, batch, capacity: int, order: int, texture=None, blend_dst: int = GL_ONE) -> None:
         self._capacity = max(1, int(capacity))
         tex = texture if texture is not None else glow_texture()
         self._texture = tex
         self._program = _quad_shader()
-        self._group = SpriteGroup(tex, GL_SRC_ALPHA, GL_ONE, self._program, parent=Group(order=int(order)))
+        self._group = SpriteGroup(tex, GL_SRC_ALPHA, blend_dst, self._program, parent=Group(order=int(order)))
 
         x1 = -float(tex.anchor_x)
         x2 = x1 + float(tex.width)
@@ -93,21 +125,23 @@ class QuadBank:
             b = 4 * q
             indices.extend((b, b + 1, b + 2, b, b + 2, b + 3))
 
-        self._translate = [0.0] * (12 * cap)
-        self._scale = [0.0] * (8 * cap)
-        self._rotation = [0.0] * (4 * cap)
-        self._colors = [0] * (16 * cap)
-        self._style = [None] * cap   # last (dx, dy, rotation, rgba) written to each slot
+        self._translate = array("f", [0.0]) * (12 * cap)
+        self._scale = array("f", [0.0]) * (8 * cap)
+        self._rotation = array("f", [0.0]) * (4 * cap)
+        self._colors = array("B", [0]) * (16 * cap)
+        # Last style written to each slot, as floats and bytes, so an unchanged style costs no writes.
+        self._sv = array("f", [0.0]) * (3 * cap)   # dx, dy, rotation
+        self._sc = array("B", [0]) * (4 * cap)     # r, g, b, a
         self._high = 0               # slots below this index may be non-zero, so flush copies them
         self._style_dirty = False
 
         self._vertex_list = self._program.vertex_list_indexed(
             4 * cap, GL_TRIANGLES, indices, batch, self._group,
             position=("f", list(corners) * cap),
-            colors=("Bn", self._colors),
-            translate=("f", self._translate),
-            scale=("f", self._scale),
-            rotation=("f", self._rotation),
+            colors=("Bn", self._colors.tolist()),
+            translate=("f", self._translate.tolist()),
+            scale=("f", self._scale.tolist()),
+            rotation=("f", self._rotation.tolist()),
             tex_coords=("f", list(tex.tex_coords) * cap),
         )
 
@@ -115,57 +149,98 @@ class QuadBank:
     def capacity(self) -> int:
         return self._capacity
 
+    @property
+    def texture(self):
+        return self._texture
+
     def place(self, slot: int, x: float, y: float) -> None:
         o = 12 * slot
-        self._translate[o:o + 12] = (x, y, 0.0, x, y, 0.0, x, y, 0.0, x, y, 0.0)
+        t = self._translate
+        x = float(x)
+        y = float(y)
+        for k in _CORNER_OFFSETS:
+            t[o + k] = x
+            t[o + k + 1] = y
+            t[o + k + 2] = 0.0
         if slot >= self._high:
             self._high = slot + 1
 
     def style(self, slot: int, dx: float, dy: float, rotation: float, rgba) -> None:
         """Set a slot's scale (``dx``, ``dy``, where 1.0 is the texture size), rotation in degrees and RGBA colour."""
+        self.set_style(slot, dx, dy, rotation, rgba[0], rgba[1], rgba[2], rgba[3])
+
+    def set_style(self, slot: int, dx: float, dy: float, rotation: float, r, g, b, a) -> None:
+        """``style`` with the colour as four numbers, so a caller whose alpha changes each frame builds no tuple."""
         dx = float(dx)
         dy = float(dy)
         rotation = float(rotation)
-        rgba = (int(rgba[0]), int(rgba[1]), int(rgba[2]), int(rgba[3]))
-        key = (dx, dy, rotation, rgba)
-        if self._style[slot] == key:
+        r = int(r)
+        g = int(g)
+        b = int(b)
+        a = max(0, min(255, int(a)))
+        o3 = 3 * slot
+        o4 = 4 * slot
+        sv = self._sv
+        sc = self._sc
+        if (sv[o3] == dx and sv[o3 + 1] == dy and sv[o3 + 2] == rotation
+                and sc[o4] == r and sc[o4 + 1] == g and sc[o4 + 2] == b and sc[o4 + 3] == a):
             return
-        self._style[slot] = key
-        o2 = 8 * slot
-        self._scale[o2:o2 + 8] = (dx, dy, dx, dy, dx, dy, dx, dy)
+        sv[o3] = dx
+        sv[o3 + 1] = dy
+        sv[o3 + 2] = rotation
+        sc[o4] = r
+        sc[o4 + 1] = g
+        sc[o4 + 2] = b
+        sc[o4 + 3] = a
+        s = self._scale
+        o8 = 8 * slot
+        for k in (0, 2, 4, 6):
+            s[o8 + k] = dx
+            s[o8 + k + 1] = dy
+        rot = self._rotation
         o1 = 4 * slot
-        self._rotation[o1:o1 + 4] = (rotation, rotation, rotation, rotation)
-        o4 = 16 * slot
-        self._colors[o4:o4 + 16] = rgba * 4
+        rot[o1] = rotation
+        rot[o1 + 1] = rotation
+        rot[o1 + 2] = rotation
+        rot[o1 + 3] = rotation
+        col = self._colors
+        o16 = 16 * slot
+        for k in (0, 4, 8, 12):
+            col[o16 + k] = r
+            col[o16 + k + 1] = g
+            col[o16 + k + 2] = b
+            col[o16 + k + 3] = a
         self._style_dirty = True
         if slot >= self._high:
             self._high = slot + 1
 
     def hide(self, slot: int) -> None:
-        self.style(slot, 0.0, 0.0, 0.0, (0, 0, 0, 0))
+        self.style(slot, 0.0, 0.0, 0.0, _HIDDEN)
 
     def flush(self) -> None:
         """Copy the used slots to the GPU. Call once per frame, after the last edit."""
         n = self._high
         if n <= 0:
             return
-        _copy_attribute(self._vertex_list, "translate", self._translate, 12, n, "f")
+        vl = self._vertex_list
+        _upload(vl, "translate", self._translate, 12 * n)
         if self._style_dirty:
-            _copy_attribute(self._vertex_list, "scale", self._scale, 8, n, "f")
-            _copy_attribute(self._vertex_list, "rotation", self._rotation, 4, n, "f")
-            _copy_attribute(self._vertex_list, "colors", self._colors, 16, n, "B")
+            _upload(vl, "scale", self._scale, 8 * n)
+            _upload(vl, "rotation", self._rotation, 4 * n)
+            _upload(vl, "colors", self._colors, 16 * n)
             self._style_dirty = False
 
 
-def _copy_attribute(vertex_list, name: str, values: list, per_slot: int, slots: int, typecode: str) -> None:
-    """Write the first ``slots`` slots of one attribute. A bulk array copy is much faster than ctypes item writes.
+_HIDDEN = (0, 0, 0, 0)
+
+
+def _upload(vertex_list, name: str, arr, count: int) -> None:
+    """Write the first ``count`` items of one attribute from its array. A bulk memory copy, no Python loop.
 
     Reading the attribute marks its region for upload, which is what makes the copy reach the GPU.
     """
-    count = per_slot * slots
-    data = array(typecode, values[:count])
     region = getattr(vertex_list, name)
-    ctypes.memmove(ctypes.addressof(region), data.buffer_info()[0], data.itemsize * count)
+    ctypes.memmove(ctypes.addressof(region), arr.buffer_info()[0], arr.itemsize * count)
 
 
 class GlowPool:

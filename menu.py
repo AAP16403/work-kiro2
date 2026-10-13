@@ -1893,9 +1893,14 @@ class GuideMenu:
         self.btn_systems.is_hovered = False
 
 
+# Gap between the Resume / Quit block and the PAUSED title, in px before UI scale. The title sits here, not at
+# the top edge, because the HUD status line (Boost, Auto-fire) is painted under the pause veil in that band.
+PAUSE_TITLE_GAP = 30
+
+
 class PauseMenu:
     """Pause menu screen."""
-    
+
     def __init__(self, width: int, height: int):
         self.batch = pyglet.graphics.Batch()
         self.overlay = shapes.Rectangle(0, 0, width, height, color=(6, 10, 18), batch=self.batch)
@@ -1915,7 +1920,7 @@ class PauseMenu:
             x=0,
             y=0,
             anchor_x="center",
-            anchor_y="center",
+            anchor_y="bottom",
             color=(226, 238, 255, 255),
             batch=self.batch,
         )
@@ -1929,7 +1934,6 @@ class PauseMenu:
         self.overlay.height = height
         self.title.x = cx
         _sync_label_style_if_ready(self.title, UI_FONT_HEAD, max(20, int(38 * scale)))
-        self.title.y = height - int(110 * scale)
 
         button_w = int(240 * scale)
         button_h = int(62 * scale)
@@ -1947,6 +1951,8 @@ class PauseMenu:
             btn.x = cx - btn.width // 2
             btn.y = y
             btn.sync()
+        # Bottom-anchored, so the title sits a fixed gap above the top button whatever its font size.
+        self.title.y = cy + total_h // 2 + int(PAUSE_TITLE_GAP * scale)
 
     def on_mouse_motion(self, x: float, y: float):
         for button in self.buttons:

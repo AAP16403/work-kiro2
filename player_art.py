@@ -36,6 +36,7 @@ import math
 
 from pyglet import shapes
 
+import config
 import motion
 from anim import Spring, ease_out_cubic
 from config import ISO_SCALE_X, ISO_SCALE_Y, PLAYER_SPEED, SHIELD_MAX
@@ -684,7 +685,7 @@ class PlayerArt:
         The ring holds GHOST_N samples and is reused, so a dash allocates nothing. Reduced motion
         takes no samples, so no ghost ever shows.
         """
-        if not reduced and burst > 0.0 and t - self._ghost_last >= GHOST_STEP_S:
+        if config.ENABLE_DASH_AFTERIMAGE and not reduced and burst > 0.0 and t - self._ghost_last >= GHOST_STEP_S:
             i = self._ghost_next
             self._ghost_t[i] = t
             self._ghost_x[i] = x

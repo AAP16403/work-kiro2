@@ -133,6 +133,20 @@ BOOST_RAM_DAMAGE = 28
 BOOST_COLOR = (255, 145, 45)
 BOOST_OVERDRIVE_SECONDS = 6.0  # Overdrive powerup: infinite boost and shield top-up duration
 
+# Repulsor (repulsor.py). A pickup fires an instant shockwave from the player: enemy bullets inside
+# REPULSOR_RANGE are pushed outward (slow ones are removed) and enemies inside it are stunned.
+REPULSOR_RANGE = 220.0            # world units from the player centre, for bullets and enemies alike
+REPULSOR_STUN_SECONDS = 1.5       # an enemy in range stops moving and acting for this long
+REPULSOR_CLEAR_SPEED = 150.0      # enemy bullets slower than this (px per second) are removed, not pushed
+REPULSOR_PUSH_SPEED = 260.0       # a kept bullet is given at least this much outward radial speed
+REPULSOR_COOLDOWN_SECONDS = 12.0  # after a shockwave fires, the next one waits this long
+REPULSOR_MAX_CHARGES = 2          # each pickup during a cooldown stores one charge, up to this many
+REPULSOR_COLOR = (190, 240, 255)  # ring and dust colour
+REPULSOR_RING_SECONDS = 0.45      # ring lifetime; with reduced motion the ring holds its full size for this long
+REPULSOR_DUST_COUNT = 5           # dust particles per stunned enemy (none with reduced motion)
+REPULSOR_DUST_SPEED = 45.0        # px per second
+REPULSOR_DUST_SECONDS = 0.4       # dust lifetime
+
 
 # Critical hits
 CRIT_CHANCE_BASE = 0.10

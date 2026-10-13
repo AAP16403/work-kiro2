@@ -102,6 +102,8 @@ def test_config_block_and_switch():
     names = []
     for line in text.split(head, 1)[1].splitlines():
         stripped = line.strip()
+        if stripped.startswith("# wave8 "):
+            break  # the next feature's block starts here
         if not stripped or stripped.startswith("#"):
             continue
         name = stripped.split("=", 1)[0].strip()

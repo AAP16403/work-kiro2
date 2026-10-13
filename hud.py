@@ -23,6 +23,7 @@ from hud_widgets import (
     token,
     weapon_swatch,
 )
+from powerup import weapon_pickup_secs_left
 from ui_theme import set_panel_alpha
 
 
@@ -140,6 +141,10 @@ class HUD:
         self.skin_chip = Chip(self.batch, self._label, label_color=accent, frame_batch=self._frame_batch)
         self.skin_chip.set_text(DEFAULT_SKIN_NAME)
         self._skin_name = DEFAULT_SKIN_NAME
+        # Last values written to the weapon chip; the chip is rewritten only when one of them changes.
+        self._chip_weapon = None
+        self._chip_secs = -1
+        self._chip_crit_bonus = None
 
         # Radial Ultra gauge (bottom-left)
         self.ultra_gauge = RadialGauge(self.batch, self._label)
@@ -802,6 +807,28 @@ class HUD:
         _fit_text(label, items[kept[0]][1], room)
         return label.text + suffix
 
+    def _sync_weapon_chip(self, player, now: float, crit_chance_bonus: float) -> None:
+        """Write the weapon chip. Its text is a pure function of (weapon, whole seconds left, crit bonus), so it is
+        rewritten only when one of those changes: a steady frame builds no strings."""
+        wp = getattr(player, "current_weapon", None)
+        secs = weapon_pickup_secs_left(player, now)
+        if wp is self._chip_weapon and secs == self._chip_secs and crit_chance_bonus == self._chip_crit_bonus:
+            return
+        self._chip_weapon = wp
+        self._chip_secs = secs
+        self._chip_crit_bonus = crit_chance_bonus
+        if not wp:
+            self.weapon_chip.set_weapon("", "", None)
+            return
+        pierce_str = f" [P+{wp.pierce}]" if getattr(wp, "pierce", 0) > 0 else ""
+        total_crit = min(1.0, max(0.0, getattr(wp, "crit_chance", 0.10) + float(crit_chance_bonus)))
+        crit_pct = int(round(total_crit * 100))
+        crit_text = f"CRIT {crit_pct}%"
+        if secs > 0:
+            # Timed pickup: the countdown sits after the crit chance and reverts to the held weapon at 0
+            crit_text = f"{crit_text}  {secs}s"
+        self.weapon_chip.set_weapon(f"{wp.name.upper()}{pierce_str}", crit_text, weapon_swatch(wp))
+
     def update_bars(
         self,
         player,
@@ -856,15 +883,8 @@ class HUD:
             _set_text(self.boost_value_label, f"{int(boost_now)}%")
             self._paint(self.boost_value_label, (255, 210, 130, 255))
 
-        # Weapon chip: name (with pierce), swatch from projectile_art, and the crit chance
-        wp = getattr(player, "current_weapon", None)
-        if wp:
-            pierce_str = f" [P+{wp.pierce}]" if getattr(wp, "pierce", 0) > 0 else ""
-            total_crit = min(1.0, max(0.0, getattr(wp, "crit_chance", 0.10) + float(crit_chance_bonus)))
-            crit_pct = int(round(total_crit * 100))
-            self.weapon_chip.set_weapon(f"{wp.name.upper()}{pierce_str}", f"CRIT {crit_pct}%", weapon_swatch(wp))
-        else:
-            self.weapon_chip.set_weapon("", "", None)
+        # Weapon chip: name (with pierce), swatch from projectile_art, the crit chance and a countdown for a timed pickup
+        self._sync_weapon_chip(player, float(state.time), crit_chance_bonus)
 
         # Radial Ultra gauge: charges held out of capacity
         ultra_cap = int(getattr(player, "ultra_max_charges", config.ULTRA_MAX_CHARGES))

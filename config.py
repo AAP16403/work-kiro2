@@ -40,6 +40,7 @@ FIRE_RATE_CURVE = 0.85
 WAVE_COOLDOWN = 2.0
 MAX_ACTIVE_CONSTRUCTIONS = 14  # Cap for enemy-built traps/hazards to avoid map clutter
 WEAPON_WAVE_UPGRADE_CHANCE = 0.5  # Chance per wave clear to roll a weapon; it is equipped only if it outranks the current one
+WEAPON_PICKUP_SECONDS = 20.0  # A weapon pickup equips for this long, then the player reverts to the weapon held before it
 
 # Game Over: the staged reveal runs this long, and input (click or key) unlocks when it ends.
 GAME_OVER_REVEAL_S = 1.0

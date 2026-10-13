@@ -25,8 +25,8 @@ from enemy import Enemy, update_enemy
 from boss_rage import celebrate_boss_death, FANFARE_MIN_GAP
 from parallel import maybe_update_enemies
 from powerup import (
-    apply_powerup, enemy_time_scale, expire_timed_effects, format_timed_powerups_hud,
-    is_rare_powerup, pickup_magnet_mods, powerup_popup_name, timed_active,
+    apply_powerup, enemy_time_scale, equip_permanent_weapon, expire_timed_effects, expire_weapon_pickup,
+    format_timed_powerups_hud, is_rare_powerup, pickup_magnet_mods, powerup_popup_name, timed_active,
 )
 import shot_mods
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
@@ -451,6 +451,7 @@ class PlayingState(State):
             game.player.invincibility_timer -= dt
         # Timed powerups: drop the expired ones, then take the single enemy time scale for this tick.
         expire_timed_effects(game.player, s.time)
+        expire_weapon_pickup(game.player, s.time)
         slow_on = timed_active(game.player, "time_slow_until", s.time)
         if getattr(s, "_time_slow_was_on", False) and not slow_on:
             audio_cues.cue(game.audio, "time_slow_off")
@@ -870,9 +871,10 @@ class PlayingState(State):
             if config.ENABLE_OBSTACLES and new_segment != getattr(s, "layout_segment", 0):
                 game._regen_layout(new_segment)
             # Weapons only ever upgrade at a wave clear: a seeded roll that equips a pool weapon only if it outranks the current one.
+            # A wave-clear upgrade is permanent: it also cancels a running weapon pickup timer.
             upgrade = roll_wave_clear_upgrade(getattr(game.player, "current_weapon", None), s.wave, s.rng)
             if upgrade is not None:
-                game.player.current_weapon = upgrade
+                equip_permanent_weapon(game.player, upgrade)
             maybe_spawn_powerup(s, Vec2(0.0, 0.0))
 
             if cleared_wave % config.BOSS_WAVE_EVERY == 0:

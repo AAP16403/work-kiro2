@@ -668,6 +668,8 @@ class HUD:
             self._boss_trail = frac  # new boss: no lag
         elif frac >= self._boss_trail:
             self._boss_trail = frac  # healed: follow immediately
+        elif _reduce_motion():
+            self._boss_trail = frac  # reduced motion: the damage shows at once, with no trailing bar
         else:
             self._boss_lag_from = self._boss_trail  # damage: trail holds, then shrinks in tick()
             self._boss_lag_t = 0.0

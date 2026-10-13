@@ -215,3 +215,33 @@ Opened because the goal review still listed these as open:
 - Integrate: wave6/integration. Verify: every test file.
 
 Multi-core: unchanged in this batch. The steering pool stays off because the quiet bench showed no clear gain. The arena geometry and asset preload paths measured no gain. A decision is needed from the user before any further multi-core work.
+
+## Wave 6 outcome (main 8ce631c)
+
+Goal gaps closed on `main`. The worktrees and branches wave6/* are merged through wave6/integration (ab02e07). Follow-up commits 2c28ab0 and 8ce631c wire the two powerups into the run and finish the visual gaps.
+
+- Chain Lightning (kind `chain`, rare, timed 8 s). Each kill the player makes throws one arc to the nearest live enemy in 160 px. The arc deals 30% of the player's damage, rounded half up. An arc that kills its target continues the chain. No enemy is hit twice in one chain. Pool weight 0.3. Hooked in the player's bullet kill path (`states.py`), drawn through `ChainArcPool` (12 arcs, built once per run in `game.py`).
+- Repulsor (kind `repulsor`, common, cooldown). A pickup fires a shockwave on the next frame: enemy bullets inside 220 px are pushed outward, slow ones are removed, and every enemy in range is stunned for 1.5 s. 12 s cooldown, up to two stored charges. Pool weight 0.7. The stun gate is in the default enemy loop and in the batch path (`parallel.py`).
+- Skins. The engine glow and the dash streak take the run's skin palette (`glow` and `trail`). The legacy ship and the Hangar preview read the same palette.
+- Known visual bugs. PAUSED no longer sits over the Boost strip. The dash afterimage is no longer doubled for the pod-robot: its body ghosts stay, and the legacy streak is off for it. The death glow stops when hp reaches 0. It is a hard cut, not a fade; the body still dissolves over 0.9 s.
+- REDUCE_MOTION. Drone bob, pulse and rotor; starfield drift; glow clocks; boss damage trail snaps; Ultra flash opens at full size and only fades; game-over labels do not rise and the new-high wobble stops; the Guide scanline is hidden, not frozen; the Settings backdrop follows the window size.
+- Layout. The wave chip's title and meta line are 2 px further apart.
+
+Screen review (`tools/screens.py`, REDUCE_MOTION on, 76 screens at 980x620 and 1920x1080). Nine label pairs remain, all on the reward and game-over screens. In the reviewed frames the reward labels sit under the opaque plate, and the game-over title and score are stacked tightly. Neither collides visibly. The checker counts boxes, not glyphs.
+
+Multi-core, measured with `tools/bench_steer.py` (steering step only, 200 frames, 3 workers, results identical to serial):
+
+| enemies | serial ms | inline ms | pool ms |
+|---|---|---|---|
+| 16 | 1.07 | 0.99 | 1.08 |
+| 32 | 2.86 | 2.82 | 1.67 |
+| 48 | 7.50 | 6.03 | 2.68 |
+| 64 | 8.86 | 8.21 | 3.53 |
+
+The pool is roughly even at 16 enemies and clearly faster from 32 up. The threshold stays at 16 because this is a single run. The whole-frame gain in play is not measured.
+
+Harness fix. `tools/bench_frames.py` shimmed `id()` in every module under the repo root. In the main checkout that root contains `.venv`, so pyglet was shimmed too, and its text layout stalled. `test_w1_perf` now skips `.venv` and `.claude`, and it runs in about a minute in the main checkout.
+
+Verification. Full suite: 61 files, all exit 0, 832 PASS lines, no FAIL. The exe smoke test passes 12 of 12 against the build from 8ce631c. Its only skip warning is the Linux X11 import, which is harmless on Windows.
+
+Still open. No person has playtested either powerup. The death glow is a cut, not a fade. The GAME_TOUR module list is from the earlier scan. The save files still live inside the build folder; `build_all.bat` backs them up and restores them, but they should move to a per-user folder. `main` is 129 commits ahead of `origin/main` and has not been pushed.

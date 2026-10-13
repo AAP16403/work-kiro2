@@ -195,6 +195,8 @@ def test_boss_shots_record_their_boss_source_in_play():
     g = _quiet_game()
     try:
         s = _new_run(g)
+        # The boss teleports on this rng. An unseeded run sometimes lands out of range and never fires in 600 steps.
+        s.rng = random.Random(4)
         s.enemies[:] = [Enemy(pos=Vec2(230.0, 60.0), hp=900, speed=30.0, behavior="boss_thunder", seed=4.0, max_hp=900)]
         seen = set()
         for _ in range(600):

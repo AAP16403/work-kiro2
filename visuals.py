@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import math
 import random
+import time
 
 import pyglet
 from pyglet import shapes
@@ -816,8 +817,13 @@ class Visuals:
             self.make_player()
         ta = motion.clock(t)  # visual pulses only; the laser check below keeps the real time
         if self._player_art is not None:
-            cx, cy = self._player_art.sync(player, shake, t=ta, aim_dir=aim_dir, palette=self.player_palette)
-            self._set_depth(self._player_handle, cy, shake)
+            # PlayerArt scales its own idle pulses with motion.clock, and needs the game clock for dashes and
+            # the laser. real_t is wall time, so the death dissolve runs even though the game clock stops at game over.
+            self._player_art.sync(player, shake, t=t, aim_dir=aim_dir, palette=self.player_palette,
+                                  real_t=time.perf_counter())
+            # Depth follows the ground point. The body bobs and recoils, so sorting by its y would move the
+            # handle across depth buckets on every bob near an edge, and each move migrates the handle's shapes.
+            self._set_depth(self._player_handle, self._player_art.ground_y, shake)
             return
         assert self._player_handle is not None
         (

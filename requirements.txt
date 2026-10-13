@@ -2,9 +2,9 @@
 # build_all.bat runs "pip install -r requirements.txt" and never upgrades anything.
 # Install by hand: .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 #
-# pyglet 2.1.16 is the tested version. The direct dependencies come first; the rest are the
+# pyglet 2.1.19 is the tested version. The direct dependencies come first; the rest are the
 # packages they pull in, pinned so that every build installs the same versions.
-pyglet==2.1.16
+pyglet==2.1.19
 moderngl==5.13.0
 pyinstaller==6.22.3
 altgraph==0.17.5

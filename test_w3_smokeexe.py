@@ -280,7 +280,7 @@ def test_requirements_pin_the_tested_pyglet_and_build_installs_from_them():
             match = re.fullmatch(r"([A-Za-z0-9_.\-]+)==([0-9][A-Za-z0-9.+\-]*)", line)
             assert match, f"requirements.txt line is not an exact pin: {line!r}"
             pins[match.group(1).lower()] = match.group(2)
-    assert pins.get("pyglet") == "2.1.16", f"pyglet pin is {pins.get('pyglet')!r}, expected 2.1.16"
+    assert pins.get("pyglet") == "2.1.19", f"pyglet pin is {pins.get('pyglet')!r}, expected 2.1.19"
     for needed in ("pyinstaller", "moderngl"):
         assert needed in pins, f"{needed} is not pinned"
 

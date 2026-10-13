@@ -92,6 +92,11 @@ def _set_position(shape, x: float, y: float) -> None:
         shape.position = (x, y)
 
 
+def _player_alive(player) -> bool:
+    """True while the player has hp left. The death dissolve runs at hp 0, when the thruster and the vignette stop."""
+    return player is not None and float(getattr(player, "hp", 1.0)) > 0.0
+
+
 # Indexes of the eye shapes inside each enemy handle (see Visuals.ensure_enemy). The eye glows read them.
 _EYE_SLOTS = {
     "boss_laser": (5, 6),  # eye, iris
@@ -675,7 +680,8 @@ class Visuals:
     def sync_juice(self, t: float, shake: Vec2, player, view_w: int, view_h: int) -> None:
         """Per-frame low-health vignette and Ultra flash."""
         hp_max = max(1, int(getattr(player, "max_hp", 100)))
-        hp_ratio = float(getattr(player, "hp", hp_max)) / float(hp_max)
+        # The low-health vignette only shows on a living player. At hp 0 it is off, so the death dissolve plays clean.
+        hp_ratio = float(getattr(player, "hp", hp_max)) / float(hp_max) if _player_alive(player) else 1.0
         self._juice.sync(t, shake, hp_ratio, view_w, view_h)
     def sync_fx(self, state, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None) -> None:
         """Per-frame graphics polish, called after the other sync_* calls and before the batch draws:
@@ -711,7 +717,7 @@ class Visuals:
                 pool.emit(("pu", id(pu)), sx, sy, 26.0, halo.color, int(120 * pulse))
 
             # Thruster and dash come before the eyes: when the pool is full, the eye glows are the ones dropped.
-            if player is not None:
+            if _player_alive(player):
                 sx, sy = to_iso(player.pos, shake)
                 bob = math.sin(t * 6.0) * 1.5
                 aim = aim_dir if (aim_dir is not None and aim_dir.length() > 1e-6) else Vec2(1.0, 0.0)
@@ -726,7 +732,10 @@ class Visuals:
             boosting = bool(getattr(player, "is_boosting", False))
             color = (255, 170, 70) if boosting else (150, 235, 255)
             self._afterimage.record(t, player.pos, player.dash_direction, bool(getattr(player, "is_dashing", False)), color)
-            self._afterimage.emit(pool, t, shake)
+            # The pod-robot draws its own body-shaped dash afterimage (player_art ghosts), so the streak only
+            # draws for the legacy ship. The dash shows one afterimage, not two stacked on the same spot.
+            if self._player_art is None:
+                self._afterimage.emit(pool, t, shake)
 
         if config.ENABLE_GLOW:
             for e in getattr(state, "enemies", []):

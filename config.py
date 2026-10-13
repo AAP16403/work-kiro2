@@ -323,3 +323,10 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 powerup-edges
+# Four edges from the verification batch, fixed together. ENABLE_POWERUP_EDGES = False restores the wave-6 rules:
+# only bullet kills chain, a Repulsor cooldown starts at the pickup, countdowns are not rounded before ceil, and a
+# stunned enemy deals contact damage and kills itself on contact like any other.
+ENABLE_POWERUP_EDGES = True
+COUNTDOWN_ROUND_DIGITS = 6  # countdown seconds are rounded to this many decimals before ceil (float noise is not a second)

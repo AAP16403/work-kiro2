@@ -36,6 +36,7 @@ from powerup import (
 import shot_mods
 import chain
 import repulsor
+import echo
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
 from drone import drone_bullets
@@ -647,11 +648,13 @@ class PlayingState(State):
         update_arena_event(s, game, dt)
 
         old_pos = Vec2(game.player.pos.x, game.player.pos.y)
+        dash_ended = False  # True on the frame the dash timer runs out; the Echo drops once the end point is settled
         if game.player.is_dashing:
             game.player.pos += game.player.dash_direction * game.player.dash_speed * dt
             game.player.dash_timer -= dt
             if game.player.dash_timer <= 0:
                 game.player.is_dashing = False
+                dash_ended = True
         else:
             moving = idir.length() > 0
             desired_vel = Vec2(0.0, 0.0)
@@ -679,6 +682,9 @@ class PlayingState(State):
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
             game.player.pos = resolve_circle_obstacles(game.player.pos, player_radius, s.obstacles)
             game.player.pos = clamp_to_map(game.player.pos, config.ROOM_RADIUS * 0.9, s.map_type)
+        if dash_ended:
+            # Echo: exactly one homing echo per dash, dropped where the dash settled (echo.py, ENABLE_ECHO).
+            echo.on_dash_end(game, s)
         if dt > 1e-6:
             player_vel = (game.player.pos - old_pos) * (1.0 / dt)
         else:
@@ -814,10 +820,14 @@ class PlayingState(State):
 
         for p in list(s.projectiles):
             if p.owner == "player":
-                locked = shot_mods.steer_homing(p, s.enemies, game.player, s.time, dt)
-                if locked is not None and getattr(p, "_homing_lock_id", None) != id(locked):
-                    p._homing_lock_id = id(locked)  # a new target: the lock sound plays once per target
-                    audio_cues.cue(game.audio, "homing_lock")
+                if echo.is_echo(p):
+                    # An echo homes on its own timer (echo.py). The Homing pickup does not add to it.
+                    echo.steer(p, s.enemies, s.time, dt)
+                else:
+                    locked = shot_mods.steer_homing(p, s.enemies, game.player, s.time, dt)
+                    if locked is not None and getattr(p, "_homing_lock_id", None) != id(locked):
+                        p._homing_lock_id = id(locked)  # a new target: the lock sound plays once per target
+                        audio_cues.cue(game.audio, "homing_lock")
             p.update(dt if p.owner == "player" else enemy_dt)
             if p.owner == "player":
                 ricochet = shot_mods.ricochet_step(p, game.player, s.time, s.map_type, config.ROOM_RADIUS)

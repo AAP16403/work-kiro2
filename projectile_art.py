@@ -146,6 +146,10 @@ TYPE_STYLES: dict[str, ProjectileStyle] = {
     "plasma": WEAPON_STYLES["Plasma Rifle"],
     "railgun": WEAPON_STYLES["Hyper Railgun"],
     "flak": WEAPON_STYLES["Flak Battery"],
+    # Echo (echo.py): the player's pod shot a dash drops. A cyan dot trail, so it reads apart from the guns.
+    "echo": ProjectileStyle(
+        "Echo", head=(150, 240, 255), core=(235, 255, 255), radius=3.4,
+        trail="dots", length=16.0, trail_color=(120, 225, 255), impact="tracer"),
     "bomb": ProjectileStyle(
         "Bomb", head=(120, 70, 45), core=(255, 145, 90), radius=6.5,
         trail="none", length=0.0, trail_color=(255, 145, 90), impact="tracer"),

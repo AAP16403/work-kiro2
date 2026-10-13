@@ -323,3 +323,16 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 echo-dash
+# Echo: the frame a dash ends, the pod drops one player-owned homing echo at the dash end point (echo.py).
+ENABLE_ECHO = True               # switch: off means dashes drop nothing (echo.on_dash_end returns None)
+ECHO_DAMAGE_PERCENT = 60         # echo damage = this percent of the effective player damage, rounded half up
+ECHO_SPEED = 520.0               # world units per second; the echo leaves along the dash direction
+ECHO_TTL = 1.6                   # seconds the echo lives before it expires
+ECHO_HOMING_SECONDS = 1.2        # the echo steers toward a target only during its first this many seconds
+ECHO_HOMING_RANGE = 300.0        # world units, measured from the echo: the nearest live enemy within this is the target
+ECHO_HOMING_TURN_RATE = 3.6      # max steering in radians per second (tighter than HOMING_TURN_RATE so it reaches its target)
+ECHO_RING_RADIUS = 34.0          # screen px: the shockwave ring at the drop point, at full size
+ECHO_RING_SECONDS = 0.3          # ring lifetime; with reduced motion the ring holds its full size and only fades
+ECHO_COLOR = (150, 240, 255)     # ring colour and the echo's trail colour (projectile_art TYPE_STYLES["echo"])

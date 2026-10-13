@@ -294,11 +294,14 @@ class Game(pyglet.window.Window):
         self.state.init_rng(run_seed)
         if run_seed is not None:
             random.seed(run_seed)
+        # The skin selected in progress is read once per run start and drives the ship, shots, trails and dash.
+        # It is read before the recorder so the recording stores the same skin id the run uses.
+        self.run_skin = read_run_skin()
         # Record this run when recording is on. The recorder is attached here, before the first step.
         self.recorder = None
         if self.record_runs and self.forced_seed is None:
             self.recorder = replay.Recorder(
-                self.state.seed, difficulty, skin=current_skin_name(), mutators=self.run_mutators,
+                self.state.seed, difficulty, skin=self.run_skin.skin_id, mutators=self.run_mutators,
             )
 
         # Base per-wave head count lives in logic.py's difficulty table (the wave ramp is applied in level.spawn_wave).
@@ -338,8 +341,6 @@ class Game(pyglet.window.Window):
         self._dash_cd_mult = 1.0
         self._dash_cd_difficulty = float(get_difficulty_mods(difficulty).get("dash_cd", 1.0))
 
-        # The skin selected in progress is read once per run start and drives the ship, shots and trails.
-        self.run_skin = read_run_skin()
         self.visuals = Visuals(self.batch, self.groups)
         self.visuals.apply_skin(self.run_skin)
         self.visuals.make_player()

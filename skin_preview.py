@@ -1,14 +1,24 @@
-"""Skin preview: draw one skin's character at a chosen size, for any screen (Hangar cards, title, pause).
+"""Skin preview: one skin's character, drawn the way the run draws it, for the Hangar cards and any other screen.
 
-The character is the in-run ship drawn with pyglet shapes, facing right. ``size`` 1.0 matches the
-in-run ship. Keep the geometry below in step with Visuals.make_player.
+CharacterPreview is the helper the Hangar uses. It draws the same look Visuals draws in a run: PlayerArt
+when config.USE_PLAYER_ART is on (the pod robot), and the legacy ship when it is off. The palette goes
+through skin_apply.complete_palette, the same path read_run_skin takes, so a card and the next run show one
+palette.
+
+SkinPreview / draw_skin_preview draw the legacy ship with pyglet shapes, facing right. ``size`` 1.0 matches
+the in-run legacy ship. Keep that geometry in step with Visuals.make_player. CharacterPreview uses it for
+the legacy look.
 """
 
 from __future__ import annotations
 
 from pyglet import shapes
 
+import config
+from player import Player
+from player_art import PlayerArt
 from skin_apply import aura_outer, complete_palette
+from utils import Vec2, to_iso
 
 _WING = ((8, 0), (-12, 18), (-16, 18), (-10, 6), (-18, 8), (-18, -8), (-10, -6), (-16, -18), (-12, -18))
 _BODY = ((18, 0), (-4, 10), (-12, 8), (-8, 0), (-12, -8), (-4, -10))
@@ -105,5 +115,64 @@ class SkinPreview:
 
 
 def draw_skin_preview(batch, x: float, y: float, size: float = 1.0, palette: dict | None = None, group=None) -> SkinPreview:
-    """Draw a skin's character centred at (x, y) at ``size`` (1.0 = in-run ship). Returns the handle."""
+    """Draw the legacy ship centred at (x, y) at ``size`` (1.0 = in-run legacy ship). Returns the handle."""
     return SkinPreview(batch, x, y, size=size, palette=palette, group=group)
+
+
+class CharacterPreview:
+    """One skin's character for a Hangar card: the in-run look, fixed in place, in that skin's palette.
+
+    The look follows config.USE_PLAYER_ART, the switch Visuals.make_player reads at build time. The
+    palette is resolved once here, through skin_apply.complete_palette, so the card and read_run_skin agree.
+
+    ``place`` sets the character's centre on screen; call it when the card layout changes. ``update``
+    poses the character for the Hangar's clock ``t``; call it every frame. Neither allocates per frame.
+    """
+
+    def __init__(self, batch, group=None, palette: dict | None = None):
+        self._player = Player(pos=Vec2(0.0, 0.0))  # the fixed dummy character every card shows
+        self._aim = Vec2(1.0, 0.0)
+        self._shake = Vec2(0.0, 0.0)
+        self._palette = complete_palette(palette)  # one dict object, so PlayerArt resolves it only once
+        self._art = PlayerArt(batch, group) if config.USE_PLAYER_ART else None
+        self._legacy = None if self._art is not None else SkinPreview(batch, group=group, palette=self._palette)
+
+    @property
+    def palette(self) -> dict:
+        """The palette this card draws, as a copy."""
+        return dict(self._palette)
+
+    @property
+    def uses_player_art(self) -> bool:
+        """True when the card draws the pod robot, False when it draws the legacy ship."""
+        return self._art is not None
+
+    @property
+    def art(self) -> PlayerArt | None:
+        """The PlayerArt behind the card, or None for the legacy look."""
+        return self._art
+
+    @property
+    def legacy(self) -> SkinPreview | None:
+        """The legacy ship behind the card, or None for the pod look."""
+        return self._legacy
+
+    def place(self, x: float, y: float) -> None:
+        """Put the character's centre at screen point (x, y)."""
+        # The dummy character sits at the world origin, so the shake offset carries it to (x, y).
+        ox, oy = to_iso(Vec2(0.0, 0.0), Vec2(0.0, 0.0))
+        self._shake = Vec2(x - ox, y - oy)
+        if self._legacy is not None:
+            self._legacy.set(x, y, 1.0, self._palette)
+
+    def update(self, t: float) -> None:
+        """Pose the pod robot for clock time ``t``. The legacy ship is static, so this does nothing for it."""
+        if self._art is not None:
+            self._art.sync(self._player, self._shake, t=t, aim_dir=self._aim, palette=self._palette)
+
+    def delete(self) -> None:
+        """Remove the card's shapes from the batch."""
+        if self._art is not None:
+            self._art.delete()
+        if self._legacy is not None:
+            self._legacy.delete()

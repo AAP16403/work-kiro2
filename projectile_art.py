@@ -13,6 +13,8 @@ results. The pieces:
   calls sync() on it every frame. Pieces are shape-like handles (x, y, x2, y2, radius, color, opacity, group)
   whose setters edit the bank's arrays only.
 - spawn_impact and flak_detonation play hit effects built only from existing ParticleSystem calls.
+- SIGNATURE_STYLES gives each enemy behaviour that fires a shot its own look (spitter blob, ranged needle, bomber and
+  boss pulse rings), read from the shot's source. Player shots and the other enemies keep their looks.
 
 Flak Battery is a small-range bomb. Its shell arcs (a ground shadow sits below it, the gap swelling and closing
 over its flight) and flickers, and a ring marks the landing point. Its detonation throws the fragments and a
@@ -64,6 +66,7 @@ _RING_TEX = 256
 _LAYERS = (
     ("ground", 13980, "disc"),
     ("ring", 13990, "ring"),
+    ("sigring", 13995, "sigring"),   # enemy signature pulse rings (wave 8): their own texture, a thicker band
     ("line", 14000, "line"),
     ("trail", 14001, "disc"),
     ("body", 14002, "disc"),
@@ -87,6 +90,12 @@ class ProjectileStyle:
     length: float
     trail_color: tuple[int, int, int]
     impact: str
+    # Signature extras (enemy shots only, see SIGNATURE_STYLES). ring > 0 draws a pulse ring of that radius behind
+    # the body; flare_color and flare_alpha override the white flare (flare_alpha 0 keeps the owner default).
+    ring: float = 0.0
+    ring_color: tuple[int, int, int] = (255, 255, 255)
+    flare_color: tuple[int, int, int] | None = None
+    flare_alpha: int = 0
 
     @property
     def color(self) -> tuple[int, int, int]:
@@ -151,6 +160,74 @@ def style_for(weapon_name: str = "", projectile_type: str = "bullet") -> Project
     return style
 
 
+# ---- enemy signatures (wave 8) ----------------------------------------------------------------
+# An enemy shot takes the look of the behaviour that fired it, read from Projectile.source (set where the shot is
+# created). The four looks differ from one another in colour or shape, and from the arena floor (config.FLOOR_*).
+# Every boss behaviour shares the "boss" look. Other enemies (tank, a reflected shot) keep the red-orange shot look
+# above. Player shots never carry a source, so they never get a signature.
+SIGNATURE_STYLES: dict[str, ProjectileStyle] = {
+    "spitter": ProjectileStyle(
+        "Spitter Blob", head=config.SIG_SPITTER_COLOR, core=config.SIG_SPITTER_CORE, radius=config.SIG_SPITTER_RADIUS,
+        trail="blob", length=config.SIG_SPITTER_TRAIL, trail_color=config.SIG_SPITTER_COLOR, impact="tracer",
+        flare_color=config.SIG_SPITTER_CORE, flare_alpha=50),
+    "ranged": ProjectileStyle(
+        "Ranged Needle", head=config.SIG_RANGED_COLOR, core=config.SIG_RANGED_CORE, radius=1.6,
+        trail="needle", length=config.SIG_RANGED_LENGTH, trail_color=config.SIG_RANGED_COLOR, impact="tracer",
+        flare_color=config.SIG_RANGED_CORE, flare_alpha=90),
+    "bomber": ProjectileStyle(
+        "Bomber Pulse", head=config.SIG_BOMBER_COLOR, core=config.SIG_BOMBER_CORE, radius=3.4,
+        trail="none", length=0.0, trail_color=config.SIG_BOMBER_COLOR, impact="tracer",
+        ring=config.SIG_BOMBER_RING, ring_color=config.SIG_BOMBER_COLOR,
+        flare_color=config.SIG_BOMBER_CORE, flare_alpha=80),
+    "boss": ProjectileStyle(
+        "Boss Shot", head=config.SIG_BOSS_COLOR, core=config.SIG_BOSS_CORE, radius=4.0,
+        trail="none", length=0.0, trail_color=config.SIG_BOSS_COLOR, impact="tracer",
+        ring=config.SIG_BOSS_RING, ring_color=config.SIG_BOSS_COLOR,
+        flare_color=config.SIG_BOSS_CORE, flare_alpha=90),
+}
+
+
+def _signature_glow(style: ProjectileStyle) -> tuple[tuple[int, int, int], float, int]:
+    radius = style.ring * 1.2 if style.ring > 0.0 else max(9.0, style.radius * 2.6)
+    return style.head, radius, int(config.SIG_GLOW_OPACITY)
+
+
+# Glow per signature, built once so a frame that draws glows allocates nothing for them.
+_SIGNATURE_GLOW = {key: _signature_glow(st) for key, st in SIGNATURE_STYLES.items()}
+
+
+def signature_key(source) -> str:
+    """The SIGNATURE_STYLES key for an enemy behaviour name, or "" when that behaviour keeps the shot look.
+
+    Every "boss_*" behaviour maps to the shared "boss" look.
+    """
+    name = str(source or "")
+    if name in SIGNATURE_STYLES:
+        return name
+    if name.startswith("boss_"):
+        return "boss"
+    return ""
+
+
+def _signed_key(proj) -> str:
+    """Signature key of one shot: "" for player shots, for shots with no source, and when ENABLE_BULLET_SIGNATURES is off."""
+    if not config.ENABLE_BULLET_SIGNATURES or str(getattr(proj, "owner", "player")) != "enemy":
+        return ""
+    return signature_key(getattr(proj, "source", ""))
+
+
+def signature_style(proj) -> ProjectileStyle | None:
+    """The signature look of an enemy shot, or None when it keeps the ordinary look."""
+    key = _signed_key(proj)
+    return SIGNATURE_STYLES[key] if key else None
+
+
+def signature_glow(proj) -> tuple[tuple[int, int, int], float, int] | None:
+    """Glow colour, radius and opacity for a signed enemy shot's head, or None when the shot keeps glow.projectile_glow."""
+    key = _signed_key(proj)
+    return _SIGNATURE_GLOW[key] if key else None
+
+
 def _is_fragment(proj) -> bool:
     """A flak fragment: a player bullet with no weapon name and the short ttl that states.py gives shrapnel."""
     return (str(getattr(proj, "owner", "player")) == "player"
@@ -163,6 +240,9 @@ def style_for_projectile(proj) -> ProjectileStyle:
     """Style for one shot, with the enemy red-orange, crit gold and flak fragment variants applied."""
     if _is_fragment(proj):
         return FRAGMENT_STYLE
+    signature = signature_style(proj)
+    if signature is not None:
+        return signature
     style = style_for(getattr(proj, "weapon_name", ""), getattr(proj, "projectile_type", "bullet"))
     if str(getattr(proj, "owner", "player")) == "enemy":
         return replace(style, head=ENEMY_HEAD, core=ENEMY_CORE, trail_color=ENEMY_TRAIL)
@@ -221,7 +301,22 @@ def _ring_alpha(d: float) -> float:
     return band + fill
 
 
-_TEXTURE_ALPHA = {"line": (_LINE_TEX, _line_alpha), "disc": (_DISC_TEX, _disc_alpha), "ring": (_RING_TEX, _ring_alpha)}
+def _sig_ring_alpha(d: float) -> float:
+    """Pulse ring of an enemy signature: a band at 0.8 of the radius, about 3 px wide on a 10 px ring, with a faint fill.
+
+    The flak telegraph's _ring_alpha band is 0.012 of the radius wide, which vanishes on a 10 to 15 px ring.
+    """
+    band = max(0.0, min(1.0, (0.13 - abs(d - 0.8)) / 0.04))
+    fill = 0.10 * max(0.0, 1.0 - d / 0.8)
+    return band + fill
+
+
+_TEXTURE_ALPHA = {
+    "line": (_LINE_TEX, _line_alpha),
+    "disc": (_DISC_TEX, _disc_alpha),
+    "ring": (_RING_TEX, _ring_alpha),
+    "sigring": (_RING_TEX, _sig_ring_alpha),
+}
 
 
 class _Pool:
@@ -617,6 +712,25 @@ def _place_shell(objs, hx, hy, bx, by, length, t) -> None:
         _fade(spark, 255 * max(0.0, math.sin(t * 17.0 + i * 2.1)), step=32)
 
 
+def _build_blob(bank, group, st):
+    """Spitter signature: one short trail dot behind the blob."""
+    return [_disc(bank, group, max(1.0, st.radius * 0.42), st.trail_color, 190)]
+
+
+def _place_blob(objs, hx, hy, bx, by, length, t) -> None:
+    d = length * 0.7
+    objs[0].move(hx + bx * d, hy + by * d)
+
+
+def _build_needle(bank, group, st):
+    """Ranged signature: one thin line for the needle's shaft."""
+    return [_line(bank, group, st.trail_color, 1.6, 240)]
+
+
+def _place_needle(objs, hx, hy, bx, by, length, t) -> None:
+    objs[0].set_ends(hx, hy, hx + bx * length, hy + by * length)
+
+
 _TRAILS = {
     "none": (_build_none, _place_none),
     "tracer": (_build_tracer, _place_tracer),
@@ -626,6 +740,8 @@ _TRAILS = {
     "orb": (_build_orb, _place_orb),
     "streak": (_build_streak, _place_streak),
     "shell": (_build_shell, _place_shell),
+    "blob": (_build_blob, _place_blob),
+    "needle": (_build_needle, _place_needle),
 }
 
 
@@ -656,7 +772,9 @@ class ProjectileVisual:
         st = self.style
         build, self._place = _TRAILS[st.trail]
         self._trail = build(bank, group, st)
-        if getattr(proj, "is_crit", False):
+        if st.flare_alpha:
+            flare_alpha = st.flare_alpha
+        elif getattr(proj, "is_crit", False):
             flare_alpha = 150
         elif str(getattr(proj, "owner", "player")) == "enemy":
             flare_alpha = 90
@@ -664,7 +782,7 @@ class ProjectileVisual:
             flare_alpha = 120
         self._body = _disc(bank, group, st.radius, st.head, layer="body")
         self._core = _disc(bank, group, max(1.0, st.radius * 0.5), st.core, layer="core")
-        self._flare = _disc(bank, group, max(2.0, st.radius * 0.55), (255, 255, 255), flare_alpha, layer="flare")
+        self._flare = _disc(bank, group, max(2.0, st.radius * 0.55), st.flare_color or (255, 255, 255), flare_alpha, layer="flare")
         self.objs = self._trail + [self._body, self._core, self._flare]
         # The ttl at build time is the full flight for a shot built on its first frame, so the arc starts at 0.
         self._ttl0 = max(0.05, float(getattr(proj, "ttl", 0.0) or 0.0))
@@ -676,6 +794,12 @@ class ProjectileVisual:
             self._shadow = _disc(bank, group, st.radius * 1.5, (0, 0, 0), 90, layer="ground", aspect=0.5)
             self._telegraph = _disc(bank, group, radius, FLAK_BURST_RING, 0, layer="ring", aspect=aspect)
             self._ground = [self._shadow, self._telegraph]
+        # A signature with a ring (bomber, boss) draws a pulse ring behind its body, on the sigring layer.
+        self._ring = None
+        self._ring_rest = float(st.ring)
+        if st.ring > 0.0:
+            self._ring = _disc(bank, group, st.ring, st.ring_color, 0, layer="sigring")
+            self._ground.append(self._ring)
 
     def sync(self, proj, shake: Vec2) -> None:
         """Move every piece to the shot's shaken screen position and animate from its ttl."""
@@ -689,6 +813,23 @@ class ProjectileVisual:
         self._flare.move(hx, hy)
         if self._telegraph is not None:
             self._sync_flak(proj, shake, hx, hy, t, tc)
+        if self._ring is not None:
+            self._sync_ring(hx, hy, tc)
+
+    def _sync_ring(self, hx: float, hy: float, tc: float) -> None:
+        """The signature pulse ring: its radius and opacity swell and fade on one sine.
+
+        tc is motion.clock(ttl), so under reduced motion the sine sits at 0 and s at 0.5: the ring keeps its rest
+        radius and opacity, and only the pulse stops.
+        """
+        ring = self._ring
+        ring.move(hx, hy)
+        s = 0.5 + 0.5 * math.sin(tc * config.SIG_PULSE_RATE)
+        amp = config.SIG_RING_PULSE
+        radius = self._ring_rest * (1.0 - amp + 2.0 * amp * s)
+        if abs(radius - ring.radius) > 0.2:
+            ring.radius = radius
+        _fade(ring, 200 + 40 * s, step=8)
 
     def _sync_flak(self, proj, shake: Vec2, hx: float, hy: float, t: float, tc: float) -> None:
         """The shell's arc, flicker and landing ring.

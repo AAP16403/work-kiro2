@@ -25,7 +25,7 @@ from glow import DashAfterimage, GlowPool, projectile_glow
 from juice import SQUASH_STEP, JuiceOverlay, squash_level
 from player_art import DEFAULT_PALETTE, PlayerArt
 from powerup_art import make_pickup_art, place_pickup_art
-from projectile_art import ProjectileVisual, ShotBank
+from projectile_art import ProjectileVisual, ShotBank, signature_glow
 from skin_apply import LEGACY_PALETTE, aura_outer, complete_palette
 from starfield import Starfield
 from utils import to_iso, Vec2, enemy_behavior_name
@@ -710,7 +710,10 @@ class Visuals:
             for p in getattr(state, "projectiles", []):
                 if id(p) not in self._proj_handles:
                     continue
-                color, radius, opacity = projectile_glow(p)
+                glow = signature_glow(p)  # an enemy signature's own glow; every other shot keeps projectile_glow
+                if glow is None:
+                    glow = projectile_glow(p)
+                color, radius, opacity = glow
                 sx, sy = to_iso(p.pos, shake)
                 pool.emit(("p", id(p)), sx, sy, radius, color, opacity)
 
@@ -1541,7 +1544,7 @@ class Visuals:
         self._proj_handles[id(proj)] = ProjectileVisual(self._shot_bank, self._projectile_group, proj, shot_palette=self.shot_palette)
 
     def sync_projectile(self, proj, shake: Vec2):
-        """Update projectile visual position and animation."""
+        """Update projectile visual position and animation. An enemy signature's pulse ring is animated in ProjectileVisual.sync."""
         self._proj_handles[id(proj)].sync(proj, shake)
 
     def drop_projectile(self, proj):

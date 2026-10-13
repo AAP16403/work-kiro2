@@ -74,7 +74,7 @@ class Ranged(Behavior):
                 proj_speed = 235.0 + state.wave * 3
                 aim = _lead_dir(peek_pos, player_pos, player_vel, proj_speed, mult=0.75)
                 vel = aim * proj_speed
-                state.projectiles.append(Projectile(peek_pos, vel, 8 + state.wave // 2, ttl=2.6, owner="enemy"))
+                state.projectiles.append(Projectile(peek_pos, vel, 8 + state.wave // 2, ttl=2.6, owner="enemy", source="ranged"))
                 enemy.attack_cd = (2.0 + random.uniform(0.0, 0.5)) / sustained_cd_scale(enemy)
 
     def _do_kiting_behavior(self, enemy, player_pos, state, dt, player_vel):
@@ -121,7 +121,7 @@ class Ranged(Behavior):
                 sa = math.sin(math.radians(aim_jitter))
                 aim = Vec2(aim.x * ca - aim.y * sa, aim.x * sa + aim.y * ca).normalized()
                 vel = aim * proj_speed
-                state.projectiles.append(Projectile(enemy.pos, vel, 6 + state.wave // 3, ttl=2.4, owner="enemy"))
+                state.projectiles.append(Projectile(enemy.pos, vel, 6 + state.wave // 3, ttl=2.4, owner="enemy", source="ranged"))
                 enemy.ai["burst_left"] -= 1
                 enemy.ai["burst_gap"] = 0.16 + random.uniform(0.0, 0.08)
                 if enemy.ai["burst_left"] <= 0:

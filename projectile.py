@@ -28,6 +28,9 @@ class Projectile:
     # uses it to pick the look, physics and hit detection never read it.
     weapon_name: str = ""
     bounces: int = 0  # Ricochet bounces taken off the arena edge; a bullet gets one (see RICOCHET_BOUNCES)
+    # The enemy behaviour that fired an enemy shot ("spitter", "ranged", "bomber", "boss_brute", ...), set where the
+    # shot is created. Visual lookup only: projectile_art picks the signature look from it, physics never reads it.
+    source: str = ""
 
     def update(self, dt: float) -> bool:
         """Update projectile position and TTL. Returns False if expired."""

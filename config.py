@@ -216,15 +216,32 @@ EVENT_NEBULA_TTL = 8.0              # seconds the cloud is active; enemies insid
 EVENT_NEBULA_RADIUS = 110.0
 EVENT_NEBULA_SHIELD = 24            # shield an enemy gains on entering the cloud; the leftover is removed on exit or at the end
 
-# Multi-core job layer (parallel.py). Pool work is opt-in. tools/bench_steer.py measures it: the pool
-# steers slower than the serial loop below ~20 live enemies and faster from ~24 up (1.6x to 2.9x at 32,
-# over two runs).
-# It stays off by default because the game's wave caps keep most fights below that, and because a
-# spawned worker costs seconds of start-up on Windows (warmed on the first playing frame).
+# Multi-core job layer (parallel.py). Pool work is opt-in and changes nothing unless a flag below is on.
+# The steering pool keeps its worker processes alive and passes each frame through shared float64
+# arrays, so no snapshot is pickled per frame.
+#
+# Measured on this machine (12 logical cores, Python 3.12, spawn, 3 workers). Method: the steering
+# stage only, as in tools/bench_steer.py, median ms per frame over 300 to 600 timed frames, medians
+# across 2 or 3 repeated sweeps. The serial path moved by up to about 70% between sweeps (30 enemies:
+# 3.9 to 6.6 ms), so read the speedups as approximate.
+#   enemies   serial   pool (3 workers)   speedup   pool faster in
+#        12     0.83        0.90            0.92x       1 of 3 runs
+#        16     1.28        1.10            1.16x       3 of 3
+#        20     1.87        1.32            1.41x       3 of 3
+#        30     5.20        1.73            3.00x       2 of 2
+#        60    13.47        4.72            2.85x       2 of 2
+# The pickled pool it replaced (commit ef93c82, one run) was 0.52x at 20 and 0.92x at 30, and won only
+# at 60 (1.79x). Three and four workers were within run-to-run noise at 16 to 60 enemies, and two
+# workers were slower at 60 (7.56 ms), so the size stays at 3.
+# PARALLEL_MIN_ENEMIES = 16 is the smallest count at which the pool was faster in every run.
+# A spawned worker takes about 0.45 s to start on Windows. warm() starts the workers during the first
+# small frames, and the first big fight does not wait for them.
+# PARALLEL_STEER_ENABLED stays False. The pool is a clear speed win, but batched steering is not the
+# serial loop: phase 1 moves every enemy before coordination is applied, so enemy movement changes.
+# That is a gameplay decision, not a performance-only switch, and the shipped default must not change.
+PARALLEL_MIN_ENEMIES = 16           # live enemy count at which the batch path runs (measured above)
 PARALLEL_STEER_ENABLED = False      # True: batch enemy steering may run in a process pool
-PARALLEL_STEER_MIN_ENEMIES = 32     # live enemy count at which the batch path is used
-# Named threshold for the multicore wiring tests and bench: the batch path runs at or above this live enemy count.
-PARALLEL_MIN_ENEMIES = PARALLEL_STEER_MIN_ENEMIES
+PARALLEL_STEER_MIN_ENEMIES = PARALLEL_MIN_ENEMIES
 PARALLEL_STEER_WORKERS = 3          # process-pool size when enabled
 PARALLEL_LOADER_WORKERS = 4         # threads for I/O-bound asset reads
 

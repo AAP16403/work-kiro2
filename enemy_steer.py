@@ -8,6 +8,8 @@ Nothing in this module touches Enemy objects, pyglet, the run RNG or global stat
 only ``utils`` and ``config``, so a spawned worker can import it without loading the game.
 """
 
+import os
+import struct
 from dataclasses import dataclass
 
 from utils import Vec2
@@ -232,3 +234,184 @@ def steer_chunk(batch: SteerBatch, start: int, stop: int) -> list:
         return [None] * max(0, stop - start)
     pts = [Vec2(o.x, o.y) for o in batch.snaps]
     return [steer_one(batch, i, pts) for i in range(start, stop)]
+
+
+# ---------------------------------------------------------------------------------------------
+# Shared-memory batch layout, used by parallel.SteerBatcher's persistent worker pool. A frame is
+# written once into float64 arrays, so nothing is pickled per frame.
+#
+#   input:  HEADER slots, then FIELDS slots per unit, in snapshot order.
+#           header: [0] unit count, [1] player x, [2] player y, [3] dt, [4] pressure_mult,
+#                   [5] steer_mult
+#           unit:   x, y, vx, vy, key code, speed, lock_t, tx, ty, role code, steer (1.0 or 0.0)
+#   output: OUT_FIELDS slots per unit: steered flag (1.0 or 0.0), vx, vy, lock_t
+#
+# Behavior and role names travel as codes into KEY_NAMES and ROLE_NAMES. ``Snapshot.seed`` is not
+# packed: steer_velocity never reads it. A batch that uses a name outside these tables is not
+# packable, and the caller steers it inline, so an unexpected name costs speed, never correctness.
+# ---------------------------------------------------------------------------------------------
+
+HEADER = 8
+FIELDS = 11
+OUT_FIELDS = 4
+KEY_NAMES = ("", "chaser", "chase", "ranged", "swarm", "charger", "tank", "spitter", "flyer", "engineer", "bomber", "egg_sac")
+ROLE_NAMES = ("front", "front_heavy", "front_dive", "flank", "mid_lob", "backline", "support")
+_KEY_CODE = {name: i for i, name in enumerate(KEY_NAMES)}
+_ROLE_CODE = {name: i for i, name in enumerate(ROLE_NAMES)}
+
+# Pipe messages between the pool and its workers: raw bytes, never pickled objects.
+MSG_QUIT = b""  # an empty message tells a worker to exit
+MSG_ACK = b"k"  # a worker's reply once its range is written to the output array
+RANGE_MSG = struct.Struct("<II")  # (start, stop) of the chunk a worker should steer
+
+
+def packable(batch) -> bool:
+    """True when every behavior and role name in ``batch`` has a code."""
+    for s in batch.snaps:
+        if s.key not in _KEY_CODE or s.role not in _ROLE_CODE:
+            return False
+    return True
+
+
+def pack_batch(batch, inp) -> None:
+    """Write ``batch`` into the float64 input array ``inp``.
+
+    The caller checks ``packable`` and that the batch fits in ``inp``. Values are stored as doubles,
+    so a worker reads back exactly the floats the batch holds.
+    """
+    snaps = batch.snaps
+    n = len(snaps)
+    if HEADER + n * FIELDS > len(inp):
+        raise ValueError("batch of %d units does not fit the shared steering array" % n)
+    inp[0] = n
+    inp[1] = batch.px
+    inp[2] = batch.py
+    inp[3] = batch.dt
+    inp[4] = batch.pressure_mult
+    inp[5] = batch.steer_mult
+    base = HEADER
+    for s in snaps:
+        inp[base] = s.x
+        inp[base + 1] = s.y
+        inp[base + 2] = s.vx
+        inp[base + 3] = s.vy
+        inp[base + 4] = _KEY_CODE[s.key]
+        inp[base + 5] = s.speed
+        inp[base + 6] = s.lock_t
+        inp[base + 7] = s.tx
+        inp[base + 8] = s.ty
+        inp[base + 9] = _ROLE_CODE[s.role]
+        inp[base + 10] = 1.0 if s.steer else 0.0
+        base += FIELDS
+
+
+def steer_packed(inp, out, start: int, stop: int) -> None:
+    """Steer units ``[start, stop)`` of a packed batch and write the results into ``out``.
+
+    This is the worker kernel. It applies the same arithmetic as ``steer_one`` and ``steer_chunk``
+    to the same floats, so its results equal theirs. The neighbour test uses the raw coordinate
+    difference, which is the expression ``(p_j - p_i).length_squared()`` evaluates, so the test
+    is decided the same way.
+    """
+    n = int(inp[0])
+    dt = inp[3]
+    if dt <= 0.0:
+        for i in range(start, stop):
+            out[i * OUT_FIELDS] = 0.0
+        return
+    player = Vec2(inp[1], inp[2])
+    prof = {"pressure_mult": inp[4], "steer_mult": inp[5]}
+    xs = [inp[HEADER + j * FIELDS] for j in range(n)]
+    ys = [inp[HEADER + j * FIELDS + 1] for j in range(n)]
+    kc = [inp[HEADER + j * FIELDS + 4] for j in range(n)]
+    for i in range(start, stop):
+        base = HEADER + i * FIELDS
+        o = i * OUT_FIELDS
+        if inp[base + 10] == 0.0:
+            out[o] = 0.0
+            continue
+        key = KEY_NAMES[int(kc[i])]
+        role = ROLE_NAMES[int(inp[base + 9])]
+        xi = xs[i]
+        yi = ys[i]
+        coord_r = coord_radius(key)
+        r2 = coord_r * coord_r
+        nearby = []
+        for j in range(n):
+            if j == i:
+                continue
+            dx = xs[j] - xi
+            dy = ys[j] - yi
+            if dx * dx + dy * dy > r2:
+                continue
+            nearby.append((Vec2(xs[j], ys[j]), kc[j] == kc[i]))
+        new_vel, lock_t = steer_velocity(
+            key,
+            Vec2(xi, yi),
+            Vec2(inp[base + 2], inp[base + 3]),
+            inp[base + 5],
+            inp[base + 6],
+            Vec2(inp[base + 7], inp[base + 8]),
+            role,
+            player,
+            prof,
+            dt,
+            nearby,
+        )
+        out[o] = 1.0
+        out[o + 1] = new_vel.x
+        out[o + 2] = new_vel.y
+        out[o + 3] = lock_t
+
+
+def unpack_results(out, start: int, stop: int) -> list:
+    """Results for units ``[start, stop)`` read from the output array, in the ``steer_chunk`` format."""
+    res = []
+    for i in range(start, stop):
+        o = i * OUT_FIELDS
+        if out[o] == 0.0:
+            res.append(None)
+        else:
+            res.append((out[o + 1], out[o + 2], out[o + 3]))
+    return res
+
+
+def steer_worker_main(conn, in_name: str, out_name: str) -> None:
+    """Entry point of a persistent steering worker, started by parallel.py with the spawn method.
+
+    The worker attaches to the pool's two shared arrays, then waits on ``conn``. For each
+    ``RANGE_MSG`` it steers that range from the input array, writes the output array and answers
+    ``MSG_ACK``. An empty message, or a closed pipe, ends the loop.
+    """
+    from multiprocessing import shared_memory
+
+    in_sh = shared_memory.SharedMemory(name=in_name)
+    out_sh = shared_memory.SharedMemory(name=out_name)
+    if os.name == "posix":
+        # Attaching registers the segment with this process's resource tracker, which would unlink
+        # it when the worker exits. The parent owns the segments, so the registration is dropped.
+        from multiprocessing import resource_tracker
+
+        for sh in (in_sh, out_sh):
+            resource_tracker.unregister(sh._name, "shared_memory")
+    inp = out = None
+    try:
+        inp = memoryview(in_sh.buf).cast("d")
+        out = memoryview(out_sh.buf).cast("d")
+        while True:
+            try:
+                msg = conn.recv_bytes()
+            except (EOFError, OSError):
+                break
+            if msg == MSG_QUIT:
+                break
+            start, stop = RANGE_MSG.unpack(msg)
+            steer_packed(inp, out, start, stop)
+            conn.send_bytes(MSG_ACK)
+    finally:
+        for view in (inp, out):
+            if view is not None:
+                view.release()
+        in_sh.close()
+        out_sh.close()
+        conn.close()

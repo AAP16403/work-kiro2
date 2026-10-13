@@ -4,11 +4,14 @@ import random
 import math
 from enum import Enum
 import pyglet
+import pyglet.shapes  # noqa: F401  (the screen veil is a pyglet shape)
 
 from config import ENEMY_COLORS, POWERUP_COLORS
 import config
 import daily
 import motion
+import ui_theme
+from anim import ease_in_out_sine
 from utils import (
     Vec2,
     clamp_to_map,
@@ -116,6 +119,90 @@ def _draw_playing_scene(game, hud: bool = True) -> None:
         finally:
             game._scene_without_hud = False
 
+
+# ----------------------------------------------------------------------------
+# Screen transitions. An incoming screen fades in from the background colour. The veil is one
+# rectangle, reused for every change, and each state's draw() ends with draw_screen_fade(). The clock is
+# game._render_time, which advances only in Game.update, so the fade runs with the game loop and holds
+# when the loop does. Pause and resume are cuts, and so is every change under config.REDUCE_MOTION.
+# ----------------------------------------------------------------------------
+SCREEN_FADE_S = 0.22
+_CUT_STATES = frozenset({GameStateName.PAUSED.value})  # pausing and resuming never fade
+
+
+def screen_fade_alpha(elapsed: float, duration: float = SCREEN_FADE_S) -> float:
+    """Veil opacity 0..1 ``elapsed`` seconds into a screen change: 1 at the cut, 0 once the fade ends.
+
+    The fall is an in-out sine, so the new screen eases out of the veil instead of snapping on.
+    """
+    if duration <= 0.0 or elapsed >= duration:
+        return 0.0
+    if elapsed <= 0.0:
+        return 1.0
+    return 1.0 - ease_in_out_sine(elapsed / duration)
+
+
+def screen_change_fades(prev_name, new_name) -> bool:
+    """True when a change from ``prev_name`` to ``new_name`` fades. None (the first screen) and pauses cut."""
+    return prev_name is not None and prev_name not in _CUT_STATES and new_name not in _CUT_STATES
+
+
+class ScreenFade:
+    """Veil state for a game: the start time of the current fade and the one rectangle that draws it."""
+
+    def __init__(self):
+        self._batch = pyglet.graphics.Batch()
+        self._rect = None
+        self._size = (0, 0)
+        self._seen = None      # class name of the screen drawn last frame
+        self._started = None   # game render time the current fade began, or None
+
+    @property
+    def seen(self):
+        return self._seen
+
+    def note_screen(self, name: str, now: float) -> None:
+        """Start a fade when the screen on top differs from the last one drawn."""
+        if name == self._seen:
+            return
+        prev = self._seen
+        self._seen = name
+        self._started = now if screen_change_fades(prev, name) else None
+
+    def opacity(self, now: float, reduced: bool) -> float:
+        if reduced or self._started is None:
+            return 0.0
+        return screen_fade_alpha(now - self._started)
+
+    def draw(self, width: int, height: int, now: float, reduced: bool) -> None:
+        alpha = self.opacity(now, reduced)
+        if alpha <= 0.0:
+            return
+        if self._rect is None:
+            self._rect = pyglet.shapes.Rectangle(0, 0, width, height, color=tuple(ui_theme.BACKGROUND), batch=self._batch)
+            self._size = (width, height)
+        elif self._size != (width, height):
+            self._rect.width = width
+            self._rect.height = height
+            self._size = (width, height)
+        self._rect.opacity = int(round(255.0 * alpha))
+        self._batch.draw()
+
+
+def draw_screen_fade(game, state) -> None:
+    """Last call in a state's draw(). Only the screen on top starts or shows a fade, so the pause and
+    game-over backdrops, which draw the playing scene inside themselves, add no veil of their own."""
+    if game.fsm.current_state is not state:
+        return
+    fade = getattr(game, "_screen_fade", None)
+    if fade is None:
+        fade = ScreenFade()
+        game._screen_fade = fade
+    now = float(getattr(game, "_render_time", 0.0))
+    fade.note_screen(type(state).__name__, now)
+    fade.draw(int(game.width), int(game.height), now, motion.reduced())
+
+
 class MenuState(State):
     def enter(self):
         self.game._reset_input_flags()
@@ -146,6 +233,7 @@ class MenuState(State):
 
     def draw(self):
         self.game.main_menu.draw()
+        draw_screen_fade(self.game, self)
 
 
 class SettingsState(State):
@@ -180,6 +268,7 @@ class SettingsState(State):
 
     def draw(self):
         self.game.settings_menu.draw()
+        draw_screen_fade(self.game, self)
 
 
 class GuideState(State):
@@ -205,6 +294,7 @@ class GuideState(State):
 
     def draw(self):
         self.game.guide_menu.draw()
+        draw_screen_fade(self.game, self)
 
 
 class HangarState(State):
@@ -235,6 +325,7 @@ class HangarState(State):
 
     def draw(self):
         self.game.hangar_menu.draw()
+        draw_screen_fade(self.game, self)
 
 
 class PlayingState(State):
@@ -1044,6 +1135,7 @@ class PlayingState(State):
 
         if game._pause_hint:
             game._pause_hint.draw()
+        draw_screen_fade(game, self)
 
 
 class PausedState(State):
@@ -1070,6 +1162,7 @@ class PausedState(State):
     def draw(self):
         _draw_playing_scene(self.game)
         self.game.pause_menu.draw()
+        draw_screen_fade(self.game, self)
 
 
 class BossRewardState(State):
@@ -1100,6 +1193,7 @@ class BossRewardState(State):
     def draw(self):
         _draw_playing_scene(self.game)
         self.game.rpg_menu.draw()
+        draw_screen_fade(self.game, self)
 
 
 _GAME_OVER_RETRY_KEYS = (
@@ -1203,3 +1297,4 @@ class GameOverState(State):
         _draw_playing_scene(self.game, hud=False)
         self.game.game_over_menu.set_reveal(float(self.game._render_time) - self._t0)
         self.game.game_over_menu.draw()
+        draw_screen_fade(self.game, self)

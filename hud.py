@@ -8,6 +8,7 @@ import pyglet
 from pyglet import shapes
 
 import config
+from anim import clamp, ease_in_out_sine, ease_out_back, ease_out_cubic
 from config import SHIELD_MAX
 from menu import UI_FONT_HEAD, UI_FONT_BODY, UI_FONT_META
 from hud_widgets import (
@@ -31,7 +32,9 @@ CONTRAST_PLATE_ALPHA = 215  # opacity of the dark plate behind each HUD number i
 CONTRAST_PLATE_PAD = 4      # reference pixels between a number and its plate's edge
 
 BANNER_IN_S = 0.25        # ease-out slide/scale-in
-BANNER_OUT_S = 0.45       # fade-out at the end of a banner
+BANNER_OUT_S = 0.45       # ease in-out fade and float at the end of a banner
+BANNER_SUB_DELAY_S = 0.05  # the subtitle starts this long after the title (capped at a quarter of the entrance)
+BANNER_TITLE_DROP = 14    # reference px the title drops in from above, landing with a small overshoot
 BOSS_LAG_HOLD_S = 0.10    # damage trail waits this long before it starts shrinking
 BOSS_LAG_SHRINK_S = 0.40  # then shrinks toward the real HP (about 0.5 s in total)
 STATUS_SEP = "   |   "    # between status segments
@@ -534,23 +537,42 @@ class HUD:
         _fit_text(self.banner_sub, sub, max_w)
 
     def _place_banner(self) -> None:
-        """Position the banner plate and text for the current animation time."""
+        """Position the banner plate and text for the current animation time.
+
+        Entrance (BANNER_IN_S): the plate eases out while it rises into place and its width settles.
+        Inside the plate the title drops from BANNER_TITLE_DROP px above its rest and lands with a small
+        overshoot (ease_out_back); the subtitle fades in a beat after the title. Exit (BANNER_OUT_S): the
+        banner fades on an in-out sine and floats up as it goes. With config.REDUCE_MOTION set, nothing
+        moves: the plate, title and subtitle only fade in and out.
+        """
         sz = self._sz
         dur = self._banner_dur
         t = self._banner_t
         in_t = min(BANNER_IN_S, dur * 0.3)
         out_t = min(BANNER_OUT_S, dur * 0.45)
-        alpha = 1.0
-        slide = 0.0  # 1 at the start of slide-in, 0 once settled
-        drift = 0.0  # 0 until the fade-out starts, then 1 at the end
+        still = _reduce_motion()
+        alpha = 1.0       # plate alpha; the title follows it
+        sub_alpha = 1.0   # the subtitle has its own alpha during the entrance
+        slide = 0.0       # 1 at the start of slide-in, 0 once settled
+        drift = 0.0       # 0 until the fade-out starts, then 1 at the end
+        drop = 0.0        # 1 at the start of the title drop, 0 once it has landed
         if t < in_t:
-            eased = 1.0 - (1.0 - t / in_t) ** 3  # ease-out
+            eased = ease_out_cubic(t / in_t)
             alpha = eased
-            slide = 1.0 - eased
+            sub_delay = min(BANNER_SUB_DELAY_S, in_t * 0.25)
+            sub_alpha = ease_out_cubic(clamp((t - sub_delay) / (in_t - sub_delay), 0.0, 1.0))
+            if still:
+                slide = 0.0
+                sub_alpha = eased
+            else:
+                slide = 1.0 - eased
+                drop = 1.0 - ease_out_back(t / in_t)
         elif t > dur - out_t:
-            p = (t - (dur - out_t)) / out_t
-            alpha = 1.0 - p
-            drift = p
+            p = clamp((t - (dur - out_t)) / out_t, 0.0, 1.0)
+            eased_out = ease_in_out_sine(p)
+            alpha = 1.0 - eased_out
+            sub_alpha = alpha
+            drift = 0.0 if still else eased_out
 
         title_px, sub_px = self._banner_px
         has_sub = bool(self.banner_sub.text)
@@ -578,8 +600,9 @@ class HUD:
         plate_y = cy - plate_h / 2.0 + dy
         top = plate_y + plate_h
         acc_y = top - pad_y - acc_h
-        title_base = acc_y - acc_gap - title_cap
-        sub_base = title_base - sub_gap - sub_cap
+        title_rest = acc_y - acc_gap - title_cap
+        title_base = title_rest + drop * sz(BANNER_TITLE_DROP)
+        sub_base = title_rest - sub_gap - sub_cap
         acc_w = min(plate_w * 0.5, sz(200))
 
         self.banner_plate.x = cx - plate_w / 2.0
@@ -600,7 +623,7 @@ class HUD:
         self.banner_sub.visible = has_sub
         self.banner_sub.x = round(cx)
         self.banner_sub.y = round(sub_base)
-        self.banner_sub.opacity = int(230 * alpha)
+        self.banner_sub.opacity = int(230 * sub_alpha)
 
     # ------------------------------------------------------------------
     # Banner, boss bar, toast and skin API

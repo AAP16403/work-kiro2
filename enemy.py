@@ -1044,18 +1044,46 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             _dispatch_behavior_update(enemy.behavior, enemy, player_pos, state, dt, game, player_vel)
 
 
+_UPDATE_KWARG_FLAGS: dict = {}  # updater function -> (takes game, takes player_vel)
+
+
+def _update_kwarg_flags(updater) -> tuple:
+    """Which optional keywords ``updater`` takes. Computed once per function, not once per unit per step.
+
+    ``inspect.signature`` costs tens of microseconds, and this ran for every unit on every step. With
+    ``config.ENABLE_MULTICORE_FRAME`` off, the signature is read on every call, as before.
+    """
+    if not config.ENABLE_MULTICORE_FRAME:
+        return _probe_update_kwargs(updater)
+    key = getattr(updater, "__func__", updater)
+    try:
+        flags = _UPDATE_KWARG_FLAGS.get(key)
+    except TypeError:  # an unhashable callable is inspected each time, as before
+        return _probe_update_kwargs(updater)
+    if flags is None:
+        flags = _probe_update_kwargs(updater)
+        _UPDATE_KWARG_FLAGS[key] = flags
+    return flags
+
+
+def _probe_update_kwargs(updater) -> tuple:
+    params = inspect.signature(updater).parameters
+    return ("game" in params, "player_vel" in params)
+
+
 def _dispatch_behavior_update(behavior_impl, enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
     """Call behavior.update with backward-compatible argument mapping."""
     updater = getattr(behavior_impl, "update", None)
     if not callable(updater):
         return
 
-    kwargs = {}
-    params = inspect.signature(updater).parameters
-
-    if "game" in params:
-        kwargs["game"] = game
-    if "player_vel" in params:
-        kwargs["player_vel"] = player_vel
-
-    updater(enemy, player_pos, state, dt, **kwargs)
+    takes_game, takes_player_vel = _update_kwarg_flags(updater)
+    # Direct calls, not a kwargs dict: this runs for every unit on every step.
+    if takes_game and takes_player_vel:
+        updater(enemy, player_pos, state, dt, game=game, player_vel=player_vel)
+    elif takes_game:
+        updater(enemy, player_pos, state, dt, game=game)
+    elif takes_player_vel:
+        updater(enemy, player_pos, state, dt, player_vel=player_vel)
+    else:
+        updater(enemy, player_pos, state, dt)

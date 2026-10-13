@@ -1,6 +1,8 @@
 """Base class for enemy behaviors."""
+import math
 from abc import ABC, abstractmethod
 
+import config
 from hazards import LaserBeam
 from utils import Vec2
 
@@ -22,6 +24,67 @@ def sustained_cd_scale(enemy) -> float:
     ai = getattr(enemy, "ai", None) or {}
     m = min(1.6, max(0.6, float(ai.get("attack_mult", 1.0))))
     return 1.0 + (m - 1.0) * 0.5
+
+
+def separation_reference(enemy, others, radius: float, weight: float = 1.0) -> Vec2:
+    """Inverse-square repulsion, written with Vec2 arithmetic. The reference for ``separation_steer``.
+
+    This is the ``_separation`` that bomber, chase, engineer, ranged, spitter and tank each carried before
+    the wave 8 frame work. It runs when ``config.ENABLE_MULTICORE_FRAME`` is off.
+    """
+    r = float(radius)
+    acc = Vec2(0.0, 0.0)
+    count = 0
+    for o in others:
+        if o is enemy:
+            continue
+        dvec = enemy.pos - o.pos
+        d = dvec.length()
+        if d <= 1e-6 or d > r:
+            continue
+        acc = acc + dvec * (1.0 / (d * d))
+        count += 1
+    if count == 0:
+        return Vec2(0.0, 0.0)
+    return acc.normalized() * weight
+
+
+def separation_steer(enemy, others, radius: float, weight: float = 1.0) -> Vec2:
+    """Inverse-square repulsion from ``others`` within ``radius``, scaled to ``weight``.
+
+    Same result as ``separation_reference``, bit for bit. It does the same float operations in the same
+    order (``dvec = enemy.pos - o.pos``, ``d = hypot``, ``acc += dvec * (1 / d*d)``, then normalise and
+    scale), but it reads the coordinates as floats and makes one Vec2 for the answer, not one per
+    neighbour pair. Every behaviour runs this for every unit each step, so the per-pair allocation was
+    the cost. With ``config.ENABLE_MULTICORE_FRAME`` off it defers to ``separation_reference``.
+    """
+    if not config.ENABLE_MULTICORE_FRAME:
+        return separation_reference(enemy, others, radius, weight)
+    r = float(radius)
+    ex = enemy.pos.x
+    ey = enemy.pos.y
+    acc_x = 0.0
+    acc_y = 0.0
+    count = 0
+    for o in others:
+        if o is enemy:
+            continue
+        op = o.pos
+        dx = ex - op.x
+        dy = ey - op.y
+        d = math.hypot(dx, dy)
+        if d <= 1e-6 or d > r:
+            continue
+        s = 1.0 / (d * d)
+        acc_x = acc_x + dx * s
+        acc_y = acc_y + dy * s
+        count += 1
+    if count == 0:
+        return Vec2(0.0, 0.0)
+    length = math.hypot(acc_x, acc_y)
+    if length <= 1e-9:
+        return Vec2(0.0, 0.0) * weight
+    return Vec2(acc_x / length, acc_y / length) * weight
 
 
 class Behavior(ABC):

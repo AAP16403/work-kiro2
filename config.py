@@ -323,3 +323,13 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 multicore-frame
+# ENABLE_MULTICORE_FRAME gates two pure frame-cost changes. Both return bit-identical results to the
+# reference code they replace, so this switch changes speed only, never enemy movement or the run:
+#   - enemy._dispatch_behavior_update reads each behaviour's optional keywords once per function instead of
+#     calling inspect.signature for every unit on every step (tens of microseconds each).
+#   - enemy_behaviors.base.separation_steer replaces the per-pair Vec2 loop that bomber, chase, engineer,
+#     ranged, spitter and tank each ran for every unit (one Vec2 per pair before, none now).
+# The shipped PARALLEL_* defaults above are unchanged. Measure with tools/bench_frame_pool.py.
+ENABLE_MULTICORE_FRAME = True

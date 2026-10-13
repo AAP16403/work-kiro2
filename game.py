@@ -86,7 +86,7 @@ from states import (
 
 # Tests and the headless tools never show the game window, so a test run opens no windows.
 # PLOUTO_HEADLESS=1 hides it for any run; PLOUTO_SHOW_WINDOW=1 shows it for a test that needs to look.
-HEADLESS_SCRIPTS = frozenset({"bench.py", "bench_frames.py", "bench_steer.py", "playtest.py", "balance_sim.py", "screens.py"})
+HEADLESS_SCRIPTS = frozenset({"bench.py", "bench_frames.py", "bench_frame_pool.py", "bench_steer.py", "playtest.py", "balance_sim.py", "screens.py"})
 
 
 def headless_requested() -> bool:

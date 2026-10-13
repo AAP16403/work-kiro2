@@ -94,6 +94,8 @@ try {
   $Info.FileName = $ExePath
   $Info.WorkingDirectory = $DistDir
   $Info.UseShellExecute = $false
+  # Hidden window: the smoke run checks that the game starts and stays up, and must not flash a window.
+  $Info.EnvironmentVariables["PLOUTO_HEADLESS"] = "1"
   $Proc = [System.Diagnostics.Process]::Start($Info)
   if (-not $Proc) { throw "the process did not start" }
   Start-Sleep -Seconds $WaitSeconds
@@ -110,8 +112,11 @@ catch {
 }
 finally {
   if ($Proc -and -not $Proc.HasExited) {
+    # The game starts worker processes of its own. Stop them too, or they stay running after the smoke run.
+    $Workers = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($Proc.Id)" -ErrorAction SilentlyContinue)
     Stop-Process -Id $Proc.Id -Force -ErrorAction SilentlyContinue
     [void]$Proc.WaitForExit(5000)
+    foreach ($Worker in $Workers) { Stop-Process -Id $Worker.ProcessId -Force -ErrorAction SilentlyContinue }
     Write-Host "Stopped Plouto.exe."
   }
 }

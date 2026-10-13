@@ -323,3 +323,17 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 combo-ring
+ENABLE_COMBO_RING = True                 # combo timer ring beside the score panel (hud.py, combo_ring.py)
+COMBO_RING_RADIUS = 22.0                 # reference px (980x620 scale): centre line of the ring band
+COMBO_RING_THICKNESS = 5.0               # reference px: width of the ring band
+COMBO_RING_SEGMENTS = 20                 # straight pieces per circle (track, sweep, halo); 20 keeps the chord error under 0.4 px at 1080p
+COMBO_RING_TRACK_ALPHA = 60              # opacity of the empty track, shown at every combo level
+COMBO_RING_SWEEP_ALPHA = 235             # opacity of the sweep that shows the combo window left
+COMBO_RING_TIER_MIN = (1.0, 2.0, 4.0, 6.0)  # multiplier at which each tier starts: grey, blue, gold, magenta
+COMBO_RING_TIER_COLORS = ((150, 160, 172), (84, 176, 255), (255, 200, 60), (240, 90, 230))
+COMBO_RING_PULSE_SECONDS = 0.35          # one pulse per tier change lasts this long
+COMBO_RING_PULSE_GROW = 0.30             # full motion: the halo grows to (1 + this) times the radius while it fades
+COMBO_RING_HALO_THICKNESS = 0.60         # the halo band is this share of the ring's thickness
+COMBO_RING_FLASH_WHITE = 0.50            # reduced motion: the sweep flashes this far toward white, then settles

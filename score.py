@@ -45,6 +45,17 @@ COMBO_DECAY_RATE = 1.0         # combo lost per second during decay
 COMBO_INCREMENT = 0.25         # combo added per kill
 COMBO_MAX = 8.0                # max combo multiplier
 
+
+def combo_window_fraction(elapsed: float, window: float) -> float:
+    """Share of a combo window still open: 1.0 at elapsed 0, 0.5 halfway, 0.0 at the timeout and after it.
+
+    A window of zero or less is already closed (0.0), so a bad config never divides by zero.
+    """
+    if window <= 0.0:
+        return 0.0
+    return max(0.0, min(1.0, 1.0 - float(elapsed) / float(window)))
+
+
 HIGH_SCORE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "high_scores.json")
 MAX_HIGH_SCORES = 5
 
@@ -106,6 +117,16 @@ class ScoreTracker:
         self._combo_timer += dt
         if self._combo_timer >= COMBO_DECAY_DELAY and self.combo > 1.0:
             self.combo = max(1.0, self.combo - COMBO_DECAY_RATE * dt)
+
+    def combo_window_left(self) -> float:
+        """Share of the combo timeout still open (the combo timer's sweep, read by the HUD combo ring).
+
+        The timeout is COMBO_DECAY_DELAY seconds from the last kill. It reads 1.0 right after a kill and 0.0 once
+        it has passed, when the combo starts to decay. With no combo (multiplier 1.0) it reads 0.0.
+        """
+        if self.combo <= 1.0:
+            return 0.0
+        return combo_window_fraction(self._combo_timer, COMBO_DECAY_DELAY)
 
     # ------------------------------------------------------------------
     # High-score persistence

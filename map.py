@@ -1,4 +1,9 @@
-"""Game map/room and isometric rendering."""
+"""Game map/room and isometric rendering.
+
+The point lists, colours and animation values come from geometry_build.py, which makes no pyglet
+calls. This module creates the pyglet shapes from those records on the main thread, in the same order
+the old code created them.
+"""
 
 import math
 import random
@@ -7,15 +12,43 @@ from pyglet import shapes
 from pyglet.graphics import Group
 
 import config
+import geometry_build
 import motion
+import utils
 from config import FLOOR_MAIN, FLOOR_EDGE, FLOOR_GRID
-from utils import Vec2, to_iso
 
 
 def _set_opacity(shape, value: int) -> None:
     """Write opacity only when it changes. Every opacity write re-uploads the shape's colour buffer."""
     if shape.opacity != value:
         shape.opacity = value
+
+
+def _worker_enabled() -> bool:
+    """config.ARENA_GEOMETRY_WORKER switches the worker on. It is off by default (geometry_build.WORKER_ENABLED_DEFAULT)."""
+    return bool(getattr(config, "ARENA_GEOMETRY_WORKER", geometry_build.WORKER_ENABLED_DEFAULT))
+
+
+def _make_shape(rec, batch, group=None):
+    """Create the pyglet shape for one geometry record (see geometry_build for the formats)."""
+    kind = rec[0]
+    if kind == "circle":
+        _, x, y, radius, color, opacity = rec
+        shape = shapes.Circle(x, y, radius, color=color, batch=batch, group=group)
+    elif kind == "line":
+        _, x1, y1, x2, y2, thickness, color, opacity = rec
+        shape = shapes.Line(x1, y1, x2, y2, thickness=thickness, color=color, batch=batch, group=group)
+    elif kind == "polygon":
+        _, vertices, color, opacity = rec
+        shape = shapes.Polygon(*vertices, color=color, batch=batch, group=group)
+    elif kind == "rect":
+        _, x, y, width, height, color, opacity = rec
+        shape = shapes.Rectangle(x, y, width, height, color=color, batch=batch, group=group)
+    else:
+        raise ValueError(f"unknown geometry record: {kind!r}")
+    if shape.opacity != opacity:
+        shape.opacity = opacity
+    return shape
 
 
 class Room:
@@ -34,6 +67,7 @@ class Room:
         self._t = 0.0
         self._w = width
         self._h = height
+        self._prefetcher = None
 
         # Combat intensity overlay (0 = calm cool tint, 1 = boss warm tint).
         self._combat_intensity = 0.0
@@ -43,9 +77,12 @@ class Room:
         # Gradient backdrop via stacked translucent rectangles.
         # The backdrop gets its own draw-order group so the starfield can sit above it and below the floor.
         bg_group = Group(order=int(config.ROOM_BG_LAYER_ORDER))
-        self._bg_a = shapes.Rectangle(0, 0, width, height, color=config.BG_TOP, batch=batch, group=bg_group)
-        self._bg_b = shapes.Rectangle(0, 0, width, height, color=config.BG_BOTTOM, batch=batch, group=bg_group)
-        self._bg_b.opacity = 120
+        for target, rec, _aux in geometry_build.background_ops(width, height, config.BG_TOP, config.BG_BOTTOM):
+            shape = _make_shape(rec, batch, bg_group)
+            if target == "bg_a":
+                self._bg_a = shape
+            else:
+                self._bg_b = shape
 
         self._ambient: list[tuple[shapes.Circle, float, float, float]] = []
         self._scanlines: list[tuple[shapes.Line, int, float]] = []
@@ -55,52 +92,19 @@ class Room:
         self._build_floor()
 
     def _build_ambient(self):
-        count = max(8, min(18, int((self._w * self._h) / 140_000)))
-        for _ in range(count):
-            r = random.uniform(14, 40)
-            x = random.uniform(0, self._w)
-            y = random.uniform(0, self._h)
-            col = random.choice([(40, 80, 140), (90, 50, 120), (60, 110, 160)])
-            orb = shapes.Circle(x, y, r, color=col, batch=self.batch)
-            orb.opacity = random.randint(18, 40)
-            vx = random.uniform(-10, 10)
-            vy = random.uniform(-8, 8)
-            phase = random.uniform(0, math.tau)
-            self._ambient.append((orb, vx, vy, phase))
-
-        # Subtle filmic vignette.
-        corners = (
-            (0, 0),
-            (self._w, 0),
-            (0, self._h),
-            (self._w, self._h),
-        )
-        for cx, cy in corners:
-            vr = min(self._w, self._h) * random.uniform(0.32, 0.46)
-            c = shapes.Circle(cx, cy, vr, color=(6, 7, 12), batch=self.batch)
-            c.opacity = random.randint(34, 54)
-            phase = random.uniform(0.0, math.tau)
-            self._vignette.append((c, phase))
-
-        # Very soft moving scanlines for synthwave vibe.
-        scan_count = max(12, min(24, int(self._h / 42)))
-        for i in range(scan_count):
-            y = (i / max(1, scan_count - 1)) * self._h
-            ln = shapes.Line(0, y, self._w, y, thickness=1, color=(90, 120, 180), batch=self.batch)
-            base = random.randint(9, 20)
-            ln.opacity = base
-            phase = random.uniform(0.0, math.tau)
-            self._scanlines.append((ln, base, phase))
-        
-        # New background grid
-        bg_grid_count = max(10, min(20, int(self._w / 50)))
-        for i in range(bg_grid_count):
-            x = (i / max(1, bg_grid_count - 1)) * self._w
-            ln = shapes.Line(x, 0, x, self._h, thickness=1, color=(100, 120, 160), batch=self.batch)
-            base = random.randint(5, 15)
-            ln.opacity = base
-            phase = random.uniform(0.0, math.tau)
-            self._bg_grid.append((ln, base, phase))
+        for target, rec, aux in geometry_build.ambient_ops(self._w, self._h, random):
+            shape = _make_shape(rec, self.batch)
+            if target == "ambient":
+                vx, vy, phase = aux
+                self._ambient.append((shape, vx, vy, phase))
+            elif target == "vignette":
+                self._vignette.append((shape, aux))
+            elif target == "scanline":
+                base, phase = aux
+                self._scanlines.append((shape, base, phase))
+            else:  # bg_grid
+                base, phase = aux
+                self._bg_grid.append((shape, base, phase))
 
     def resize(self, width: int, height: int):
         self._w = width
@@ -116,6 +120,53 @@ class Room:
         if map_type:
             self.map_type = map_type
         self._rebuild_floor()
+
+    def prefetch_arena(self, map_type: str = None, width: int = None, height: int = None) -> bool:
+        """Start one arena's floor geometry in a worker process, for the next rebuild to pick up.
+
+        Call it at wave start for the arena that comes next. It does nothing unless
+        config.ARENA_GEOMETRY_WORKER is true. A rebuild for exactly this arena uses the worker's result if
+        it has finished. Otherwise the rebuild builds the same geometry in-process. Returns True if a request
+        was queued.
+        """
+        if not _worker_enabled():
+            return False
+        if self._prefetcher is None:
+            self._prefetcher = geometry_build.FloorPrefetcher()
+        return self._prefetcher.submit(self._arena_spec(map_type, width, height))
+
+    def _arena_spec(self, map_type: str = None, width: int = None, height: int = None):
+        return geometry_build.ArenaSpec(
+            map_type=self.map_type if map_type is None else map_type,
+            radius=float(config.ROOM_RADIUS),
+            width=self._w if width is None else width,
+            height=self._h if height is None else height,
+            view_w=utils.VIEW_W,
+            view_h=utils.VIEW_H,
+            iso_x=utils.ISO_SCALE_X,
+            iso_y=utils.ISO_SCALE_Y,
+            floor_main=FLOOR_MAIN,
+            floor_edge=FLOOR_EDGE,
+            floor_grid=FLOOR_GRID,
+        )
+
+    def _rebuild_ops(self):
+        """Floor ops for a rebuild. None means build in-process from the module RNG (the default path).
+
+        With the worker on, a request queued by prefetch_arena() for this exact arena is used once it has
+        finished. Otherwise the same ops are built in-process from that request's seed, so the result is
+        the same whichever path produced it.
+        """
+        if not _worker_enabled() or self._prefetcher is None:
+            return None
+        spec = self._arena_spec()
+        seed = self._prefetcher.seed_for(spec)
+        if seed is None:
+            return None
+        ops = self._prefetcher.take(spec)
+        if ops is None:
+            ops = geometry_build.floor_ops(spec, random.Random(seed))
+        return ops
 
     def _rebuild_floor(self):
         # Free the previous floor shapes; otherwise old polygons stay in the batch (ghost floor, GPU leak).
@@ -149,345 +200,36 @@ class Room:
                 o.delete()
         self._decor.clear()
         # Scanlines and the background grid are built once in _build_ambient; keep them across floor rebuilds.
-        self._build_floor()
+        self._build_floor(self._rebuild_ops())
 
-    def _build_floor(self):
-        """Build the isometric floor with enhanced visuals."""
-        radius = float(config.ROOM_RADIUS)
-
-        def iso_point(angle, r=radius):
-            p = Vec2(math.cos(angle) * float(r), math.sin(angle) * float(r))
-            return to_iso(p, Vec2(0, 0))
-
-        points_list = []
-        if self.map_type == config.MAP_DIAMOND:
-            # 4 points
-            points = [iso_point(i * math.pi / 2, radius * 1.1) for i in range(4)]
-            # Fix orientation: 0 is right. We want points at (R,0), (0,R), (-R,0), (0,-R).
-            # iso_point uses standard math angles. 0 is Right. pi/2 is Up.
-            points_list.append(points)
-            
-        elif self.map_type == config.MAP_CROSS:
-            # 12 points. Two rectangles crossing.
-            # Arms width = 0.35 * R?
-            w = radius * 0.35
-            r = radius
-            # Defined in logical coords, then converted.
-            # Start top-right inner corner? 
-            # Verts: (w, w), (r, w), (r, -w), (w, -w), (w, -r), (-w, -r), (-w, -w), (-r, -w), (-r, w), (-w, w), (-w, r), (w, r)
-            # Order matters for filling.
-            logic_pts = [
-                Vec2(w, w), Vec2(r, w), Vec2(r, -w), Vec2(w, -w),
-                Vec2(w, -r), Vec2(-w, -r), Vec2(-w, -w), Vec2(-r, -w),
-                Vec2(-r, w), Vec2(-w, w), Vec2(-w, r), Vec2(w, r)
-            ]
-            points_list.append([to_iso(p, Vec2(0,0)) for p in logic_pts])
-
-        elif self.map_type == config.MAP_DONUT:
-            # Series of trapezoids.
-            inner = radius * 0.4
-            segments = 16
-            for i in range(segments):
-                a1 = (i / segments) * math.tau
-                a2 = ((i + 1) / segments) * math.tau
-                p1 = iso_point(a1, inner)
-                p2 = iso_point(a1, radius)
-                p3 = iso_point(a2, radius)
-                p4 = iso_point(a2, inner)
-                points_list.append([p1, p2, p3, p4])
-                
-        else: # MAP_CIRCLE
-            # Create circle shape with multiple points for smoother edges
-            points_list.append([iso_point((i / 32) * math.tau, radius) for i in range(32)])
-
+    def _build_floor(self, ops=None):
+        """Build the isometric floor. ``ops`` comes from geometry_build (see _rebuild_ops). None builds it here."""
+        if ops is None:
+            ops = geometry_build.floor_ops(self._arena_spec(), random)
         self._floor_polys = []
-        for pts in points_list:
-            self._floor_polys.append(shapes.Polygon(*pts, color=FLOOR_MAIN, batch=self.batch))
-        
-        # Edge/Border logic is complex for general shapes. 
-        # For simplicity, we just draw the floor polygons slightly larger/darker behind?
-        # Or just rely on the boundary lines.
-        # Let's drop the filled "edge" polygon for non-circles to avoid triangulation complexity,
-        # and rely on the boundary lines which we will update next.
-        
-        # Only draw edge for circle/diamond (convex) easily.
-        if self.map_type in (config.MAP_CIRCLE, config.MAP_DIAMOND):
-             edge_pts = [iso_point((i / 32) * math.tau, radius * 1.03) for i in range(32)] if self.map_type == config.MAP_CIRCLE else \
-                        [iso_point(i * math.pi / 2, radius * 1.13) for i in range(4)]
-             self._edge = shapes.Polygon(*edge_pts, color=FLOOR_EDGE, batch=self.batch)
-             self._edge.opacity = 150
-
-        # Combat intensity overlay — a translucent polygon matching the floor shape.
-        # We can just duplicate the floor polys.
         self._intensity_overlays = []
-        for pts in points_list:
-            io = shapes.Polygon(*pts, color=(60, 30, 20), batch=self.batch)
-            io.opacity = 0
-            self._intensity_overlays.append(io)
-
-        # Soft central lighting (screen-space; low opacity so it "just adds depth").
-        cx = self._w * 0.5
-        cy = self._h * 0.5
-        light_a = shapes.Circle(cx, cy, min(self._w, self._h) * 0.30, color=(60, 80, 125), batch=self.batch)
-        light_a.opacity = 18
-        light_b = shapes.Circle(cx, cy, min(self._w, self._h) * 0.18, color=(140, 95, 190), batch=self.batch)
-        light_b.opacity = 12
-        self._decor.extend([light_a, light_b])
-
-        # Enhanced grid with multiple densities for better visual clarity
-        grid_step = max(52, int(radius * 0.14))
-        grid_n = max(5, int(radius // grid_step))
-        for i in range(-grid_n, grid_n + 1):
-            # Primary grid lines (every 50 units)
-            a = Vec2(i * grid_step, -radius)
-            b = Vec2(i * grid_step, radius)
-            ax, ay = to_iso(a, Vec2(0, 0))
-            bx, by = to_iso(b, Vec2(0, 0))
-            ln = shapes.Line(ax, ay, bx, by, thickness=1, color=FLOOR_GRID, batch=self.batch)
-            ln.opacity = 120
-            self._grid.append(ln)
-
-            a = Vec2(-radius, i * grid_step)
-            b = Vec2(radius, i * grid_step)
-            ax, ay = to_iso(a, Vec2(0, 0))
-            bx, by = to_iso(b, Vec2(0, 0))
-            ln = shapes.Line(ax, ay, bx, by, thickness=1, color=FLOOR_GRID, batch=self.batch)
-            ln.opacity = 120
-            self._grid.append(ln)
-
-        # Add secondary finer grid for visual richness
-        fine_grid_step = max(28, int(radius * 0.075))
-        fine_n = max(10, int(radius // fine_grid_step))
-        for i in range(-fine_n, fine_n + 1):
-            a = Vec2(i * fine_grid_step, -radius)
-            b = Vec2(i * fine_grid_step, radius)
-            ax, ay = to_iso(a, Vec2(0, 0))
-            bx, by = to_iso(b, Vec2(0, 0))
-            ln = shapes.Line(ax, ay, bx, by, thickness=0.5, color=FLOOR_GRID, batch=self.batch)
-            ln.opacity = 40
-            self._grid.append(ln)
-
-            a = Vec2(-radius, i * fine_grid_step)
-            b = Vec2(radius, i * fine_grid_step)
-            ax, ay = to_iso(a, Vec2(0, 0))
-            bx, by = to_iso(b, Vec2(0, 0))
-            ln = shapes.Line(ax, ay, bx, by, thickness=0.5, color=FLOOR_GRID, batch=self.batch)
-            ln.opacity = 40
-            self._grid.append(ln)
-
-        # Boundary ring for visual containment (static-ish, separate pulse).
-        # Generate boundary lines based on points.
-        all_lines = []
-        if self.map_type == config.MAP_DONUT:
-             # Inner and outer rings
-             seg = 32
-             # Outer
-             for i in range(seg):
-                 a1 = (i/seg)*math.tau; p1 = iso_point(a1, radius)
-                 a2 = ((i+1)/seg)*math.tau; p2 = iso_point(a2, radius)
-                 all_lines.append((p1, p2))
-             # Inner
-             inner = radius * 0.4
-             for i in range(seg):
-                 a1 = (i/seg)*math.tau; p1 = iso_point(a1, inner)
-                 a2 = ((i+1)/seg)*math.tau; p2 = iso_point(a2, inner)
-                 all_lines.append((p1, p2))
-
-        elif self.map_type == config.MAP_CROSS:
-             # Follow the 12 logical points
-             w = radius * 0.35
-             r = radius
-             logic_pts = [
-                Vec2(w, w), Vec2(r, w), Vec2(r, -w), Vec2(w, -w),
-                Vec2(w, -r), Vec2(-w, -r), Vec2(-w, -w), Vec2(-r, -w),
-                Vec2(-r, w), Vec2(-w, w), Vec2(-w, r), Vec2(w, r)
-             ]
-             screen_pts = [to_iso(p, Vec2(0,0)) for p in logic_pts]
-             for i in range(len(screen_pts)):
-                 all_lines.append((screen_pts[i], screen_pts[(i+1)%len(screen_pts)]))
-        
-        elif self.map_type == config.MAP_DIAMOND:
-             pts = [iso_point(i * math.pi / 2, radius * 1.1) for i in range(4)]
-             for i in range(4):
-                 all_lines.append((pts[i], pts[(i+1)%4]))
-
-        else: # Circle
-             seg = 40
-             for i in range(seg):
-                 a1 = (i/seg)*math.tau; p1 = iso_point(a1, radius)
-                 a2 = ((i+1)/seg)*math.tau; p2 = iso_point(a2, radius)
-                 all_lines.append((p1, p2))
-
-        for p1, p2 in all_lines:
-            ln = shapes.Line(
-                p1[0], p1[1], p2[0], p2[1],
-                thickness=2,
-                color=(155, 110, 180),
-                batch=self.batch,
-            )
-            ln.opacity = 135
-            self._boundary.append((ln, random.uniform(0.0, math.tau)))
-
-        self._build_floor_decor(radius)
-
-    def _build_floor_decor(self, radius: float) -> None:
-        """Add panels + glowing circuit lines for a more detailed floor."""
-        # Panel "tiles" (isometric diamonds) within the room.
-        panel_count = max(26, min(70, int(radius * 0.20)))
-        for _ in range(panel_count):
-            ang = random.uniform(0.0, math.tau)
-            r = (random.random() ** 0.65) * (radius * 0.82)
-            center = Vec2(math.cos(ang) * r, math.sin(ang) * r)
-
-            sx = random.uniform(18.0, 46.0)
-            sy = random.uniform(12.0, 34.0)
-
-            p1 = center + Vec2(sx, 0.0)
-            p2 = center + Vec2(0.0, sy)
-            p3 = center + Vec2(-sx, 0.0)
-            p4 = center + Vec2(0.0, -sy)
-            x1, y1 = to_iso(p1, Vec2(0, 0))
-            x2, y2 = to_iso(p2, Vec2(0, 0))
-            x3, y3 = to_iso(p3, Vec2(0, 0))
-            x4, y4 = to_iso(p4, Vec2(0, 0))
-
-            col = random.choice([(42, 45, 50), (35, 38, 42), (48, 52, 60), (32, 35, 40)])
-            poly = shapes.Polygon((x1, y1), (x2, y2), (x3, y3), (x4, y4), color=col, batch=self.batch)
-            poly.opacity = random.randint(22, 46)
-            self._decor.append(poly)
-
-            # Occasional panel seams (subtle outlines).
-            if random.random() < 0.22 and sx * sy > 700:
-                seam_col = random.choice([(85, 82, 78), (75, 72, 68), (95, 90, 85)])
-                base = random.randint(28, 55)
-                ln1 = shapes.Line(x1, y1, x2, y2, thickness=1, color=seam_col, batch=self.batch)
-                ln1.opacity = base
-                ln2 = shapes.Line(x2, y2, x3, y3, thickness=1, color=seam_col, batch=self.batch)
-                ln2.opacity = base
-                ln3 = shapes.Line(x3, y3, x4, y4, thickness=1, color=seam_col, batch=self.batch)
-                ln3.opacity = base
-                ln4 = shapes.Line(x4, y4, x1, y1, thickness=1, color=seam_col, batch=self.batch)
-                ln4.opacity = base
-                self._decor.extend([ln1, ln2, ln3, ln4])
-
-            # New: Add a chance for a smaller inner diamond
-            if random.random() < 0.3:
-                p1_inner = center + Vec2(sx * 0.5, 0.0)
-                p2_inner = center + Vec2(0.0, sy * 0.5)
-                p3_inner = center + Vec2(-sx * 0.5, 0.0)
-                p4_inner = center + Vec2(0.0, -sy * 0.5)
-                x1_inner, y1_inner = to_iso(p1_inner, Vec2(0, 0))
-                x2_inner, y2_inner = to_iso(p2_inner, Vec2(0, 0))
-                x3_inner, y3_inner = to_iso(p3_inner, Vec2(0, 0))
-                x4_inner, y4_inner = to_iso(p4_inner, Vec2(0, 0))
-                inner_col = random.choice([(55, 52, 48), (46, 44, 40)])
-                inner_poly = shapes.Polygon((x1_inner, y1_inner), (x2_inner, y2_inner), (x3_inner, y3_inner), (x4_inner, y4_inner), color=inner_col, batch=self.batch)
-                inner_poly.opacity = random.randint(30, 50)
-                self._decor.append(inner_poly)
-
-            # New: Add a chance for a central glow
-            if random.random() < 0.15:
-                cx, cy = to_iso(center, Vec2(0, 0))
-                glow = shapes.Circle(cx, cy, radius=random.uniform(3, 6), color=(150, 180, 220), batch=self.batch)
-                glow.opacity = random.randint(20, 40)
-                self._decor.append(glow)
-
-        # Central Reactor Seal Decal
-        # A large, complex geometric pattern in the center.
-        seal_r = radius * 0.35
-        seal_segments = 64
-        seal_color = (60, 70, 85)
-        seal_points = []
-        for i in range(seal_segments):
-            a = (i / seal_segments) * math.tau
-            r_mod = seal_r * (0.9 + 0.1 * math.cos(a * 4))
-            seal_points.append(to_iso(Vec2(math.cos(a) * r_mod, math.sin(a) * r_mod), Vec2(0, 0)))
-        
-        # Draw the seal lines
-        for i in range(seal_segments):
-            p1 = seal_points[i]
-            p2 = seal_points[(i + 1) % seal_segments]
-            ln = shapes.Line(p1[0], p1[1], p2[0], p2[1], thickness=2, color=seal_color, batch=self.batch)
-            ln.opacity = 60
-            self._decor.append(ln)
-            # Inner spokes
-            if i % 8 == 0:
-                p3 = to_iso(Vec2(0, 0), Vec2(0, 0))
-                spoke = shapes.Line(p1[0], p1[1], p3[0], p3[1], thickness=1, color=seal_color, batch=self.batch)
-                spoke.opacity = 40
-                self._decor.append(spoke)
-
-        # Pavement cracks — subtle dark fissure lines across the floor (cooled down).
-        crack_count = max(8, min(18, int(radius * 0.04)))
-        for _ in range(crack_count):
-            ang = random.uniform(0.0, math.tau)
-            r_start = (random.random() ** 0.6) * (radius * 0.75)
-            if r_start < seal_r:  # Don't draw cracks over the seal
-                r_start = seal_r + (seal_r * 0.2)
-            start = Vec2(math.cos(ang) * r_start, math.sin(ang) * r_start)
-            # Crack follows a slightly bent path.
-            seg_count = random.randint(2, 4)
-            cur = start
-            for _seg in range(seg_count):
-                seg_len = random.uniform(15.0, 55.0)
-                seg_ang = ang + random.uniform(-0.6, 0.6)
-                nxt = cur + Vec2(math.cos(seg_ang), math.sin(seg_ang)) * seg_len
-                if nxt.length() > radius * 0.9:
-                    break
-                cx1, cy1 = to_iso(cur, Vec2(0, 0))
-                cx2, cy2 = to_iso(nxt, Vec2(0, 0))
-                crack_col = random.choice([(25, 30, 35), (20, 25, 30), (15, 20, 25)])
-                ln = shapes.Line(cx1, cy1, cx2, cy2, thickness=random.choice([1, 1, 2]), color=crack_col, batch=self.batch)
-                ln.opacity = random.randint(50, 90)
-                self._decor.append(ln)
-                cur = nxt
-                ang = seg_ang
-
-        # Circuit lines (pulse in update).
-        circuit_count = max(14, min(26, int(radius * 0.07)))
-        dirs = [Vec2(1, 0), Vec2(0, 1), Vec2(1, 1), Vec2(1, -1)]
-        for _ in range(circuit_count):
-            for _attempt in range(10):
-                ang = random.uniform(0.0, math.tau)
-                r = (random.random() ** 0.7) * (radius * 0.72)
-                start = Vec2(math.cos(ang) * r, math.sin(ang) * r)
-                d = random.choice(dirs).normalized()
-                length = random.uniform(radius * 0.18, radius * 0.42)
-                end = start + d * length
-                if start.length() <= radius * 0.88 and end.length() <= radius * 0.88:
-                    break
+        for target, rec, aux in ops:
+            shape = _make_shape(rec, self.batch)
+            if target == "floor":
+                self._floor_polys.append(shape)
+            elif target == "edge":
+                self._edge = shape
+            elif target == "intensity":
+                self._intensity_overlays.append(shape)
+            elif target == "grid":
+                self._grid.append(shape)
+            elif target == "boundary":
+                self._boundary.append((shape, aux))
+            elif target == "decor":
+                self._decor.append(shape)
+            elif target == "pulse_line":
+                base, phase = aux
+                self._pulse_lines.append((shape, base, phase))
+            elif target == "pulse_node":
+                base, phase = aux
+                self._pulse_nodes.append((shape, base, phase))
             else:
-                continue
-
-            x1, y1 = to_iso(start, Vec2(0, 0))
-            x2, y2 = to_iso(end, Vec2(0, 0))
-            col = random.choice([(90, 200, 255), (200, 120, 255), (120, 240, 200)])
-            thickness = random.choice([2, 2, 3])
-            ln = shapes.Line(x1, y1, x2, y2, thickness=thickness, color=col, batch=self.batch)
-            base = random.randint(42, 70)
-            ln.opacity = base
-            phase = random.uniform(0.0, math.tau)
-            self._pulse_lines.append((ln, base, phase))
-
-            # End nodes.
-            for x, y in ((x1, y1), (x2, y2)):
-                node = shapes.Circle(x, y, radius=3.2, color=col, batch=self.batch)
-                node.opacity = min(110, base + 45)
-                self._pulse_nodes.append((node, node.opacity, phase + random.uniform(-0.8, 0.8)))
-
-        # Beacon lights around the edge.
-        for i in range(10):
-            a = (i / 10) * math.tau + (math.tau / 20)
-            wp = Vec2(math.cos(a) * (radius * 0.985), math.sin(a) * (radius * 0.985))
-            x, y = to_iso(wp, Vec2(0, 0))
-            col = random.choice([(170, 200, 255), (255, 120, 255), (120, 240, 200)])
-            glow = shapes.Circle(x, y, radius=10.5, color=col, batch=self.batch)
-            glow.opacity = 26
-            core = shapes.Circle(x, y, radius=4.0, color=(255, 255, 255), batch=self.batch)
-            core.opacity = 120
-            phase = random.uniform(0.0, math.tau)
-            self._pulse_nodes.append((glow, glow.opacity, phase))
-            self._pulse_nodes.append((core, core.opacity, phase + 0.7))
+                raise ValueError(f"unknown floor target: {target!r}")
 
     def set_combat_intensity(self, target: float) -> None:
         """Set the target combat intensity (0 = calm, 1 = boss fight)."""

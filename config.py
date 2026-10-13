@@ -323,3 +323,8 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 saves-untracked
+# At launch, create each missing save file (high_scores.json, progress.json, user_settings.json) with its
+# defaults. An existing file is never overwritten. Off means the files appear on the first save, as before.
+ENABLE_SAVES_UNTRACKED = True

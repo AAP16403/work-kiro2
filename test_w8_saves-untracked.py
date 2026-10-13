@@ -10,7 +10,9 @@ The checks:
 - build_all.bat: the save backup list names the same three files, and the script does not depend on git or on
   the tracked high_scores.json beyond that list;
 - load: a missing file reads as defaults, and a corrupt file reads as defaults, is moved aside and never crashes;
-- save: the first save creates the file, with the defaults or with the data it was given.
+- save: the first save creates the file, with the defaults or with the data it was given;
+- launch: game.ensure_save_files() creates each missing file with its defaults, never overwrites an existing
+  file (a corrupt one included), and writes nothing when ENABLE_SAVES_UNTRACKED is off.
 
 Every file write goes to a temporary folder. run_all() checks that the real save files in the project root are
 unchanged at the end. Plain functions that print [PASS] lines, run from run_all().
@@ -26,6 +28,8 @@ from contextlib import contextmanager
 
 import achievements
 import audio
+import config
+import game
 import progress
 import score as score_mod
 from score import ScoreTracker
@@ -219,6 +223,61 @@ def test_default_saves_write_the_defaults():
 
 
 # ---------------------------------------------------------------------------
+# Launch: create the missing files with their defaults
+# ---------------------------------------------------------------------------
+
+def test_launch_creates_each_missing_file_with_defaults():
+    with _sandbox() as tmp:
+        created = game.ensure_save_files()
+        assert sorted(created) == sorted(SAVE_FILES), created
+        assert _read_json(os.path.join(tmp, "high_scores.json")) == {"version": 1}, "an empty board"
+        assert _read_json(os.path.join(tmp, "progress.json")) == progress.default_progress()
+        assert _read_json(os.path.join(tmp, "user_settings.json")) == {"version": 1, "music_volume": 0.5, "sfx_volume": 0.8}
+        assert ScoreTracker("normal").get_high_score() == 0
+        assert progress.load() == progress.default_progress()
+        assert audio.load_audio_settings() == DEFAULT_VOLUMES
+        assert game.ensure_save_files() == [], "a second launch finds every file and writes nothing"
+    print("[PASS] test_launch_creates_each_missing_file_with_defaults passed (three files created with defaults, second launch is a no-op)")
+
+
+def test_launch_never_overwrites_an_existing_file():
+    board = '{"version": 1, "normal": [{"score": 77, "wave": 1, "kills": 0, "best_combo": 1.0, "date": "x"}]}'
+    prog = '{"version": 1, "best_score": 99, "runs_played": 4}'
+    settings = '{"music_volume": 0.1}'  # an old file without a version or sfx: left exactly as it is
+    with _sandbox() as tmp:
+        files = {"high_scores.json": board, "progress.json": prog, "user_settings.json": settings}
+        for name, text in files.items():
+            _write_text(os.path.join(tmp, name), text)
+        assert game.ensure_save_files() == [], "every file exists, so nothing is created"
+        for name, text in files.items():
+            assert _read_text(os.path.join(tmp, name)) == text, f"{name} must not be overwritten at launch"
+        assert audio.load_audio_settings()[0] == 0.1 and progress.load()["best_score"] == 99
+
+    with _sandbox() as tmp:
+        bad = '{"best_wave": 4, "best_sc'
+        _write_text(os.path.join(tmp, "progress.json"), bad)
+        created = game.ensure_save_files()
+        assert "progress.json" not in created, "a corrupt file is not replaced at launch"
+        assert _read_text(os.path.join(tmp, "progress.json")) == bad
+        assert progress.load() == progress.default_progress(), "the load path quarantines it and starts on defaults"
+        assert _read_text(os.path.join(tmp, "progress.json.corrupt-1")) == bad
+    print("[PASS] test_launch_never_overwrites_an_existing_file passed (existing and corrupt files are left for their own load path)")
+
+
+def test_switch_off_creates_nothing_at_launch():
+    with _sandbox() as tmp:
+        saved = config.ENABLE_SAVES_UNTRACKED
+        config.ENABLE_SAVES_UNTRACKED = False
+        try:
+            assert game.ensure_save_files() == [], "the switch off must create nothing"
+        finally:
+            config.ENABLE_SAVES_UNTRACKED = saved
+        assert os.listdir(tmp) == [], f"the switch off must leave the folder empty: {os.listdir(tmp)}"
+        assert config.ENABLE_SAVES_UNTRACKED is True, "the switch ships on"
+    print("[PASS] test_switch_off_creates_nothing_at_launch passed (ENABLE_SAVES_UNTRACKED off writes no file, and the switch ships on)")
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -232,6 +291,9 @@ def run_all():
     test_corrupt_files_load_defaults_without_crashing()
     test_first_save_creates_each_file()
     test_default_saves_write_the_defaults()
+    test_launch_creates_each_missing_file_with_defaults()
+    test_launch_never_overwrites_an_existing_file()
+    test_switch_off_creates_nothing_at_launch()
 
     real_after = {name: _digest(os.path.join(HERE, name)) for name in SAVE_FILES}
     assert real_before == real_after, "a test changed a real save file in the project root"

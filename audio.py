@@ -17,7 +17,7 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 
-from savefile import load_settings, update_settings
+from savefile import USER_SETTINGS_VERSION, create_if_missing, load_settings, update_settings
 
 
 def _resource_path(*parts: str) -> str:
@@ -521,3 +521,11 @@ def save_audio_settings(music: float, sfx: float) -> None:
         })
     except Exception:
         pass
+
+
+def ensure_settings_file() -> bool:
+    """Create user_settings.json with the default volumes when it is missing. Never overwrites. Never raises."""
+    return create_if_missing(_SETTINGS_PATH, {
+        "music_volume": _DEFAULT_MUSIC_VOLUME,
+        "sfx_volume": _DEFAULT_SFX_VOLUME,
+    }, USER_SETTINGS_VERSION)

@@ -7,6 +7,7 @@ import config
 from savefile import (
     HIGH_SCORES_VERSION,
     board_entries,
+    create_if_missing,
     load_versioned,
     migrate_high_scores,
     save_versioned,
@@ -124,6 +125,11 @@ class ScoreTracker:
     def save_high_scores(data: dict) -> None:
         """Persist high scores to disk atomically. A failed write leaves the previous file in place."""
         save_versioned(HIGH_SCORE_FILE, data, HIGH_SCORES_VERSION)
+
+    @staticmethod
+    def ensure_high_scores_file() -> bool:
+        """Create high_scores.json with an empty board when it is missing. Never overwrites. Never raises."""
+        return create_if_missing(HIGH_SCORE_FILE, {}, HIGH_SCORES_VERSION)
 
     def submit_score(self, wave: int) -> bool:
         """Submit the current run score and place it on the board.

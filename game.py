@@ -32,7 +32,7 @@ from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
 from chain import ChainArcPool
-from audio import AudioManager, load_audio_settings, save_audio_settings
+from audio import AudioManager, ensure_settings_file, load_audio_settings, save_audio_settings
 import shake_prefs
 import access_prefs
 from popups import DamagePopups
@@ -1018,11 +1018,35 @@ class Game(pyglet.window.Window):
         self.advanced_fx.render(self._render_time, ci, hp_ratio=hp_ratio, boss_active=boss_active)
 
 
+def ensure_save_files() -> list:
+    """At launch, create each missing save file with its defaults. Returns the names it created. Never raises.
+
+    Only a file that does not exist yet is written, so a saved board, progress record or volume is never
+    overwritten, and a corrupt file is left for the load path to quarantine. Gated by ENABLE_SAVES_UNTRACKED.
+    """
+    if not config.ENABLE_SAVES_UNTRACKED:
+        return []
+    created = []
+    steps = (
+        ("high_scores.json", ScoreTracker.ensure_high_scores_file),
+        ("progress.json", meta_progress.ensure_file),
+        ("user_settings.json", ensure_settings_file),
+    )
+    for name, step in steps:
+        try:
+            if step():
+                created.append(name)
+        except Exception:
+            pass
+    return created
+
+
 def main():
     """Start the game. ``--record`` saves every finished run's inputs to replays/last_run.json (off by default)."""
     import sys
     record = "--record" in sys.argv[1:]
     try:
+        ensure_save_files()
         _ = Game(record_runs=record)
         pyglet.app.run()
     except KeyboardInterrupt:

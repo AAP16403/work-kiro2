@@ -328,3 +328,13 @@ COLORBLIND_ENEMY_COLORS = {
 # At launch, create each missing save file (high_scores.json, progress.json, user_settings.json) with its
 # defaults. An existing file is never overwritten. Off means the files appear on the first save, as before.
 ENABLE_SAVES_UNTRACKED = True
+
+# wave8 multicore-frame
+# ENABLE_MULTICORE_FRAME gates two pure frame-cost changes. Both return bit-identical results to the
+# reference code they replace, so this switch changes speed only, never enemy movement or the run:
+#   - enemy._dispatch_behavior_update reads each behaviour's optional keywords once per function instead of
+#     calling inspect.signature for every unit on every step (tens of microseconds each).
+#   - enemy_behaviors.base.separation_steer replaces the per-pair Vec2 loop that bomber, chase, engineer,
+#     ranged, spitter and tank each ran for every unit (one Vec2 per pair before, none now).
+# The shipped PARALLEL_* defaults above are unchanged. Measure with tools/bench_frame_pool.py.
+ENABLE_MULTICORE_FRAME = True

@@ -8,11 +8,14 @@ Volume settings persist in user_settings.json (project root, or next to the
 executable in a frozen build) under the keys "music_volume" and "sfx_volume".
 """
 
+import atexit
 import math
+import multiprocessing
 import os
 import random
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 
 from savefile import load_settings, update_settings
 
@@ -280,17 +283,23 @@ class AudioManager:
     # ----- internals -----------------------------------------------------
 
     def _load(self, cache: dict, key: str, path: str):
-        """Load and cache a streaming=False source. Misses are remembered."""
+        """Load and cache a streaming=False source. Misses are remembered.
+
+        A music file the startup preload decoded is taken from it (joining that job first). Any
+        other file, and a preload that failed, is loaded here with media.load, as before.
+        """
         if key in cache:
             return cache[key]
         source = None
         if not os.path.isfile(path):
             _warn_missing(path)
         else:
-            try:
-                source = self._media.load(path, streaming=False)
-            except Exception:
-                source = None
+            source = _take_preloaded(path)
+            if source is None:
+                try:
+                    source = self._media.load(path, streaming=False)
+                except Exception:
+                    source = None
         cache[key] = source
         return source
 
@@ -341,6 +350,121 @@ class AudioManager:
             else:
                 _safe_delete(player)
         self._voices = alive
+
+
+# ----- startup preload -----------------------------------------------------
+#
+# start_preload() reads and decodes the menu music WAV in one spawn-context worker process while the
+# game is still importing and building its window. The worker runs only stdlib ``wave`` code (no
+# pyglet import). The pyglet source object is built on the main thread by _take_preloaded(), which
+# joins the worker job. A worker failure returns None, and the caller then does the same
+# media.load it did before, so a missing or unreadable file is handled as it was without preload.
+
+# Off by default. Measured in wave 4: starting the worker costs the main thread about 30 ms, while the
+# decode it moves is about 3 ms, so the default startup is not made faster. See test_w4_loading.py.
+PRELOAD_STARTUP_MUSIC = False
+_JOIN_TIMEOUT_S = 10.0
+_preload_pool = None
+_preload = {}  # path -> Future of _decode_wav_worker(path)
+_atexit_registered = False
+
+
+def _decode_wav_worker(path: str):
+    """Worker entry point: read a WAV file's PCM frames with the stdlib wave module.
+
+    Returns (channels, sample_size_bits, sample_rate, pcm_bytes), or None for any file that
+    pyglet's WAV decoder would refuse. None sends the caller to the synchronous load.
+    """
+    try:
+        import wave
+
+        with wave.open(path, "rb") as wav:
+            channels, sampwidth, framerate, nframes, _comptype, _compname = wav.getparams()
+            if channels not in (1, 2) or sampwidth not in (1, 2):
+                return None
+            data = wav.readframes(nframes)
+        return (channels, sampwidth * 8, framerate, data)
+    except Exception:
+        return None
+
+
+def _static_source_from_pcm(channels: int, sample_size: int, sample_rate: int, data: bytes):
+    """Build the pyglet StaticSource that media.load returns for the same decoded PCM.
+
+    StaticSource.__init__ only decodes; its result is the three fields set here.
+    """
+    from pyglet.media.codecs.base import AudioFormat, StaticSource
+
+    audio_format = AudioFormat(channels=channels, sample_size=sample_size, sample_rate=sample_rate)
+    source = StaticSource.__new__(StaticSource)
+    source.audio_format = audio_format
+    source._data = data
+    source._duration = len(data) / audio_format.bytes_per_second
+    return source
+
+
+def start_preload() -> bool:
+    """Start the background decode of the menu music WAV. Call once at startup, under the entry guard.
+
+    Returns True when the worker was started. Never raises; on failure every load stays synchronous.
+    Does nothing (returns False) while PRELOAD_STARTUP_MUSIC is off.
+    """
+    global _preload_pool, _atexit_registered
+    if not PRELOAD_STARTUP_MUSIC:
+        return False
+    if _preload_pool is not None:
+        return True
+    paths = [os.path.join(_AUDIO_DIR, _MUSIC_FILES["menu"])]  # the menu's music is the only one needed at startup
+    paths = [p for p in paths if os.path.isfile(p)]  # a missing file is reported on first load, as before
+    if not paths:
+        return False
+    pool = None
+    try:
+        pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
+        futures = {p: pool.submit(_decode_wav_worker, p) for p in paths}
+    except Exception:
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
+        return False
+    _preload_pool = pool
+    _preload.update(futures)
+    if not _atexit_registered:
+        atexit.register(shutdown_preload)
+        _atexit_registered = True
+    return True
+
+
+def shutdown_preload() -> None:
+    """Stop the preload worker. Safe to call again; also runs at interpreter exit."""
+    global _preload_pool
+    pool = _preload_pool
+    _preload_pool = None
+    _preload.clear()
+    if pool is not None:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
+
+def _take_preloaded(path: str):
+    """Return the pyglet source decoded for path by the preload, or None.
+
+    None means nothing was preloaded for path, or its job failed or timed out. The caller then
+    loads the file synchronously. Once the last job is taken, the worker is shut down.
+    """
+    future = _preload.pop(path, None)
+    source = None
+    if future is not None:
+        try:
+            pcm = future.result(timeout=_JOIN_TIMEOUT_S)
+            if pcm is not None:
+                source = _static_source_from_pcm(*pcm)
+        except Exception:
+            source = None
+    if not _preload:
+        shutdown_preload()
+    return source
 
 
 # ----- settings persistence ----------------------------------------------

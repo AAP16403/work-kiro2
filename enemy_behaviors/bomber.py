@@ -56,6 +56,7 @@ class Bomber(Behavior):
                     ttl=fuse,
                     owner="enemy",
                     projectile_type="bomb",
+                    source="bomber",
                 )
             )
             enemy.attack_cd = (2.0 + random.uniform(0.2, 0.7)) / sustained_cd_scale(enemy)

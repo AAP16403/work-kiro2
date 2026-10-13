@@ -51,7 +51,7 @@ class Tank(Behavior):
             proj_speed = 185.0
             aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.6)
             vel = aim * proj_speed
-            state.projectiles.append(Projectile(enemy.pos, vel, 12, ttl=2.8, owner="enemy"))
+            state.projectiles.append(Projectile(enemy.pos, vel, 12, ttl=2.8, owner="enemy", source="tank"))
             cd_scale = sustained_cd_scale(enemy)
             if enemy.ai["push_t"] > 0.0:
                 enemy.attack_cd = (1.35 + random.uniform(0.0, 0.2)) / cd_scale

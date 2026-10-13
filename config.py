@@ -323,3 +323,25 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 bullet-signatures
+# Enemy bullets take a look named for the behaviour that fired them (projectile_art.SIGNATURE_STYLES). Player
+# shots, and enemies with no signature (tank, reflected shots), keep the red-orange shot look. Visual only: no
+# damage, speed or ttl value here changes the simulation.
+ENABLE_BULLET_SIGNATURES = True     # False draws every enemy shot with the old red-orange look
+SIG_SPITTER_COLOR = (120, 255, 110) # spitter: green blob with a short trail dot
+SIG_SPITTER_CORE = (200, 255, 170)  # the blob's highlight
+SIG_SPITTER_RADIUS = 4.6            # blob body radius, screen px
+SIG_SPITTER_TRAIL = 12.0            # trail dot distance behind the blob at rest, screen px
+SIG_RANGED_COLOR = (255, 110, 120)  # ranged: thin needle, shaft colour
+SIG_RANGED_CORE = (255, 236, 232)   # the needle's tip
+SIG_RANGED_LENGTH = 30.0            # needle length at rest, screen px
+SIG_BOMBER_COLOR = (255, 150, 40)   # bomber: orange pulse ring around the bomb
+SIG_BOMBER_CORE = (255, 228, 170)   # the bomb's centre
+SIG_BOMBER_RING = 10.0              # bomber ring radius at rest, screen px
+SIG_BOSS_COLOR = (255, 70, 225)     # boss shots (every boss_* behaviour): larger magenta ring
+SIG_BOSS_CORE = (255, 205, 250)     # the boss shot's centre
+SIG_BOSS_RING = 15.0                # boss ring radius at rest, screen px
+SIG_RING_PULSE = 0.18               # a pulse ring swells and shrinks by this fraction of its radius (0 under REDUCE_MOTION)
+SIG_PULSE_RATE = 9.0                # pulse rate in radians per second of shot ttl (frozen under REDUCE_MOTION)
+SIG_GLOW_OPACITY = 110              # head glow of a signed shot

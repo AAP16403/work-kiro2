@@ -65,7 +65,7 @@ class Spitter(Behavior):
                 vel_x = aim.x * cos_a - aim.y * sin_a
                 vel_y = aim.x * sin_a + aim.y * cos_a
                 vel = Vec2(vel_x, vel_y) * speed
-                state.projectiles.append(Projectile(enemy.pos, vel, damage, ttl=2.5, owner="enemy", projectile_type="spread"))
+                state.projectiles.append(Projectile(enemy.pos, vel, damage, ttl=2.5, owner="enemy", projectile_type="spread", source="spitter"))
             enemy.ai["volley_mode"] = 1 - int(enemy.ai["volley_mode"])
 
     def _separation(self, enemy, others, radius: float = 44.0, weight: float = 1.1) -> Vec2:

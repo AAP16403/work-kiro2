@@ -230,7 +230,7 @@ def enemy_entries() -> list[dict]:
 
 
 def powerup_entries() -> list[dict]:
-    """Ricochet, homing, time slow and magnet. Shown on the Powerups tab."""
+    """Ricochet, homing, time slow, magnet and repulsor. Shown on the Powerups tab."""
     bounce = "once" if int(config.RICOCHET_BOUNCES) == 1 else f"{int(config.RICOCHET_BOUNCES)} times"
     return [
         {
@@ -256,6 +256,12 @@ def powerup_entries() -> list[dict]:
             "what": f"Pickups are pulled from {config.MAGNET_RADIUS_MULT:g}x as far, and faster, for {config.MAGNET_DURATION:g}s.",
             "deal": "Clear the field, then sweep up distant loot.",
             "lore": "Drops pulled in like filings to a lodestone.",
+        },
+        {
+            "key": "repulsor", "name": "Repulsor (R)", "icon": "R",
+            "what": f"Shockwave: enemy shots within {config.REPULSOR_RANGE:g} px are pushed out, slow ones vanish. Enemies stun {config.REPULSOR_STUN_SECONDS:g}s.",
+            "deal": f"Cooldown {config.REPULSOR_COOLDOWN_SECONDS:g}s. Extra pickups bank up to {config.REPULSOR_MAX_CHARGES}.",
+            "lore": "A reactive pulse that shoves back anything not moving fast.",
         },
     ]
 

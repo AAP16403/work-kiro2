@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import config
+import repulsor
 from config import BOOST_OVERDRIVE_SECONDS, PLAYER_HP, SHIELD_MAX
 from drone import DRONE_DURATION
 from utils import Vec2
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 class PowerUp:
     """PowerUp entity."""
     pos: Vec2
-    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon", "ultra", "boost", "drone", "ricochet", "homing", "time_slow", "magnet"
+    kind: str  # "heal", "damage", "speed", "firerate", "shield", "laser", "vortex", "weapon", "ultra", "boost", "drone", "ricochet", "homing", "time_slow", "magnet", "repulsor"
     data: str | None = None
 
 
@@ -130,6 +131,9 @@ def format_timed_powerups_hud(player: "Player", now: float) -> str:
         left = float(getattr(player, field, 0.0)) - float(now)
         if left > 0.0:
             parts.append(f"{label} {math.ceil(left)}s")
+    rep = repulsor.hud_text(player, now)  # Repulsor cooldown countdown and stored charges
+    if rep:
+        parts.append(rep)
     return "  ".join(parts)
 
 
@@ -174,6 +178,9 @@ def apply_powerup(player: "Player", p: PowerUp, now: float):
     elif p.kind == "drone":
         # Rare companion: one drone orbits for DRONE_DURATION. Re-picking only refreshes the timer; drones never stack.
         player.drone_until = max(float(getattr(player, "drone_until", 0.0)), now + DRONE_DURATION)
+    elif p.kind == "repulsor":
+        # Fires a shockwave on the next frame (repulsor.update), or stores a charge during the cooldown.
+        repulsor.pickup(player, now)
     elif p.kind in TIMED_POWERUPS:
         # Refresh, never stack: picking one up again restarts its full duration.
         field, duration_name = TIMED_POWERUPS[p.kind]

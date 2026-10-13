@@ -323,3 +323,10 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 neon-obsidian
+# Two more pod skins, in skins.py. Neon Surge Pod unlocks at a best wave, Obsidian Pod at a best score in one run.
+# ENABLE_NEON_OBSIDIAN False hides both skins: they leave the Hangar, cannot be selected, and drop out of the Guide.
+ENABLE_NEON_OBSIDIAN = True
+NEON_SURGE_UNLOCK_WAVE = 15         # progress best_wave at which Neon Surge Pod unlocks
+OBSIDIAN_UNLOCK_SCORE = 20000       # progress best_score (one run) at which Obsidian Pod unlocks

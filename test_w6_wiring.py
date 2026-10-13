@@ -169,11 +169,52 @@ def test_stunned_enemy_is_not_steered_in_batch():
     print("[PASS] test_stunned_enemy_is_not_steered_in_batch passed (stunned excluded from the batch)")
 
 
+def test_settings_backdrop_follows_the_window():
+    """The Settings backdrop covers the window at every size, not only the size it was built at."""
+    g = Game()
+    g.set_visible(False)
+    try:
+        menu = g.settings_menu
+        for w, h in ((1920, 1080), (980, 620)):
+            menu.resize(w, h)
+            for rect in (menu._bg_a, menu._bg_b):
+                assert (rect.width, rect.height) == (w, h), (w, h, rect.width, rect.height)
+    finally:
+        g.close()
+    print("[PASS] test_settings_backdrop_follows_the_window passed (both backdrop layers at 1920x1080 and 980x620)")
+
+
+def test_ultra_flash_holds_full_size_under_reduce_motion():
+    """Reduced motion: the Ultra flash opens at full size and only fades. Full motion still swells it."""
+    g = Game()
+    g.set_visible(False)
+    prev = config.REDUCE_MOTION
+    try:
+        _new_run(g)  # the visuals, and so the juice overlay, exist once a run is set up
+        juice = g.visuals._juice
+        scales = {}
+        for reduced in (True, False):
+            config.REDUCE_MOTION = reduced
+            juice.trigger_ultra_flash(Vec2(0.0, 0.0), (255, 240, 180), 200.0, 0.0)
+            juice.sync(0.03, Vec2(0.0, 0.0), 1.0, 980, 620)
+            early = juice._flash.scale
+            juice.sync(0.15, Vec2(0.0, 0.0), 1.0, 980, 620)
+            scales[reduced] = (early, juice._flash.scale)
+        assert scales[True][0] == scales[True][1], f"reduced motion swelled the flash: {scales[True]}"
+        assert scales[False][1] > scales[False][0], f"full motion should swell the flash: {scales[False]}"
+    finally:
+        config.REDUCE_MOTION = prev
+        g.close()
+    print("[PASS] test_ultra_flash_holds_full_size_under_reduce_motion passed (reduced: no swell; full: swells)")
+
+
 def run_all():
     test_both_kinds_spawn_and_draw()
+    test_ultra_flash_holds_full_size_under_reduce_motion()
     test_chain_kill_in_play_throws_an_arc_that_fades()
     test_repulsor_pickup_fires_and_holds_enemy_in_range()
     test_stunned_enemy_is_not_steered_in_batch()
+    test_settings_backdrop_follows_the_window()
 
 
 if __name__ == "__main__":

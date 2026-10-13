@@ -430,8 +430,9 @@ class HUD:
         ring_block_right = ring_cx + ring_r + sz(64)
         self.ultra_gauge.place(ring_cx, ring_cy, ring_r, max(2, sz(6)), caption_x=ring_cx + ring_r + sz(10))
 
-        # Wave chip (top-center). Reference 56 px tall: meta baseline at 11, wave baseline at 26,
-        # which leaves ~11 px above the title and below the meta line with a 6 px gap between them.
+        # Wave chip (top-center). Reference 56 px tall: meta baseline at 9, wave baseline at 28. The title's box
+        # reaches about 5 px below its baseline, so the 28 px baseline keeps it clear of the meta line's box
+        # (the capture checker flagged the old 26/11 pair as overlapping).
         chip_w = sz(max(160, min(320, int(width * 0.26))))
         wave_h = sz(56)
         chip_x = (width - chip_w) // 2
@@ -440,9 +441,9 @@ class HUD:
         self._frame("wave", chip_x, wave_y, chip_w, wave_h, edge)
 
         self.wave_label.x = chip_x + chip_w // 2
-        self.wave_label.y = wave_y + sz(26)
+        self.wave_label.y = wave_y + sz(28)
         self.meta_label.x = chip_x + chip_w // 2
-        self.meta_label.y = wave_y + sz(11)
+        self.meta_label.y = wave_y + sz(9)
         self._meta_max_w = chip_w - sz(24)
         _fit_text(self.meta_label, self._meta_src, self._meta_max_w)
 

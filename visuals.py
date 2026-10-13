@@ -668,6 +668,10 @@ class Visuals:
         self.ship_palette = dict(run_skin.ship_palette)
         self.shot_palette = run_skin.shot_palette
 
+    def _thruster_palette(self) -> dict:
+        """The palette the player's engine glow and dash streak read: the pod-robot's, or the legacy ship's."""
+        return self.player_palette if self._player_art is not None else self.ship_palette
+
     @property
     def player_bullet_tint(self):
         """The skin's plain-shot colour, or None for the weapon colours. A read-only view of shot_palette."""
@@ -726,14 +730,14 @@ class Visuals:
                 aim = aim_dir if (aim_dir is not None and aim_dir.length() > 1e-6) else Vec2(1.0, 0.0)
                 boosting = bool(getattr(player, "is_boosting", False))
                 pulse = 0.5 + 0.5 * math.sin(ta * (30.0 if boosting else 15.0))
-                color = (255, 180, 70) if boosting else (100, 220, 255)
+                color = (255, 180, 70) if boosting else tuple(self._thruster_palette()["glow"])
                 radius = (13.0 if boosting else 9.0) + 3.0 * pulse
                 # Same spot sync_player draws the engine glow.
                 pool.emit("thruster", sx - aim.x * 10.0, sy + bob - aim.y * 10.0, radius, color, int(120 + 100 * pulse))
 
         if config.ENABLE_DASH_AFTERIMAGE and player is not None:
             boosting = bool(getattr(player, "is_boosting", False))
-            color = (255, 170, 70) if boosting else (150, 235, 255)
+            color = (255, 170, 70) if boosting else tuple(self._thruster_palette()["trail"])
             self._afterimage.record(t, player.pos, player.dash_direction, bool(getattr(player, "is_dashing", False)), color)
             # The pod-robot draws its own body-shaped dash afterimage (player_art ghosts), so the streak only
             # draws for the legacy ship. The dash shows one afterimage, not two stacked on the same spot.
@@ -789,7 +793,7 @@ class Visuals:
             (10, 0), (2, 4), (-6, 3), (-6, -3), (2, -4),
             color=cockpit_color, batch=self.batch
         )
-        engine_glow = shapes.Circle(0, 0, 4, color=(100, 220, 255), batch=self.batch)
+        engine_glow = shapes.Circle(0, 0, 4, color=pal["glow"], batch=self.batch)
         engine_glow.opacity = 200
 
         # Thrusters
@@ -880,7 +884,7 @@ class Visuals:
         engine_glow.x, engine_glow.y = bx, by
             
         engine_pulse = 0.7 + 0.3 * math.sin(ta * (30.0 if is_boosting else 15.0))
-        engine_glow.color = (255, 180, 70) if is_boosting else (100, 220, 255)
+        engine_glow.color = (255, 180, 70) if is_boosting else self.ship_palette["glow"]
         engine_glow.opacity = int(255 * engine_pulse)
 
         # Aim direction affects gun orientation.

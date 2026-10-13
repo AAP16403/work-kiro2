@@ -271,5 +271,7 @@ class JuiceOverlay:
                 self._flash.x = sx
                 self._flash.y = sy
                 swell = ULTRA_FLASH_START_SCALE + (1.0 - ULTRA_FLASH_START_SCALE) * prog
+                if bool(getattr(config, "REDUCE_MOTION", False)):
+                    swell = 1.0  # reduced motion: the flash opens at full size and only fades
                 self._flash.scale = max(0.02, self._flash_radius * swell / _FLASH_HALF)
                 self._flash.opacity = int(255 * ULTRA_FLASH_OPACITY * strength)

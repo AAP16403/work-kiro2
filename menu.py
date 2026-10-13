@@ -928,6 +928,11 @@ class SettingsMenu:
     def resize(self, width: int, height: int):
         self.screen_width = width
         self.screen_height = height
+        # The backdrop covers the window. Without this it kept the size it had when the menu was built.
+        self._bg_a.width = width
+        self._bg_a.height = height
+        self._bg_b.width = width
+        self._bg_b.height = height
         cx = width // 2
         # Settings has denser content than other menus; cap scale to avoid crowding.
         scale = min(_ui_scale(width, height), 1.25)
@@ -1672,8 +1677,11 @@ class GuideMenu:
         dt = motion.anim_dt(dt)  # animation only: reduced motion freezes the scanline and the shine
         self._t += dt
         self._panel_shine.opacity = int(8 + 14 * (0.5 + 0.5 * math.sin(self._t * 1.4)))
-        self._scanline.y = int(36 + (self.screen_height - 72) * (0.5 + 0.5 * math.sin(self._t * 0.37)))
-        self._scanline.opacity = int(12 + 26 * (0.5 + 0.5 * math.sin(self._t * 2.1)))
+        if motion.reduced():
+            self._scanline.opacity = 0  # the scanline is a moving sweep; with reduced motion it is hidden, not frozen
+        else:
+            self._scanline.y = int(36 + (self.screen_height - 72) * (0.5 + 0.5 * math.sin(self._t * 0.37)))
+            self._scanline.opacity = int(12 + 26 * (0.5 + 0.5 * math.sin(self._t * 2.1)))
 
     def resize(self, width: int, height: int):
         self.screen_width = width
@@ -2310,7 +2318,8 @@ class GameOverMenu:
         self._reveal_t = float(t)
         self._reveal_total = max(1e-6, float(total))
         p = max(0.0, min(1.0, self._reveal_t / self._reveal_total))
-        rise = int(_GO_RISE_PX * self._scale)
+        # Reduced motion keeps the rise and the new-high wobble at zero: the labels only fade in.
+        rise = int(_GO_RISE_PX * self._scale * motion.factor())
 
         self.overlay.opacity = int(216 * _reveal_progress(p, _GO_OVERLAY_SPAN))
 
@@ -2318,7 +2327,7 @@ class GameOverMenu:
             a = _reveal_progress(p, _GO_STAGE_SPAN[key])
             y = self._base_y.get(key, 0) - int((1.0 - a) * rise)
             if key == "new_high" and self.new_high_label.text:
-                y += int(round(4.0 * math.sin(self._reveal_t * 6.0)))
+                y += int(round(4.0 * math.sin(self._reveal_t * 6.0) * motion.factor()))
             for label, full_alpha in targets:
                 label.y = y
                 label.opacity = int(full_alpha * a)

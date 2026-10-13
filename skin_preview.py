@@ -25,7 +25,6 @@ _BODY = ((18, 0), (-4, 10), (-12, 8), (-8, 0), (-12, -8), (-4, -10))
 _COCKPIT = ((10, 0), (2, 4), (-6, 3), (-6, -3), (2, -4))
 _WING_COLOR = (15, 22, 36)
 _BARREL_COLOR = (230, 230, 240)
-_ENGINE_COLOR = (100, 220, 255)
 
 
 def _bar(x1, y1, x2, y2, half):
@@ -47,7 +46,7 @@ def _layout(size: float, pal: dict) -> list:
         ("poly", (0.0, 0.0), _scaled(_WING, s), _WING_COLOR, 255),
         ("poly", (0.0, 0.0), _scaled(_BODY, s), pal["body"], 255),
         ("poly", (0.0, 0.0), _scaled(_COCKPIT, s), pal["accent"], 255),
-        ("circle", (-10.0 * s, 0.0), 4.0 * s, _ENGINE_COLOR, 255),
+        ("circle", (-10.0 * s, 0.0), 4.0 * s, pal["glow"], 255),
         ("poly", (0.0, 0.0), _scaled(_bar(8.0, 0.0, 26.0, 0.0, 1.5), s), _BARREL_COLOR, 210),
         ("poly", (0.0, 0.0), _scaled(_bar(8.0, 0.0, 26.0, 0.0, 0.5), s), pal["eye"], 220),
         ("poly", (0.0, 0.0), _scaled(_bar(-9.0, 4.0, -19.0, 4.0, 2.0), s), pal["trail"], 110),

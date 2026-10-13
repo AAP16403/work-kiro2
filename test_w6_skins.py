@@ -4,9 +4,8 @@ stay locked, and the Hangar cards draw through skin_preview with the look the ru
 Every test points progress.PROGRESS_FILE at a temp file, so the real progress.json is never read or written.
 Selection goes through HangarMenu.choose, the call the Hangar's click and ENTER paths use.
 
-The glow streak behind a dash (glow.DashAfterimage, coloured in visuals.sync_glow) is not skinned yet.
-That lives in visuals.py, which this wave does not own, so test_glow_streak_follows_skin reports it as a
-known gap instead of failing.
+The dash glow streak (glow.DashAfterimage, coloured in visuals.sync_glow) takes the skin trail colour, and the
+engine glow takes the skin glow colour. test_glow_streak_follows_skin and test_thruster_glow_follows_skin check both.
 """
 
 import os
@@ -35,7 +34,6 @@ DASH_LEGACY = (160, 220, 255)
 
 _ORIGINAL_PROGRESS_FILE = progress.PROGRESS_FILE
 _TEMP_DIRS: list[str] = []
-_KNOWN_GAPS: list[str] = []  # gaps the tests report without failing, because the code that has them is not in this wave
 
 
 def _rgb(shape):
@@ -266,12 +264,31 @@ def test_glow_streak_follows_skin(g):
     g.visuals.sync_glow(g.state, g.player, Vec2(0.0, 0.0), t=1.0, aim_dir=Vec2(1.0, 0.0))
     samples = [s[5] for s in g.visuals._afterimage._samples]
     trail = complete_palette(skins.get("ember").palette)["trail"]
-    if samples and all(c == trail for c in samples):
-        print("[PASS] test_glow_streak_follows_skin passed (dash glow streak takes the skin trail colour)")
-    else:
-        _KNOWN_GAPS.append("dash glow streak (visuals.sync_glow)")
-        print(f"[KNOWN GAP visuals.py] dash glow streak colour {samples[:1]} is still the legacy colour; "
-              f"the ember trail is {trail}. visuals.sync_glow hard-codes it.")
+    assert samples and all(tuple(c) == tuple(trail) for c in samples), (samples[:1], trail)
+    print("[PASS] test_glow_streak_follows_skin passed (dash glow streak takes the skin trail colour)")
+
+
+def test_thruster_glow_follows_skin(g):
+    path = _temp_progress(best_score=6000)
+    menu = _menu(path)
+    assert menu.choose("ember")
+    _start(g)
+    pool = g.visuals._glow_pool
+    emitted = {}
+    real_emit = pool.emit
+
+    def record(key, x, y, radius, color, opacity):
+        emitted[key] = tuple(color)
+        return real_emit(key, x, y, radius, color, opacity)
+
+    pool.emit = record
+    try:
+        g.visuals.sync_glow(g.state, g.player, Vec2(0.0, 0.0), t=1.0, aim_dir=Vec2(1.0, 0.0))
+    finally:
+        del pool.emit
+    glow = tuple(complete_palette(skins.get("ember").palette)["glow"])
+    assert emitted.get("thruster") == glow, (emitted.get("thruster"), glow)
+    print("[PASS] test_thruster_glow_follows_skin passed (engine glow takes the skin glow colour)")
 
 
 def run_all():
@@ -286,15 +303,13 @@ def run_all():
         test_achievement_gallery_marks_earned(g)
         test_run_recording_stores_skin_id(g)
         test_glow_streak_follows_skin(g)
+        test_thruster_glow_follows_skin(g)
     finally:
         g.close()
         progress.PROGRESS_FILE = _ORIGINAL_PROGRESS_FILE
         for folder in _TEMP_DIRS:
             shutil.rmtree(folder, ignore_errors=True)
-    if _KNOWN_GAPS:
-        print(f"\nALL WAVE 6 SKIN TESTS PASSED, {len(_KNOWN_GAPS)} known gap(s) outside this wave: {'; '.join(_KNOWN_GAPS)}")
-    else:
-        print("\nALL WAVE 6 SKIN TESTS PASSED")
+    print("\nALL WAVE 6 SKIN TESTS PASSED")
 
 
 if __name__ == "__main__":

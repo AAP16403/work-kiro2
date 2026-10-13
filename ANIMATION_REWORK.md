@@ -202,3 +202,16 @@ Known from earlier measurements, left off by default:
 
 - Arena geometry worker (wave5/geometry): no measurable gain. Off.
 - Asset preload (wave5/loading): no measurable gain. Off.
+
+## Goal gaps batch (wf_9233f7a2-f95, base main a23a0f5)
+
+Opened because the goal review still listed these as open:
+
+- New power-up: Chain Lightning (kind "chain"), timed, rare tier. Worktree w6-chainlight, branch wave6/chainlight.
+- New power-up: Repulsor (kind "repulsor"), cooldown and charges, common tier. Worktree w6-repulsor, branch wave6/repulsor.
+- Skins: the skin preview helper wired into the Hangar, selected skin applied to the player, bullets and afterimage. Worktree w6-skins, branch wave6/skins.
+- Known visual bugs: PAUSED over the Boost bar, dash afterimage over the glow streak, thruster glow not fading in the death dissolve. Worktree w6-visualfix, branch wave6/visualfix.
+- Full review: every screen, REDUCE_MOTION on and off, contact sheets at both sizes, screen-fade capture timing. Worktree w6-capture, branch wave6/capture.
+- Integrate: wave6/integration. Verify: every test file.
+
+Multi-core: unchanged in this batch. The steering pool stays off because the quiet bench showed no clear gain. The arena geometry and asset preload paths measured no gain. A decision is needed from the user before any further multi-core work.

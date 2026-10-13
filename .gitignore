@@ -47,6 +47,15 @@ replays/
 # Local user settings (audio, shake, accessibility, run mutator selection)
 user_settings.json
 
+# Local high-score board (score.py). Written at game over, never committed.
+high_scores.json
+
+# Save-file leftovers: corrupt files moved aside by savefile.py, and temp files from an interrupted atomic write
+*.json.corrupt-*
+.progress-*.tmp
+.user_settings-*.tmp
+.high_scores-*.tmp
+
 # Claude Code session worktrees must never be committed
 .claude/
 

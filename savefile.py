@@ -157,6 +157,19 @@ def save_versioned(path: str, data: dict, current: int) -> bool:
     return atomic_write_json(path, _with_version(body, stamp))
 
 
+def create_if_missing(path: str, data: dict, current: int) -> bool:
+    """Write ``data`` to ``path`` only when nothing is there yet. Returns True when it wrote. Never raises.
+
+    Any existing file is left alone, a corrupt one included: loading is what quarantines a corrupt file.
+    """
+    try:
+        if os.path.exists(path):
+            return False
+        return save_versioned(path, data, current)
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Format: user_settings.json
 # ---------------------------------------------------------------------------

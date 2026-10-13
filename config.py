@@ -323,3 +323,8 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 death-fade
+# At hp 0 the death dissolve starts. With this on, the engine glow and the low-health vignette fade with the
+# dissolve (1 at death, 0 at its end) instead of cutting off on the frame hp reaches 0. Off restores the cut.
+ENABLE_DEATH_FADE = True

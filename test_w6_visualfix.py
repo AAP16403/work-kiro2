@@ -1,5 +1,5 @@
 """Wave 6 visual fixes: the pause title clears the HUD status line, one dash afterimage per character,
-and the thruster glow and low-health vignette stop at hp 0 so the death dissolve plays clean.
+and the thruster glow and low-health vignette fade with the death dissolve from hp 0 (wave 8).
 
 Covers:
   - PAUSED sits above the Resume / Quit block and no label overlaps it, at 980x620 and 1920x1080
@@ -7,7 +7,7 @@ Covers:
   - the pod-robot dash shows only its body-shaped ghosts, not the glow streak on top of them;
   - the legacy ship keeps the glow streak, since it has no ghosts of its own;
   - ENABLE_DASH_AFTERIMAGE off silences the pod-robot ghosts too;
-  - the thruster glow and the low-health vignette are on while hp > 0 and off at hp 0.
+  - the thruster glow and the low-health vignette are on while hp > 0 and fade from hp 0 (wave 8).
 
 Run with the venv python: ``python test_w6_visualfix.py``. Also collectable by pytest.
 """
@@ -147,8 +147,9 @@ def test_dash_flag_off_silences_pod_ghosts(g):
     print("[PASS] test_dash_flag_off_silences_pod_ghosts passed (no afterimage with the switch off)")
 
 
-def test_thruster_and_vignette_stop_at_zero_hp(g):
-    """The thruster glow and the low-health vignette are on while hp > 0 and off at hp 0."""
+def test_thruster_and_vignette_fade_at_zero_hp(g):
+    """The thruster glow and the low-health vignette are on while hp > 0. On the death frame they are still drawn,
+    faded from their living values, instead of cutting off (wave 8: the full fade is in test_w8_death-fade.py)."""
     s = _new_run(g)
     _clear_field(s)
     g.player.hp = g.player.max_hp
@@ -158,14 +159,15 @@ def test_thruster_and_vignette_stop_at_zero_hp(g):
 
     g.player.hp = max(1.0, 0.15 * g.player.max_hp)
     _draw_frame(g)
-    assert g.visuals._juice._vignette.opacity > 0, "the vignette must show below 30 percent hp"
+    living_vignette = g.visuals._juice._vignette.opacity
+    assert living_vignette > 0, "the vignette must show below 30 percent hp"
 
     g.player.hp = 0
     keys = _draw_frame(g)
-    assert "thruster" not in keys, "the thruster glow must stop at hp 0, so the death dissolve does not keep it lit"
-    assert g.visuals._juice._vignette.opacity == 0, "the vignette must be off at hp 0"
+    assert "thruster" in keys, "the thruster glow must still show on the death frame, fading with the dissolve"
+    assert 0 < g.visuals._juice._vignette.opacity <= living_vignette, "the vignette must fade from its living value at hp 0"
     g.player.hp = g.player.max_hp
-    print("[PASS] test_thruster_and_vignette_stop_at_zero_hp passed (thruster and vignette on at hp > 0, off at 0)")
+    print("[PASS] test_thruster_and_vignette_fade_at_zero_hp passed (thruster and vignette on at hp > 0, fading on the death frame)")
 
 
 def run_all():
@@ -176,7 +178,7 @@ def run_all():
         test_pod_robot_dash_has_only_its_ghosts(g)
         test_legacy_ship_keeps_glow_streak(g)
         test_dash_flag_off_silences_pod_ghosts(g)
-        test_thruster_and_vignette_stop_at_zero_hp(g)
+        test_thruster_and_vignette_fade_at_zero_hp(g)
     finally:
         g.close()
     print("\nALL WAVE 6 VISUAL FIX TESTS PASSED")

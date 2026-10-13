@@ -305,6 +305,15 @@ class PlayerArt:
         self.shapes = []
         self._fixed = []
 
+    @property
+    def fade(self) -> float:
+        """The dissolve fade from the last sync: 1 while the body lives, falling to 0 over DISSOLVE_S of a death.
+
+        visuals.py multiplies the engine glow and the low-health vignette by it, so they fade with the body.
+        Read it after sync(); it never changes the body.
+        """
+        return float(self._alpha)
+
     # ------------------------------------------------------------- per frame
 
     @property

@@ -23,7 +23,7 @@ from enemy_behaviors.flyer import Flyer
 from event_visuals import ArenaEventFx
 from glow import DashAfterimage, GlowPool, projectile_glow
 from juice import SQUASH_STEP, JuiceOverlay, squash_level
-from player_art import DEFAULT_PALETTE, PlayerArt
+from player_art import DEFAULT_PALETTE, DISSOLVE_S, REAL_STEP_MAX, PlayerArt
 from powerup_art import make_pickup_art, place_pickup_art
 from projectile_art import ProjectileVisual, ShotBank
 from skin_apply import LEGACY_PALETTE, aura_outer, complete_palette
@@ -93,7 +93,7 @@ def _set_position(shape, x: float, y: float) -> None:
 
 
 def _player_alive(player) -> bool:
-    """True while the player has hp left. The death dissolve runs at hp 0, when the thruster and the vignette stop."""
+    """True while the player has hp left. At hp 0 the death dissolve runs, and the engine glow and the vignette fade with it."""
     return player is not None and float(getattr(player, "hp", 1.0)) > 0.0
 
 
@@ -534,6 +534,15 @@ class Visuals:
         self._glow_pool = GlowPool(batch, cap=config.GLOW_POOL_CAP, order=config.GLOW_LAYER_ORDER)
         self._afterimage = DashAfterimage()
         self._dissolve = _EnemyDissolve(self.batch)  # enemy death motes (pooled, see _EnemyDissolve)
+        # Death fade (see _death_fade). The engine glow and the vignette hold what they showed on the last living
+        # frame, and fade from there. The legacy ship has no dissolve, so it keeps its own clock (_legacy_death_fade).
+        self._hold_ta = 0.0            # glow pulse clock of the last living frame
+        self._hold_boost = False       # whether the player was boosting on the last living frame
+        self._hold_hp = 1.0            # vignette hp ratio of the last living frame
+        self._hold_t = 0.0             # vignette pulse clock of the last living frame
+        self._legacy_fade = 1.0
+        self._legacy_dead_s = 0.0      # real seconds the legacy ship has been dead
+        self._legacy_real: float | None = None
 
     def _init_scene_fx(self) -> None:
         self._scene_glows = [
@@ -682,11 +691,56 @@ class Visuals:
         self._juice.trigger_ultra_flash(pos, variant_color, radius, t)
 
     def sync_juice(self, t: float, shake: Vec2, player, view_w: int, view_h: int) -> None:
-        """Per-frame low-health vignette and Ultra flash."""
-        hp_max = max(1, int(getattr(player, "max_hp", 100)))
-        # The low-health vignette only shows on a living player. At hp 0 it is off, so the death dissolve plays clean.
-        hp_ratio = float(getattr(player, "hp", hp_max)) / float(hp_max) if _player_alive(player) else 1.0
-        self._juice.sync(t, shake, hp_ratio, view_w, view_h)
+        """Per-frame low-health vignette and Ultra flash.
+
+        A living player's vignette reads hp, as before. At hp 0 it holds the strength of the last living frame
+        and fades with the death dissolve (_death_fade), so it does not cut off on the frame hp reaches 0.
+        """
+        if _player_alive(player):
+            hp_max = max(1, int(getattr(player, "max_hp", 100)))
+            hp_ratio = float(getattr(player, "hp", hp_max)) / float(hp_max)
+            self._hold_hp = hp_ratio
+            self._hold_t = t
+            self._juice.sync(t, shake, hp_ratio, view_w, view_h)
+            return
+        self._juice.sync(t, shake, self._hold_hp, view_w, view_h,
+                         vignette_t=self._hold_t, vignette_fade=self._death_fade(player))
+
+    def _death_fade(self, player) -> float:
+        """Fade factor for the engine glow and the low-health vignette, read after this frame's sync_player.
+
+        1 while the player lives. Once hp is 0 it falls with the death dissolve: the pod-robot's dissolve
+        (PlayerArt.fade) or, for the legacy ship, its own clock over the same DISSOLVE_S. It is 0 with no player,
+        and for a dead player while config.ENABLE_DEATH_FADE is off, which restores the cut at hp 0.
+        This is not motion, so REDUCE_MOTION leaves it alone.
+        """
+        if player is None:
+            return 0.0
+        if _player_alive(player):
+            return 1.0
+        if not config.ENABLE_DEATH_FADE:
+            return 0.0
+        if self._player_art is not None:
+            return self._player_art.fade
+        return self._legacy_fade
+
+    def _legacy_death_fade(self, player, real_t: float) -> float:
+        """The legacy ship's death fade. It has no dissolve, so this clock runs the same DISSOLVE_S of real time.
+
+        It counts real time like PlayerArt does: each step is capped at REAL_STEP_MAX, and the death frame counts
+        its own step. The ship's body is drawn as before.
+        """
+        if _player_alive(player):
+            self._legacy_dead_s = 0.0
+            self._legacy_real = real_t
+            return 1.0
+        step = 0.0
+        if self._legacy_real is not None:
+            step = min(max(real_t - self._legacy_real, 0.0), REAL_STEP_MAX)
+        self._legacy_real = real_t
+        self._legacy_dead_s += step
+        return 1.0 - min(max(self._legacy_dead_s / DISSOLVE_S, 0.0), 1.0)
+
     def sync_fx(self, state, player, shake: Vec2, t: float = 0.0, aim_dir: Vec2 | None = None) -> None:
         """Per-frame graphics polish, called after the other sync_* calls and before the batch draws:
         the parallax starfield (placed by the player's position and the window size) and the glows."""
@@ -724,16 +778,30 @@ class Visuals:
                 pool.emit(("pu", id(pu)), sx, sy, 26.0, halo.color, int(120 * pulse))
 
             # Thruster and dash come before the eyes: when the pool is full, the eye glows are the ones dropped.
-            if _player_alive(player):
+            # The engine glow fades with the death dissolve (_death_fade). A living player draws it exactly as before.
+            # A dying player holds the pulse, colour and boost of its last living frame, so only the fade changes.
+            fade = self._death_fade(player)
+            if fade > 0.0:
+                if _player_alive(player):
+                    glow_ta = ta
+                    boosting = bool(getattr(player, "is_boosting", False))
+                    self._hold_ta = ta
+                    self._hold_boost = boosting
+                else:
+                    glow_ta = self._hold_ta
+                    boosting = self._hold_boost
                 sx, sy = to_iso(player.pos, shake)
-                bob = math.sin(ta * 6.0) * 1.5
+                bob = math.sin(glow_ta * 6.0) * 1.5
                 aim = aim_dir if (aim_dir is not None and aim_dir.length() > 1e-6) else Vec2(1.0, 0.0)
-                boosting = bool(getattr(player, "is_boosting", False))
-                pulse = 0.5 + 0.5 * math.sin(ta * (30.0 if boosting else 15.0))
+                pulse = 0.5 + 0.5 * math.sin(glow_ta * (30.0 if boosting else 15.0))
                 color = (255, 180, 70) if boosting else tuple(self._thruster_palette()["glow"])
                 radius = (13.0 if boosting else 9.0) + 3.0 * pulse
-                # Same spot sync_player draws the engine glow.
-                pool.emit("thruster", sx - aim.x * 10.0, sy + bob - aim.y * 10.0, radius, color, int(120 + 100 * pulse))
+                opacity = 120 + 100 * pulse
+                if fade < 1.0:
+                    opacity *= fade
+                if opacity >= 1.0:
+                    # Same spot sync_player draws the engine glow.
+                    pool.emit("thruster", sx - aim.x * 10.0, sy + bob - aim.y * 10.0, radius, color, int(opacity))
 
         if config.ENABLE_DASH_AFTERIMAGE and player is not None:
             boosting = bool(getattr(player, "is_boosting", False))
@@ -832,15 +900,17 @@ class Visuals:
             self._player_handle = None
             self.make_player()
         ta = motion.clock(t)  # visual pulses only; the laser check below keeps the real time
+        real_now = time.perf_counter()
         if self._player_art is not None:
             # PlayerArt scales its own idle pulses with motion.clock, and needs the game clock for dashes and
             # the laser. real_t is wall time, so the death dissolve runs even though the game clock stops at game over.
             self._player_art.sync(player, shake, t=t, aim_dir=aim_dir, palette=self.player_palette,
-                                  real_t=time.perf_counter())
+                                  real_t=real_now)
             # Depth follows the ground point. The body bobs and recoils, so sorting by its y would move the
             # handle across depth buckets on every bob near an edge, and each move migrates the handle's shapes.
             self._set_depth(self._player_handle, self._player_art.ground_y, shake)
             return
+        self._legacy_fade = self._legacy_death_fade(player, real_now)
         assert self._player_handle is not None
         (
             sh, glow, glow2, shield_ring2, shield_ring, laser_ring, boost_ring,

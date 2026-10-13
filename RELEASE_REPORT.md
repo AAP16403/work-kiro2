@@ -121,7 +121,7 @@ No other code or test change is evidenced in this pass. The fix commits earlier 
 3. Docs are stale. test_w3_docs.out (05:39:58) predates README.md (06:01:22) and CHANGELOG.md (05:58:12). Re-run the docs tests and run each README command once before release.
 4. The tested exe predates the pin. dist/Plouto/Plouto.exe is at 05:38:24; requirements.txt was pinned to 2.1.19 at 05:39:20. The build log does not name the pyglet version it used, so the exe that passed the smoke test is not shown to be built on 2.1.19. Rebuild and re-run the exe smoke.
 5. The pin test was edited to match the pin. test_w3_smokeexe.py now expects 2.1.19 (section 3e). It confirms the file and the test agree; it does not independently confirm the tested version.
-6. The exe build exit code and rerun2's exit code are not recorded in any output.
+6. The exe build exit code is 0 (see scratchpad consolidate/exe_build_final.txt). rerun2 exit code is not recorded in any output file.
 7. Literal 120 shield caps remain in vercel_site (grep run for this report): vercel_site/py/powerup.py lines 35, 48 and 56 (min(120, ...)); vercel_site/py/rpg.py line 50 (_SHIELD_CAP = 120); vercel_site/py/browser_game.py lines 2022 and 2223. The gaps test only covers the desktop tree (88 files).
 8. The browser build lacks the new systems. CHANGELOG.md line 311 says it "does not have Ricochet, Homing, Time Slow, Drone, Splitter, Reflector". Not checked in code in this pass.
 9. Drone is not in the Guide Systems tab. The drone entry is in POWERUP_INFO (menu.py line 1530); SYSTEMS_INFO (menu.py line 1546) is built from guide_info.systems_entries(), which has no drone entry.

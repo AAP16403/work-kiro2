@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal enableextensions
 
 cd /d "%~dp0"
@@ -9,6 +9,8 @@ set "BUILD_PS1=build_exe.ps1"
 set "PS_EXE=powershell"
 set "DIST_DIR=dist\%APP_NAME%"
 set "DIST_EXE=%DIST_DIR%\%APP_NAME%.exe"
+set "SAVE_BACKUP=build_backup\saves"
+set "SAVE_FILES=progress.json user_settings.json high_scores.json"
 
 echo === %APP_NAME%: full build ===
 echo Working dir: %CD%
@@ -68,6 +70,14 @@ if not exist "requirements.txt" (
 if errorlevel 1 goto :fail
 
 echo.
+echo Backing up player save files before the old build folder is removed...
+if not exist "%SAVE_BACKUP%" mkdir "%SAVE_BACKUP%"
+for %%F in (%SAVE_FILES%) do (
+  if exist "%DIST_DIR%\%%F" copy /y "%DIST_DIR%\%%F" "%SAVE_BACKUP%\%%F" >nul
+  if exist "%DIST_DIR%\_internal\%%F" copy /y "%DIST_DIR%\_internal\%%F" "%SAVE_BACKUP%\%%F" >nul
+)
+
+echo.
 echo Cleaning stale build outputs...
 if exist "build\kiro2_game" rmdir /s /q "build\kiro2_game"
 if exist "dist\Kiro2Game" rmdir /s /q "dist\Kiro2Game"
@@ -104,6 +114,12 @@ echo Creating .zip...
 if errorlevel 1 goto :fail
 
 echo.
+echo Restoring player save files into the new build ^(after the zip, so the zip has no saves^)...
+for %%F in (%SAVE_FILES%) do (
+  if exist "%SAVE_BACKUP%\%%F" copy /y "%SAVE_BACKUP%\%%F" "%DIST_DIR%\_internal\%%F" >nul
+)
+
+echo.
 echo SUCCESS.
 echo Output folder: %CD%\dist\%APP_NAME%\
 echo EXE: %CD%\dist\%APP_NAME%\%APP_NAME%.exe
@@ -115,6 +131,7 @@ exit /b 0
 :fail
 echo.
 echo FAILED. Scroll up for the first error message.
+if exist "%SAVE_BACKUP%" echo Player save backup, if any, is in %CD%\%SAVE_BACKUP%
 echo.
 if not defined NO_PAUSE pause
 exit /b 1

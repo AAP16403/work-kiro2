@@ -49,3 +49,6 @@ user_settings.json
 
 # Claude Code session worktrees must never be committed
 .claude/
+
+# Player saves kept across rebuilds by build_all.bat
+build_backup/

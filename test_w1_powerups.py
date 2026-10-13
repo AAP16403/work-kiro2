@@ -485,7 +485,7 @@ def test_new_kinds_have_colours_names_and_distinct_art():
         assert color not in old_colors and color not in seen, f"{kind} colour is not distinct"
         seen.add(color)
         assert kind in POWERUP_NAMES and POWERUP_NAMES[kind].strip(), f"{kind} has no popup name"
-    assert set(PICKUP_ART_KINDS) == set(NEW_KINDS)
+    assert set(PICKUP_ART_KINDS) == set(NEW_KINDS) | {"chain"}  # Chain Lightning joined the decorated pickups in wave 6
 
     g = Game()
     try:

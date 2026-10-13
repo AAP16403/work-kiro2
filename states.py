@@ -16,6 +16,7 @@ from utils import (
     Vec2,
     clamp_to_map,
     iso_to_world,
+    to_iso,
     dist,
     dist_sq,
     point_segment_distance,
@@ -33,6 +34,8 @@ from powerup import (
     format_timed_powerups_hud, is_rare_powerup, pickup_magnet_mods, powerup_popup_name, timed_active,
 )
 import shot_mods
+import chain
+import repulsor
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
 from drone import drone_bullets
@@ -390,6 +393,15 @@ class PlayingState(State):
             e.hp -= amount
 
     @staticmethod
+    def _chain_hit(game, s, target, amount: int) -> bool:
+        """One Chain Lightning arc's damage. True when it kills the target, which is then removed and scored."""
+        PlayingState._damage_enemy(game, s, target, amount)
+        if target.hp > 0:
+            return False
+        PlayingState._kill_enemy(game, s, target)
+        return True
+
+    @staticmethod
     def _spawn_cluster_shrapnel(game, s, p, ignore_entity_id: int | None = None) -> None:
         if game.particle_system:
             flak_detonation(game.particle_system, p.pos)
@@ -734,12 +746,16 @@ class PlayingState(State):
             game.particle_system.add_muzzle_flash(d_muzzle, d_aim)
             audio_cues.cue(game.audio, "drone_fire")
 
+        # Repulsor: a pending shockwave or a stored charge fires here, before enemies move, so the stun lands this frame.
+        repulsor.update(game.player, s, s.time, game.particle_system)
+
         batched = maybe_update_enemies(s, game, enemy_dt, game.player.pos, player_vel)
         for e in list(s.enemies):
             if e not in s.enemies or e.hp <= 0 or getattr(e, "_is_dead", False):
                 continue
             shots_before = len(s.projectiles)
-            if batched is None or id(e) not in batched:
+            # A stunned enemy neither moves nor fires. It still takes part in the body checks below.
+            if not repulsor.is_stunned(e, s.time) and (batched is None or id(e) not in batched):
                 update_enemy(e, game.player.pos, s, enemy_dt, game, player_vel=player_vel)
             if len(s.projectiles) > shots_before:
                 shape_enemy_volley(s.projectiles, shots_before, getattr(s, "rules", None))  # Bullet Hell; a no-op in stock runs
@@ -882,6 +898,13 @@ class PlayingState(State):
                             if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
                                 game._damage_player(game.balance.tank_death_blast_damage)
                                 add_shake(s, 15.0)
+                            # Chain Lightning: a kill the player makes throws arcs from the dead enemy.
+                            if chain.chain_active(game.player, s.time):
+                                chain.resolve_chain(
+                                    e, s.enemies, game.player, s.time,
+                                    lambda target, amount: self._chain_hit(game, s, target, amount),
+                                    pool=game.chain_pool,
+                                )
 
                         pierce = getattr(p, "pierce", 0)
                         if pierce > 0:
@@ -1072,6 +1095,7 @@ class PlayingState(State):
             game.visuals.sync_arena_event(game.state.arena_event, shake)
 
         game.visuals.sync_fx(game.state, game.player, shake, t=s.time, aim_dir=aim_dir)
+        game.chain_pool.update(s.time, lambda x, y: to_iso(Vec2(x, y), shake))
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:

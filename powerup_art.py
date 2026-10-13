@@ -1,4 +1,4 @@
-"""Pickup decorations for the timed powerups (Ricochet, Homing, Time Slow, Magnet).
+"""Pickup decorations for the timed powerups (Ricochet, Homing, Time Slow, Magnet, Chain Lightning).
 
 visuals.ensure_powerup draws the shared orb, rings, core and glyph for every pickup. A timed pickup
 also gets a few shapes around the orb that tell it apart at a glance:
@@ -7,6 +7,7 @@ also gets a few shapes around the orb that tell it apart at a glance:
     homing     four short bars, a crosshair
     time_slow  an open clock ring with a single hand
     magnet     a thick horseshoe with white tips
+    chain      a zigzag ring of six dots (chain.make_chain_pickup_art)
 
 make_pickup_art builds those shapes into a batch and returns each one with its offset from the orb
 centre. place_pickup_art moves them with the orb every frame.
@@ -16,8 +17,10 @@ import math
 
 from pyglet import shapes
 
-# Kinds that get a decoration. Other pickups draw the shared orb only.
-PICKUP_ART_KINDS = frozenset({"ricochet", "homing", "time_slow", "magnet"})
+import chain
+
+# Kinds that get a decoration. Other pickups draw the shared orb only (Repulsor does).
+PICKUP_ART_KINDS = frozenset({"ricochet", "homing", "time_slow", "magnet", "chain"})
 
 _WHITE = (255, 255, 255)
 
@@ -86,6 +89,9 @@ def make_pickup_art(kind: str, batch, color, size: float, group=None):
             tip.opacity = 235
             out.append(tip)
             offsets.append((side * ring_r - 2.0, -2.0))
+
+    elif kind == "chain":
+        out, offsets = chain.make_chain_pickup_art(batch, color, r, group=group)
 
     return out, offsets
 

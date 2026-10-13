@@ -1576,6 +1576,8 @@ class Visuals:
             "homing": (POWERUP_COLORS["homing"], "H", 14),
             "time_slow": (POWERUP_COLORS["time_slow"], "~", 14),
             "magnet": (POWERUP_COLORS["magnet"], "M", 14),
+            "chain": (POWERUP_COLORS["chain"], "Z", 14),
+            "repulsor": (POWERUP_COLORS["repulsor"], "()", 14),
         }.get(kind, ((200, 200, 200), "?", 12))
 
         # Large, glowing center orb

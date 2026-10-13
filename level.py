@@ -246,12 +246,14 @@ POWERUP_POOL_WEIGHTS = (
     ("speed", 1.0),       # common
     ("firerate", 1.0),    # common
     ("shield", 1.0),      # common
+    ("repulsor", 0.7),    # common, shockwave on a 12 s cooldown
     ("laser", 1.0),       # rare
     ("boost", 1.0),       # common
     ("ricochet", 0.5),    # common, 8 s
     ("homing", 0.3),      # rare, 6 s
     ("time_slow", 0.2),   # rare, 4 s
     ("magnet", 0.5),      # common, 10 s
+    ("chain", 0.3),       # rare, 8 s
 )
 _POOL_KINDS = tuple(k for k, _w in POWERUP_POOL_WEIGHTS)
 _POOL_WEIGHTS = tuple(float(w) for _k, w in POWERUP_POOL_WEIGHTS)

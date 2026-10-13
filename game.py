@@ -31,6 +31,7 @@ from skin_apply import default_run_skin, read_run_skin
 from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
+from chain import ChainArcPool
 from audio import AudioManager, load_audio_settings, save_audio_settings
 import shake_prefs
 import access_prefs
@@ -168,6 +169,7 @@ class Game(pyglet.window.Window):
         self.player = None
         self.visuals = None
         self.particle_system = None
+        self.chain_pool = None  # Chain Lightning arcs; built per run beside the particle system
         self.run_skin = default_run_skin()  # replaced with the selected skin at each run start
 
         self.keys = pyglet.window.key.KeyStateHandler()
@@ -346,6 +348,7 @@ class Game(pyglet.window.Window):
         self.visuals.make_player()
 
         self.particle_system = ParticleSystem(self.batch)
+        self.chain_pool = ChainArcPool(self.batch, group=pyglet.graphics.Group(order=config.CHAIN_LAYER_ORDER))
         self.popups = DamagePopups()
         self._hitstop = 0.0
 
@@ -868,6 +871,7 @@ class Game(pyglet.window.Window):
         self.player = None
         self.visuals = None
         self.particle_system = None
+        self.chain_pool = None
         self.popups = None
         self._hitstop = 0.0
 

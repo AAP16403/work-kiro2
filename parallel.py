@@ -26,6 +26,7 @@ from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import shared_memory
 
 import config
+import repulsor
 from enemy import steer_snapshot, update_enemy
 from enemy_steer import (
     FIELDS,
@@ -290,9 +291,14 @@ def update_enemies_batched(state, game, dt: float, player_pos: Vec2, player_vel:
     Phase 1 runs every live enemy's behavior serially, without coordination. Phase 2 snapshots all
     non-boss enemies once and steers them through ``batcher``. Steering therefore reads positions
     after every behavior has moved, which differs slightly from the interleaved default path.
-    Inline and pooled batch runs are identical to each other.
+    Inline and pooled batch runs are identical to each other. A Repulsor-stunned enemy is neither
+    updated nor steered; states.py skips it in the default loop too.
     """
-    live = [e for e in state.enemies if e.hp > 0 and not getattr(e, "_is_dead", False)]
+    now = state.time
+    live = [
+        e for e in state.enemies
+        if e.hp > 0 and not getattr(e, "_is_dead", False) and not repulsor.is_stunned(e, now)
+    ]
     for e in live:
         update_enemy(e, player_pos, state, dt, game, player_vel=player_vel, coordinate=False)
     steered = {id(e) for e in live}

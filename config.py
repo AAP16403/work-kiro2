@@ -122,6 +122,7 @@ CHAIN_FLICKER_SECONDS = 0.05  # normal motion re-rolls the jagged shape this oft
 CHAIN_PICKUP_DOT = 2.6        # pickup decoration: radius of each dot in the zigzag ring
 CHAIN_PICKUP_RING_NEAR = 7.0  # dot distance beyond the orb edge on the even dots
 CHAIN_PICKUP_RING_FAR = 12.0  # dot distance beyond the orb edge on the odd dots
+CHAIN_LAYER_ORDER = 14600     # arc draw order: above the glow pool (14500), below the particle rings (15000)
 
 # Boost / Overdrive mechanic (LSHIFT key)
 BOOST_SPEED_MULT = 1.65
@@ -146,6 +147,10 @@ REPULSOR_RING_SECONDS = 0.45      # ring lifetime; with reduced motion the ring 
 REPULSOR_DUST_COUNT = 5           # dust particles per stunned enemy (none with reduced motion)
 REPULSOR_DUST_SPEED = 45.0        # px per second
 REPULSOR_DUST_SECONDS = 0.4       # dust lifetime
+
+# Pickup colours for the two powerups above. POWERUP_COLORS sits at the top of this file, before these exist.
+POWERUP_COLORS["chain"] = CHAIN_COLOR
+POWERUP_COLORS["repulsor"] = REPULSOR_COLOR
 
 
 # Critical hits

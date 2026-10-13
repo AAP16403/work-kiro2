@@ -197,8 +197,12 @@ _SHIMMED_MODULES = []
 
 
 def _project_modules():
-    """Loaded game modules under ROOT, excluding tools, tests and the browser build."""
-    skip_dirs = (os.path.join(ROOT, "tools"), os.path.join(ROOT, "vercel_site"))
+    """Loaded game modules under ROOT, excluding tools, tests, the browser build, the venv and the worktrees.
+
+    The venv is skipped on purpose: when ROOT is the main checkout, pyglet itself lives under ROOT/.venv, and
+    shimming its id() stalls text layout. Worktrees under .claude hold other copies of the game modules.
+    """
+    skip_dirs = tuple(os.path.join(ROOT, d) for d in ("tools", "vercel_site", ".venv", ".claude"))
     for mod in list(sys.modules.values()):
         path = getattr(mod, "__file__", None)
         if not path:

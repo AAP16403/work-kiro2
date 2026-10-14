@@ -11,6 +11,8 @@ Rules:
     - A shard is spent on its first hit. It expires after SHARD_SECONDS of fixed-step time.
     - At most SHARD_CAP shards are live. A new shard takes a free slot, or else drops the oldest live shard.
     - Flak shrapnel does not split. It is already the burst of a flak shell, and copying its crit flag would stack shards.
+    - A shard meets affixes under the same rules as the shot that made it. A Reflector whose cooldown is ready sends the
+      shard back and takes no damage from it; otherwise the shard deals its damage. A tank that a shard kills runs its death blast.
 
 ShardPool is a fixed set of slots. Each slot is one quad in a glow.QuadBank, so spawn, step and draw create no objects per
 frame. The quad is drawn in the shot colour: the skin's player_bullet_tint, or the bullet's weapon colour when that is None. A slow shimmer runs in full motion only. Reduced motion stops the shimmer and nothing else: the shards

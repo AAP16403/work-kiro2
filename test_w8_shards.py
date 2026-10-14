@@ -7,6 +7,8 @@ up; only critical player bullets splitting (not enemy shots, not flak shrapnel);
 ENABLE_SHARDS off; the shot colour; the pool's draw (placement, fade, hide) and the reduced-motion rule; steady frames
 building no objects; the frame cost with live shards; and two scripted runs in play. The first run checks one real crit
 bullet's split at its entry point. The second forces crits through the crit bonus path and reports shard hits and kills.
+Affixes: a shard meets a Reflector under the same rules as the shot that made it (sent back in its cooldown, hurts it
+otherwise), a reflected crit does not split, and a tank that a shard kills blasts the player as a direct kill does.
 Plain functions that print [PASS] lines, run from run_all().
 """
 
@@ -484,6 +486,113 @@ def test_a_shard_kill_removes_and_scores_the_enemy_in_play():
           "(a shard hit took a 5 hp enemy out of the run, counted as a shard kill; the origin stayed at 100 hp)")
 
 
+def test_a_shard_meets_the_reflector_like_the_shot_that_made_it():
+    g = Game()
+    g.set_visible(False)
+    try:
+        s = _new_run(g)
+        pool = g.shard_pool
+        reflector = Enemy(pos=Vec2(130.0, 0.0), hp=100, speed=0.0, behavior="chaser",
+                          is_elite=True, elite_affix="reflector", attack_cd=99.0)
+        s.enemies[:] = [reflector]
+        far_origin = _enemy(-300.0, 0.0)  # a shard's origin, off every path
+        # The cooldown is ready, so the first shard is sent back at the player and does no damage.
+        pool.spawn(100.0, 0.0, 600.0, 0.0, 11, far_origin, (255, 255, 255))
+        for _ in range(30):
+            g._fixed_step()
+            if pool.hits:
+                break
+        assert pool.hits == 1 and pool.live_count == 0, (pool.hits, pool.live_count)
+        assert reflector.hp == 100, f"a reflected shard must not hurt the reflector ({reflector.hp})"
+        back = [p for p in s.projectiles if p.owner == "enemy" and p.damage == 11 and p.vel.x < 0]
+        assert len(back) == 1, f"the reflected shard is fired back at the player ({len(back)})"
+        assert reflector.ai["reflect_ready_at"] > s.time, "the reflector's cooldown starts"
+        # A second shard inside the cooldown hurts the reflector, as a second shot would.
+        pool.spawn(100.0, 0.0, 600.0, 0.0, 11, far_origin, (255, 255, 255))
+        for _ in range(30):
+            g._fixed_step()
+            if reflector.hp < 100:
+                break
+        assert reflector.hp == 89, f"a shard inside the cooldown hurts the reflector ({reflector.hp})"
+        g.on_draw()
+    finally:
+        g.close()
+    print("[PASS] test_a_shard_meets_the_reflector_like_the_shot_that_made_it passed "
+          "(a shard into a ready reflector is sent back and does no damage; one inside the cooldown does 11)")
+
+
+def test_a_reflected_crit_does_not_split_and_a_crit_into_the_cooldown_does():
+    g = Game()
+    g.set_visible(False)
+    try:
+        s = _new_run(g)
+        pool = g.shard_pool
+        reflector = Enemy(pos=Vec2(130.0, 0.0), hp=100, speed=0.0, behavior="chaser",
+                          is_elite=True, elite_affix="reflector", attack_cd=99.0)
+        s.enemies[:] = [reflector]
+        bullet = _crit(x=100.0, damage=30)
+        s.projectiles.append(bullet)
+        for _ in range(30):
+            g._fixed_step()
+            if bullet not in s.projectiles:
+                break
+        assert reflector.hp == 100, f"the reflected crit must not hurt the reflector ({reflector.hp})"
+        assert pool.spawned == 0 and pool.live_count == 0, f"a reflected crit never splits ({pool.spawned})"
+        # A crit inside the cooldown hurts the reflector and splits, with the reflector as the shards' origin.
+        second = _crit(x=100.0, damage=30)
+        s.projectiles.append(second)
+        for _ in range(30):
+            g._fixed_step()
+            if pool.spawned:
+                break
+        assert reflector.hp == 70, f"a crit inside the cooldown hurts the reflector ({reflector.hp})"
+        assert pool.spawned == 3 and pool.live_count == 3, (pool.spawned, pool.live_count)
+        assert all(sh.origin is reflector for sh in pool.live_shards()), "the reflector is the shards' origin"
+    finally:
+        g.close()
+    print("[PASS] test_a_reflected_crit_does_not_split_and_a_crit_into_the_cooldown_does passed "
+          "(a reflected crit spawns no shards; one inside the cooldown hurts the reflector and splits)")
+
+
+def _tank_kill(by_shard: bool, tank_x: float):
+    """Kill a 5 hp tank at tank_x with one shard or with one plain bullet. Returns (player hp lost, the blast damage)."""
+    g = Game()
+    g.set_visible(False)
+    try:
+        s = _new_run(g)
+        g.player.hp = 500
+        g.player.shield = 0
+        g.player.invincibility_timer = 0.0
+        tank = Enemy(pos=Vec2(tank_x, 0.0), hp=5, speed=0.0, behavior="tank", attack_cd=99.0)
+        s.enemies[:] = [tank]
+        before = g.player.hp
+        if by_shard:
+            g.shard_pool.spawn(tank_x - 20.0, 0.0, 600.0, 0.0, 11, _enemy(-300.0, 0.0), (255, 255, 255))
+        else:
+            bullet = _crit(x=tank_x - 20.0, damage=30)
+            bullet.is_crit = False  # a plain bullet: a direct kill with no shards
+            s.projectiles.append(bullet)
+        for _ in range(30):
+            g._fixed_step()
+            if tank not in s.enemies:
+                break
+        assert tank not in s.enemies and getattr(tank, "_is_dead", False), "the tank died"
+        return before - g.player.hp, g.balance.tank_death_blast_damage
+    finally:
+        g.close()
+
+
+def test_a_shard_kill_of_a_tank_fires_the_death_blast_like_a_direct_kill():
+    shard_lost, blast = _tank_kill(True, 50.0)     # 50 px from the player, inside the blast radius
+    direct_lost, _ = _tank_kill(False, 50.0)
+    far_lost, _ = _tank_kill(True, 100.0)           # 100 px out, past the blast radius
+    assert blast > 0, blast
+    assert shard_lost == direct_lost == blast, (shard_lost, direct_lost, blast)
+    assert far_lost == 0, f"a tank killed outside the blast radius blasts nothing ({far_lost})"
+    print(f"[PASS] test_a_shard_kill_of_a_tank_fires_the_death_blast_like_a_direct_kill passed "
+          f"(a shard kill and a direct kill both cost the player {blast} hp; outside the radius, none)")
+
+
 def test_scripted_run_with_forced_crits_reports_shard_hits_and_kills():
     g = Game()
     g.set_visible(False)
@@ -555,6 +664,9 @@ def run_all():
     test_frame_cost_with_live_shards_is_reported()
     test_a_crit_splits_where_it_enters_an_enemy_in_play()
     test_a_shard_kill_removes_and_scores_the_enemy_in_play()
+    test_a_shard_meets_the_reflector_like_the_shot_that_made_it()
+    test_a_reflected_crit_does_not_split_and_a_crit_into_the_cooldown_does()
+    test_a_shard_kill_of_a_tank_fires_the_death_blast_like_a_direct_kill()
     test_scripted_run_with_forced_crits_reports_shard_hits_and_kills()
     print("ALL W8 SHARDS TESTS PASSED")
 

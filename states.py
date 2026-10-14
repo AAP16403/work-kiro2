@@ -402,13 +402,49 @@ class PlayingState(State):
         PlayingState._kill_enemy(game, s, target)
         return True
 
+    @staticmethod
+    def _reflect_back(game, s, e, damage: int) -> bool:
+        """Reflector affix: the first player shot in each cooldown window is sent back at the player instead of hurting
+        the reflector. A flash and a sound mark the reflection. True when the shot was reflected, so the caller removes it.
+        False when the enemy has no reflector affix or its cooldown is still running.
+        """
+        if getattr(e, "elite_affix", None) != "reflector" or s.time < float(e.ai.get("reflect_ready_at", 0.0)):
+            return False
+        e.ai["reflect_ready_at"] = s.time + float(config.ELITE_REFLECT_COOLDOWN)
+        to_player = game.player.pos - e.pos
+        aim_len = to_player.length() or 1.0
+        s.projectiles.append(Projectile(
+            Vec2(e.pos.x, e.pos.y), to_player / aim_len * float(config.ELITE_REFLECT_SPEED),
+            int(damage), ttl=2.0, owner="enemy", projectile_type="bullet",
+        ))
+        if game.particle_system:
+            game.particle_system.add_shockwave(e.pos, (255, 220, 120), max_radius=34.0, ttl=0.25)
+        audio_cues.cue(game.audio, "reflect")
+        return True
+
+    @staticmethod
+    def _tank_death_blast(game, s, e, behavior_name: str) -> None:
+        """A tank that dies within its blast radius hurts the player. Every kill path runs this: a bullet or a shard."""
+        if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
+            game._damage_player(game.balance.tank_death_blast_damage)
+            add_shake(s, 15.0)
+
     def _shard_hit(self, target, amount: int) -> bool:
-        """One shard's damage. True when it kills the target, which is then removed and scored."""
+        """One shard's hit, under the same affix rules as the player shot that made it.
+
+        A Reflector sends the shard back when its cooldown is ready, and the shard then does no damage. Otherwise the
+        shard deals its damage, and a kill runs the same tank death blast a direct kill does. True when the shard kills.
+        """
         game = self.game
-        PlayingState._damage_enemy(game, game.state, target, amount)
+        s = game.state
+        if self._reflect_back(game, s, target, amount):
+            return False
+        behavior_name = getattr(target, "_behavior_name", enemy_behavior_name(target))
+        PlayingState._damage_enemy(game, s, target, amount)
         if target.hp > 0:
             return False
-        PlayingState._kill_enemy(game, game.state, target)
+        PlayingState._kill_enemy(game, s, target)
+        self._tank_death_blast(game, s, target, behavior_name)
         return True
 
     @staticmethod
@@ -886,19 +922,8 @@ class PlayingState(State):
                     if self._segment_hits_circle(psd2, e.pos, p_prev, p.pos, hit_r2):
                         hit_entities.add(id(e))
                         is_crit = getattr(p, "is_crit", False)
-                        if getattr(e, "elite_affix", None) == "reflector" and s.time >= float(e.ai.get("reflect_ready_at", 0.0)):
-                            # Reflector affix: the first player shot in each cooldown window is sent back at the player
-                            # instead of hurting the reflector. A flash and a sound mark the reflection.
-                            e.ai["reflect_ready_at"] = s.time + float(config.ELITE_REFLECT_COOLDOWN)
-                            to_player = game.player.pos - e.pos
-                            aim_len = to_player.length() or 1.0
-                            s.projectiles.append(Projectile(
-                                Vec2(e.pos.x, e.pos.y), to_player / aim_len * float(config.ELITE_REFLECT_SPEED),
-                                int(p.damage), ttl=2.0, owner="enemy", projectile_type="bullet",
-                            ))
-                            if game.particle_system:
-                                game.particle_system.add_shockwave(e.pos, (255, 220, 120), max_radius=34.0, ttl=0.25)
-                            audio_cues.cue(game.audio, "reflect")
+                        if self._reflect_back(game, s, e, p.damage):
+                            # The reflected shot leaves its path and hurts nobody, so a crit reflected here never splits.
                             self._remove_projectile(game, s, p, detonating_enemy=e)
                             break
                         PlayingState._damage_enemy(game, s, e, p.damage, is_crit=is_crit)
@@ -916,9 +941,7 @@ class PlayingState(State):
 
                         if e.hp <= 0:
                             self._kill_enemy(game, s, e)
-                            if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
-                                game._damage_player(game.balance.tank_death_blast_damage)
-                                add_shake(s, 15.0)
+                            self._tank_death_blast(game, s, e, behavior_name)
                             # Chain Lightning: a kill the player makes throws arcs from the dead enemy.
                             if chain.chain_active(game.player, s.time):
                                 chain.resolve_chain(

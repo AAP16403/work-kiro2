@@ -538,6 +538,7 @@ class Visuals:
         # frame, and fade from there. The legacy ship has no dissolve, so it keeps its own clock (_legacy_death_fade).
         self._hold_ta = 0.0            # glow pulse clock of the last living frame
         self._hold_boost = False       # whether the player was boosting on the last living frame
+        self._hold_aim = Vec2(1.0, 0.0)  # the engine glow's aim on the last living frame
         self._hold_hp = 1.0            # vignette hp ratio of the last living frame
         self._hold_t = 0.0             # vignette pulse clock of the last living frame
         self._legacy_fade = 1.0
@@ -724,6 +725,18 @@ class Visuals:
             return self._player_art.fade
         return self._legacy_fade
 
+    def _engine_glow_state(self, player, ta: float, aim_dir: Vec2 | None) -> tuple[float, Vec2, bool]:
+        """The pulse clock, aim and boost the engine glow draws this frame, as (ta, aim, boosting).
+
+        A living player draws the live values. A dying player draws the hold from its last living frame (set in
+        sync_player), so its glow only fades: the pulse, colour, boost and spot stay as they were. With
+        config.ENABLE_DEATH_FADE off the live values are used, as on main.
+        """
+        if _player_alive(player) or not config.ENABLE_DEATH_FADE:
+            aim = aim_dir if (aim_dir is not None and aim_dir.length() > 1e-6) else Vec2(1.0, 0.0)
+            return ta, aim, bool(getattr(player, "is_boosting", False))
+        return self._hold_ta, self._hold_aim, self._hold_boost
+
     def _legacy_death_fade(self, player, real_t: float) -> float:
         """The legacy ship's death fade. It has no dissolve, so this clock runs the same DISSOLVE_S of real time.
 
@@ -779,20 +792,12 @@ class Visuals:
 
             # Thruster and dash come before the eyes: when the pool is full, the eye glows are the ones dropped.
             # The engine glow fades with the death dissolve (_death_fade). A living player draws it exactly as before.
-            # A dying player holds the pulse, colour and boost of its last living frame, so only the fade changes.
+            # A dying player holds the pulse, colour, boost and aim of its last living frame, so only the fade changes.
             fade = self._death_fade(player)
             if fade > 0.0:
-                if _player_alive(player):
-                    glow_ta = ta
-                    boosting = bool(getattr(player, "is_boosting", False))
-                    self._hold_ta = ta
-                    self._hold_boost = boosting
-                else:
-                    glow_ta = self._hold_ta
-                    boosting = self._hold_boost
+                glow_ta, aim, boosting = self._engine_glow_state(player, ta, aim_dir)
                 sx, sy = to_iso(player.pos, shake)
                 bob = math.sin(glow_ta * 6.0) * 1.5
-                aim = aim_dir if (aim_dir is not None and aim_dir.length() > 1e-6) else Vec2(1.0, 0.0)
                 pulse = 0.5 + 0.5 * math.sin(glow_ta * (30.0 if boosting else 15.0))
                 color = (255, 180, 70) if boosting else tuple(self._thruster_palette()["glow"])
                 radius = (13.0 if boosting else 9.0) + 3.0 * pulse
@@ -901,6 +906,11 @@ class Visuals:
             self.make_player()
         ta = motion.clock(t)  # visual pulses only; the laser check below keeps the real time
         real_now = time.perf_counter()
+        if _player_alive(player):
+            # The engine glow's hold: what a dying player's glow keeps from this living frame (_engine_glow_state).
+            self._hold_ta = ta
+            self._hold_boost = bool(getattr(player, "is_boosting", False))
+            self._hold_aim = aim_dir if (aim_dir is not None and aim_dir.length() > 1e-6) else Vec2(1.0, 0.0)
         if self._player_art is not None:
             # PlayerArt scales its own idle pulses with motion.clock, and needs the game clock for dashes and
             # the laser. real_t is wall time, so the death dissolve runs even though the game clock stops at game over.
@@ -949,13 +959,15 @@ class Visuals:
             part.x, part.y = cx, cy
             part.rotation = angle
             
-        bx = cx - aim_dir.x * 10
-        by = cy - aim_dir.y * 10
-        engine_glow.x, engine_glow.y = bx, by
-            
-        engine_pulse = 0.7 + 0.3 * math.sin(ta * (30.0 if is_boosting else 15.0))
-        engine_glow.color = (255, 180, 70) if is_boosting else self.ship_palette["glow"]
-        engine_glow.opacity = int(255 * engine_pulse)
+        # The engine glow sprite. A dying player's keeps the pulse, colour, boost and spot of its last living frame,
+        # and fades with the dissolve (body_fade). Living, or with ENABLE_DEATH_FADE off, it is drawn as before.
+        glow_ta, glow_aim, glow_boost = self._engine_glow_state(player, ta, aim_dir)
+        glow_bob = math.sin(glow_ta * 6.0) * 1.5
+        engine_glow.x, engine_glow.y = sx - glow_aim.x * 10, sy + glow_bob - glow_aim.y * 10
+        engine_pulse = 0.7 + 0.3 * math.sin(glow_ta * (30.0 if glow_boost else 15.0))
+        engine_glow.color = (255, 180, 70) if glow_boost else self.ship_palette["glow"]
+        body_fade = self._death_fade(player) if config.ENABLE_DEATH_FADE else 1.0
+        engine_glow.opacity = int(255 * engine_pulse * body_fade)
 
         # Aim direction affects gun orientation.
         gun_len = 18

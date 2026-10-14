@@ -14,7 +14,11 @@ Covers:
   - a living player draws what main drew: the thruster pulse, colour and radius, and the vignette strength;
   - a new life after a death shows the living glow again, and no vignette;
   - ENABLE_DEATH_FADE off restores the cut at hp 0;
-  - the legacy ship fades over the same DISSOLVE_S of real time.
+  - the legacy ship fades over the same DISSOLVE_S of real time;
+  - a dying player's engine glow keeps the aim of its last living frame, so its spot stays where it was (the mouse
+    moves on while the body dies), and a living glow still follows the aim;
+  - the legacy ship's own engine glow sprite fades over the same DISSOLVE_S, at its last living spot;
+  - ENABLE_DEATH_FADE off leaves the legacy body glow as main: lit at its living pulse, on the live aim.
 
 The dissolve runs on real time, so the tests put a fake wall clock in place of the time module inside visuals.py.
 
@@ -154,6 +158,39 @@ def _hurt_then_die(g, wall, clock_moves: bool):
         if fade <= 0.0:
             break
     return living, frames
+
+
+AIM_A = Vec2(1.0, 0.0)
+AIM_B = Vec2(-0.6, 0.8)  # the mouse moves here while the player dies
+
+
+def _frame_with_aim(g, aim: Vec2) -> dict:
+    """One frame drawn with this aim: the player, then its glow, as states.py does it (shake zero).
+
+    Returns the thruster glow drawn as {x, y, op}, or {} when none is drawn.
+    """
+    pool = g.visuals._glow_pool
+    drawn = {}
+    real_emit = pool.emit
+
+    def emit(key, x, y, radius, color, opacity=255, *args, **kwargs):
+        if key == "thruster":
+            drawn.update(x=float(x), y=float(y), op=int(opacity))
+        return real_emit(key, x, y, radius, color, opacity, *args, **kwargs)
+
+    pool.emit = emit
+    try:
+        g.visuals.sync_player(g.player, Vec2(0.0, 0.0), t=g.state.time, aim_dir=aim)
+        g.visuals.sync_fx(g.state, g.player, Vec2(0.0, 0.0), t=g.state.time, aim_dir=aim)
+    finally:
+        del pool.emit  # the instance attribute goes; the pool's own emit is the class method again
+    return drawn
+
+
+def _body_glow(g) -> tuple:
+    """The legacy ship's own engine glow sprite as (opacity, x, y): the 11th part of its handle (Visuals.make_player)."""
+    glow = g.visuals._player_handle.objs[10]
+    return int(glow.opacity), float(glow.x), float(glow.y)
 
 
 def _assert_non_increasing(values, what: str) -> None:
@@ -308,6 +345,104 @@ def test_legacy_ship_fades_on_the_same_clock(g):
     print(f"[PASS] test_legacy_ship_fades_on_the_same_clock passed (legacy fade over {len(frames)} frames, {DISSOLVE_S} s)")
 
 
+def test_engine_glow_holds_its_aim_while_dying(g):
+    """A dying player's engine glow keeps the aim of its last living frame, so its spot does not swing with the mouse.
+    Living, the glow still follows the aim."""
+    with _wall_clock() as wall:
+        _new_run(g)
+        g.player.hp = LOW_HP_RATIO * g.player.max_hp
+        _advance(g, wall, clock_moves=False)
+        at_b = _frame_with_aim(g, AIM_B)
+        _advance(g, wall, clock_moves=False)
+        last = _frame_with_aim(g, AIM_A)  # the last living frame aims at A
+        assert "x" in at_b and "x" in last, "the living glow must be drawn"
+        moved = abs(at_b["x"] - last["x"]) + abs(at_b["y"] - last["y"])
+        assert moved > 1.0, f"a living glow must follow the aim, but it moved only {moved:.3f} px from A to B"
+        g.player.hp = 0
+        checked = 0
+        for _ in range(MAX_DISSOLVE_FRAMES):
+            _advance(g, wall, clock_moves=False)
+            drawn = _frame_with_aim(g, AIM_B)  # the mouse has moved on to B while the body dies
+            fade = _fade(g)
+            if "x" in drawn:
+                checked += 1
+                assert abs(drawn["x"] - last["x"]) < 1e-9 and abs(drawn["y"] - last["y"]) < 1e-9, (
+                    f"the dying glow moved to ({drawn['x']:.3f}, {drawn['y']:.3f}), "
+                    f"not held at its last living spot ({last['x']:.3f}, {last['y']:.3f})")
+            if fade <= 0.0:
+                break
+        assert checked >= 10, f"the dying glow must be drawn for a while, it was drawn on {checked} frames"
+    print(f"[PASS] test_engine_glow_holds_its_aim_while_dying passed (spot held on {checked} dying frames, aim B ignored)")
+
+
+def test_legacy_body_glow_fades_over_the_dissolve(g):
+    """The legacy ship's own engine glow sprite fades over the same DISSOLVE_S as the pool glow. It keeps its last living
+    spot, and its opacity is its living pulse times the fade: 0 at the end of the dissolve, not 230 for ever."""
+    with _config_value("USE_PLAYER_ART", False), _wall_clock() as wall:
+        _new_run(g)
+        assert g.visuals._player_art is None, "the legacy ship must be the character on screen"
+        g.player.hp = LOW_HP_RATIO * g.player.max_hp
+        _advance(g, wall, clock_moves=False)
+        _frame_with_aim(g, AIM_B)
+        _advance(g, wall, clock_moves=False)
+        _frame_with_aim(g, AIM_A)  # the last living frame
+        living_op, lx, ly = _body_glow(g)
+        assert living_op > 0, "the body's engine glow must be lit on the last living frame"
+        g.player.hp = 0
+        frames = []
+        for _ in range(MAX_DISSOLVE_FRAMES):
+            _advance(g, wall, clock_moves=False)
+            _frame_with_aim(g, AIM_B)
+            op, x, y = _body_glow(g)
+            fade = _fade(g)
+            frames.append({"fade": fade, "op": op, "x": x, "y": y})
+            if fade <= 0.0:
+                break
+        assert frames[0]["op"] > 0, "the body glow fades in from its living value on the death frame"
+        for f in frames:
+            assert abs(f["op"] - living_op * f["fade"]) <= 2.0, f"body glow {f['op']} is not {living_op} times {f['fade']:.4f}"
+        _assert_non_increasing([f["op"] for f in frames], "the legacy body engine glow opacity")
+        assert frames[-1]["op"] == 0, f"the body glow must be dark at the end of the dissolve, saw {frames[-1]['op']}"
+        half = _half_point(frames)
+        assert abs(half["op"] / living_op - half["fade"]) < 0.05, f"half-way body glow {half['op']} of {living_op}, fade {half['fade']:.3f}"
+        length = len(frames) * FRAME
+        assert abs(length - DISSOLVE_S) < 2 * FRAME, f"the body glow must fade over {DISSOLVE_S} s, took {length:.3f} s"
+        for f in frames:
+            assert abs(f["x"] - lx) < 1e-9 and abs(f["y"] - ly) < 1e-9, (
+                f"the dying body glow moved to ({f['x']:.3f}, {f['y']:.3f}), not held at ({lx:.3f}, {ly:.3f})")
+    # Back to the pod-robot for the tests that follow.
+    g.visuals.sync_player(g.player, Vec2(0.0, 0.0))
+    print(f"[PASS] test_legacy_body_glow_fades_over_the_dissolve passed (body glow {living_op} to 0 over {len(frames)} frames)")
+
+
+def test_switch_off_keeps_the_body_glow_as_main(g):
+    """ENABLE_DEATH_FADE off: the legacy body's engine glow is drawn as on main. It stays lit at its living pulse and
+    follows the live aim while the ship dies, and the pool glow is cut at hp 0."""
+    with _config_value("ENABLE_DEATH_FADE", False), _config_value("USE_PLAYER_ART", False), _wall_clock() as wall:
+        _new_run(g)
+        assert g.visuals._player_art is None, "the legacy ship must be the character on screen"
+        g.player.hp = LOW_HP_RATIO * g.player.max_hp
+        _advance(g, wall, clock_moves=False)
+        _frame_with_aim(g, AIM_B)
+        living_b = _body_glow(g)
+        _advance(g, wall, clock_moves=False)
+        _frame_with_aim(g, AIM_A)
+        living_a = _body_glow(g)
+        assert living_b[0] > 0 and living_b[0] == living_a[0], "living, the body glow shows its pulse"
+        assert abs(living_b[1] - living_a[1]) + abs(living_b[2] - living_a[2]) > 1.0, "the living body glow must follow the aim"
+        g.player.hp = 0
+        for _ in range(MAX_DISSOLVE_FRAMES // 2):  # the switch is off, so the glow must not fade within the dissolve
+            _advance(g, wall, clock_moves=False)
+            drawn = _frame_with_aim(g, AIM_B)
+            op, x, y = _body_glow(g)
+            assert "x" not in drawn, f"with the switch off the pool glow stops at hp 0, saw {drawn}"
+            assert op == living_b[0], f"with the switch off the body glow stays at its living pulse, saw {op}"
+            assert abs(x - living_b[1]) < 1e-9 and abs(y - living_b[2]) < 1e-9, (
+                f"with the switch off the body glow follows the live aim, as on main, saw ({x:.3f}, {y:.3f})")
+    g.visuals.sync_player(g.player, Vec2(0.0, 0.0))
+    print("[PASS] test_switch_off_keeps_the_body_glow_as_main passed (switch off: body glow lit and on the live aim, as on main)")
+
+
 def run_all():
     score_saved = score.HIGH_SCORE_FILE
     progress_saved = progress.PROGRESS_FILE
@@ -325,6 +460,9 @@ def run_all():
         test_new_life_shows_the_living_glow_again(g)
         test_switch_off_restores_the_cut(g)
         test_legacy_ship_fades_on_the_same_clock(g)
+        test_engine_glow_holds_its_aim_while_dying(g)
+        test_legacy_body_glow_fades_over_the_dissolve(g)
+        test_switch_off_keeps_the_body_glow_as_main(g)
     finally:
         g.close()
         score.HIGH_SCORE_FILE = score_saved

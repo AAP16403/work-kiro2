@@ -9,7 +9,7 @@ from chain import expire_chain, start_chain
 import repulsor
 from config import BOOST_OVERDRIVE_SECONDS, PLAYER_HP, SHIELD_MAX
 from drone import DRONE_DURATION
-from utils import Vec2
+from utils import Vec2, round_countdown
 from weapons import WEAPONS, is_weapon_upgrade
 
 if TYPE_CHECKING:
@@ -104,7 +104,7 @@ def equip_permanent_weapon(player: "Player", weapon) -> None:
 
 def weapon_pickup_secs_left(player: "Player", now: float) -> int:
     """Whole seconds left on the timed weapon, rounded up like the status line. 0 when the weapon is permanent."""
-    left = float(getattr(player, "weapon_until", 0.0)) - float(now)
+    left = round_countdown(float(getattr(player, "weapon_until", 0.0)) - float(now))
     return math.ceil(left) if left > 0.0 else 0
 
 
@@ -133,7 +133,7 @@ def format_timed_powerups_hud(player: "Player", now: float) -> str:
     )
     parts = []
     for field, label in labels:
-        left = float(getattr(player, field, 0.0)) - float(now)
+        left = round_countdown(float(getattr(player, field, 0.0)) - float(now))  # no whole second from float noise
         if left > 0.0:
             parts.append(f"{label} {math.ceil(left)}s")
     rep = repulsor.hud_text(player, now)  # Repulsor cooldown countdown and stored charges

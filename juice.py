@@ -247,14 +247,20 @@ class JuiceOverlay:
         self._flash.color = ultra_flash_color(variant_color)
         self._flash_on = True
 
-    def sync(self, t: float, shake: Vec2, hp_ratio: float, view_w: int, view_h: int) -> None:
-        """Per-frame update. Moves, scales and fades the two sprites. Creates nothing."""
+    def sync(self, t: float, shake: Vec2, hp_ratio: float, view_w: int, view_h: int,
+             vignette_t: float | None = None, vignette_fade: float = 1.0) -> None:
+        """Per-frame update. Moves, scales and fades the two sprites. Creates nothing.
+
+        vignette_t holds the pulse clock of the vignette (None: use t). vignette_fade scales its opacity, so
+        the death fade can take it to zero. The defaults give the vignette exactly its living opacity.
+        """
         # Low-health vignette: one sprite stretched over the whole window.
         if (view_w, view_h) != self._view:
             self._view = (view_w, view_h)
             self._vignette.scale_x = max(1, view_w) / float(_VIGNETTE_W)
             self._vignette.scale_y = max(1, view_h) / float(_VIGNETTE_H)
-        opacity = int(255 * low_hp_vignette_strength(hp_ratio, t))
+        strength = low_hp_vignette_strength(hp_ratio, t if vignette_t is None else vignette_t)
+        opacity = int(255 * strength * vignette_fade)
         if self._vignette.opacity != opacity:
             self._vignette.opacity = opacity
 

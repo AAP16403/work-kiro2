@@ -214,6 +214,24 @@ class QuadBank:
         if slot >= self._high:
             self._high = slot + 1
 
+    def set_alpha(self, slot: int, a: int) -> None:
+        """Set only a slot's alpha, for a quad whose size, rotation and colour are unchanged. Four array writes."""
+        a = max(0, min(255, int(a)))
+        sc = self._sc
+        o4 = 4 * slot
+        if sc[o4 + 3] == a:
+            return
+        sc[o4 + 3] = a
+        col = self._colors
+        o = 16 * slot + 3
+        col[o] = a
+        col[o + 4] = a
+        col[o + 8] = a
+        col[o + 12] = a
+        self._style_dirty = True
+        if slot >= self._high:
+            self._high = slot + 1
+
     def hide(self, slot: int) -> None:
         self.style(slot, 0.0, 0.0, 0.0, _HIDDEN)
 

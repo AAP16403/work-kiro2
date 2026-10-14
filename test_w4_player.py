@@ -454,22 +454,36 @@ def test_allocation_per_frame_is_bounded(g):
 
     for i in range(300):
         frame(i)
-    gc.collect()
-    gc.disable()
-    try:
-        b0 = sys.getallocatedblocks()
-        frames = 900
-        for i in range(300, 300 + frames):
+    # The menu floor prefetch and the audio preload run in background threads. Whatever they allocate
+    # while a measured window is open is counted in that window's block total, and on a loaded machine
+    # that has pushed one long window to 4.3 to 5.6 blocks per frame. So the test measures three short
+    # windows, each after a settle that lets the background work finish, and asserts on the quietest one:
+    # a busy thread can spoil one window, but it is unlikely to spoil all three.
+    frames = 300
+    settle = 60
+    windows = []
+    i = 300
+    for _ in range(3):
+        for _ in range(settle):  # gc stays enabled through the settle, so the last window's garbage goes first
             frame(i)
-        b1 = sys.getallocatedblocks()
-    finally:
-        gc.enable()
-    per_frame = (b1 - b0) / frames
+            i += 1
+        gc.collect()
+        gc.disable()
+        try:
+            b0 = sys.getallocatedblocks()
+            for _ in range(frames):
+                frame(i)
+                i += 1
+            b1 = sys.getallocatedblocks()
+        finally:
+            gc.enable()
+        windows.append((b1 - b0) / frames)
+    per_frame = min(windows)
     # Measured on this machine: about 0.3 net blocks per frame, against about 1.3 before this change.
     # pyglet's own vertex bookkeeping accounts for most of it; the bound catches a real per-frame leak.
-    assert per_frame < 1.0, f"net allocation {per_frame:.2f} blocks per frame"
+    assert per_frame < 1.0, f"net allocation {per_frame:.2f} blocks per frame (windows {[round(w, 2) for w in windows]})"
     art.delete()
-    print(f"[PASS] test_allocation_per_frame_is_bounded passed (net {per_frame:.2f} blocks per frame)")
+    print(f"[PASS] test_allocation_per_frame_is_bounded passed (net {per_frame:.2f} blocks per frame, quietest of 3 windows)")
 
 
 def test_sync_leaves_the_depth_handle_alone_while_bobbing(g):

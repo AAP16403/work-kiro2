@@ -1,5 +1,5 @@
 """Chase behavior for enemies."""
-from enemy_behaviors.base import Behavior, add_windup_telegraph
+from enemy_behaviors.base import Behavior, add_windup_telegraph, separation_steer
 from utils import Vec2, perp
 import math
 import random
@@ -84,21 +84,7 @@ class Chase(Behavior):
 
     def _separation(self, enemy, others, radius: float, weight: float = 1.0) -> Vec2:
         """Repel from nearby enemies to reduce stacking."""
-        r = float(radius)
-        acc = Vec2(0.0, 0.0)
-        count = 0
-        for o in others:
-            if o is enemy:
-                continue
-            dvec = enemy.pos - o.pos
-            d = dvec.length()
-            if d <= 1e-6 or d > r:
-                continue
-            acc = acc + dvec * (1.0 / (d * d))
-            count += 1
-        if count == 0:
-            return Vec2(0.0, 0.0)
-        return acc.normalized() * weight
+        return separation_steer(enemy, others, radius, weight)
 
     def _dodge_player_projectiles(self, enemy, projectiles, danger_radius: float = 70.0) -> Vec2:
         steer = Vec2(0.0, 0.0)

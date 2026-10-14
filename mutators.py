@@ -281,6 +281,7 @@ def shape_enemy_volley(projectiles: list, start: int, rules: RunRules | None) ->
             owner=template.owner,
             projectile_type=template.projectile_type,
             is_crit=template.is_crit,
+            source=getattr(template, "source", ""),  # an extra shot keeps the behaviour that fired its volley
         ))
     return len(new_angles)
 

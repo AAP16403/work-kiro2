@@ -89,18 +89,19 @@ def _fire_fan(
     damage: int,
     ttl: float = 2.6,
     projectile_type: str = "bullet",
+    source: str = "",
 ):
-    """Fire a spread/fan of enemy bullets around an aim direction."""
+    """Fire a spread/fan of enemy bullets around an aim direction. ``source`` is the behaviour that fires them."""
     ptype = str(projectile_type or "bullet")
     n = max(1, int(count))
     if n == 1:
-        state.projectiles.append(Projectile(origin, aim * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype))
+        state.projectiles.append(Projectile(origin, aim * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype, source=source))
         return
     step = float(spread_deg) / float(n - 1) if n > 1 else 0.0
     start = -float(spread_deg) * 0.5
     for i in range(n):
         d = _rotate(aim, start + step * i)
-        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype))
+        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype, source=source))
 
 
 def _fire_ring(
@@ -112,8 +113,9 @@ def _fire_ring(
     ttl: float = 2.8,
     start_deg: float = 0.0,
     projectile_type: str = "bullet",
+    source: str = "",
 ) -> None:
-    """Fire bullets in a full ring around the origin."""
+    """Fire bullets in a full ring around the origin. ``source`` is the behaviour that fires them."""
     ptype = str(projectile_type or "bullet")
     n = max(3, int(count))
     base = float(start_deg)
@@ -121,12 +123,12 @@ def _fire_ring(
     for i in range(n):
         a = base + i * step
         d = Vec2(math.cos(math.radians(a)), math.sin(math.radians(a)))
-        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype))
+        state.projectiles.append(Projectile(origin, d * float(speed), int(damage), ttl=float(ttl), owner="enemy", projectile_type=ptype, source=source))
 
 
-def _spawn_shockwave(state, origin: Vec2, count: int = 16, speed: float = 240.0, damage: int = 10):
+def _spawn_shockwave(state, origin: Vec2, count: int = 16, speed: float = 240.0, damage: int = 10, source: str = ""):
     """Spawn a expanding ring of projectiles (shockwave)."""
-    _fire_ring(state, origin, count, speed, damage, ttl=1.8, projectile_type="plasma")
+    _fire_ring(state, origin, count, speed, damage, ttl=1.8, projectile_type="plasma", source=source)
 
 
 def _boss_init(enemy: Enemy):
@@ -564,10 +566,10 @@ def _update_boss_thunder(enemy: Enemy, player_pos: Vec2, state, dt: float, game,
         if atk_roll > 0.3:
             ring_cnt = boss_rage.volley(enemy, 8 if phase == 0 else 10)
             gun = cycle_gun(enemy, ["plasma", "bullet"])
-            _fire_ring(state, enemy.pos, ring_cnt, proj_speed * 0.9, dmg, projectile_type=gun)
+            _fire_ring(state, enemy.pos, ring_cnt, proj_speed * 0.9, dmg, projectile_type=gun, source=enemy.behavior)
             
             if phase >= 2 and state.rng.random() < 0.45:
-                _fire_ring(state, enemy.pos, ring_cnt, proj_speed * 0.75, dmg, start_deg=15.0, projectile_type=gun)
+                _fire_ring(state, enemy.pos, ring_cnt, proj_speed * 0.75, dmg, start_deg=15.0, projectile_type=gun, source=enemy.behavior)
 
         enemy.ai[state_key] = "stalk"
         cd_base = 2.5 - (state.wave * 0.035) - (phase * 0.2)
@@ -647,7 +649,7 @@ def _update_boss_laser(enemy: Enemy, player_pos: Vec2, state, dt: float, game, p
             enemy.ai["laser_tick"] = boss_rage.cooldown(enemy, 0.22 if phase == 0 else 0.18 if phase == 1 else 0.15)
         
         if phase >= 2 and state.rng.random() < 0.01:
-             _fire_ring(state, enemy.pos, count=6, speed=170.0, damage=8, projectile_type="plasma")
+             _fire_ring(state, enemy.pos, count=6, speed=170.0, damage=8, projectile_type="plasma", source=enemy.behavior)
 
         if l_timer <= 0:
             enemy.ai["laser_state"] = "reposition"
@@ -695,13 +697,13 @@ def _update_boss_trapmaster(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
         aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.85)
         if phase == 0:
             if persona != "cautious":
-                _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 4), spread_deg=56.0, speed=proj_speed, damage=dmg, ttl=2.55, projectile_type="spread")
+                _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 4), spread_deg=56.0, speed=proj_speed, damage=dmg, ttl=2.55, projectile_type="spread", source=enemy.behavior)
         elif phase == 1:
-            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 6), spread_deg=76.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="spread")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 6), spread_deg=76.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="spread", source=enemy.behavior)
         else:
-            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=88.0, speed=proj_speed, damage=dmg + 2, ttl=2.55, projectile_type="spread")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=88.0, speed=proj_speed, damage=dmg + 2, ttl=2.55, projectile_type="spread", source=enemy.behavior)
             if persona in ("aggressive", "trickster"):
-                _fire_fan(state, enemy.pos, perp(aim), count=3, spread_deg=38.0, speed=proj_speed * 0.9, damage=max(1, dmg), ttl=2.3, projectile_type="spread")
+                _fire_fan(state, enemy.pos, perp(aim), count=3, spread_deg=38.0, speed=proj_speed * 0.9, damage=max(1, dmg), ttl=2.3, projectile_type="spread", source=enemy.behavior)
 
         adds_cap = _boss_adds_cap(state, 2)
         if len(getattr(state, "enemies", [])) < adds_cap and state.rng.random() < 0.14:
@@ -744,7 +746,7 @@ def _update_boss_swarmqueen(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
             proj_speed = 190.0
             dmg = _boss_damage(state, base=6.0, wave_scale=0.15, cap=18)
             aim = _safe_dir(player_pos - enemy.pos)
-            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 5 + min(phase, 1)), spread_deg=56.0, speed=proj_speed, damage=dmg, projectile_type="plasma")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 5 + min(phase, 1)), spread_deg=56.0, speed=proj_speed, damage=dmg, projectile_type="plasma", source=enemy.behavior)
 
         else:
             for _ in range(2):
@@ -842,7 +844,7 @@ def _update_boss_brute(enemy: Enemy, player_pos: Vec2, state, dt: float, game, p
             enemy.ai["brute_timer"] = 2.0
             
             sw_dmg = _boss_damage(state, base=7.0, wave_scale=0.13, cap=18)
-            _spawn_shockwave(state, enemy.pos, count=boss_rage.volley(enemy, 12 + phase_boss * 3), speed=240.0, damage=sw_dmg)
+            _spawn_shockwave(state, enemy.pos, count=boss_rage.volley(enemy, 12 + phase_boss * 3), speed=240.0, damage=sw_dmg, source=enemy.behavior)
             
         elif b_timer <= 0:
             enemy.ai["brute_state"] = "recover"
@@ -886,17 +888,17 @@ def _update_boss_abyss_gaze(enemy: Enemy, player_pos: Vec2, state, dt: float, ga
         aim = _lead_dir(enemy.pos, player_pos, player_vel, proj_speed, mult=0.72)
 
         if phase == 0:
-            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 6), spread_deg=72.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type="plasma")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 6), spread_deg=72.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type="plasma", source=enemy.behavior)
         elif phase == 1:
-            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="plasma")
-            _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.45, start_deg=enemy.t * 30.0, projectile_type="bullet")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type="plasma", source=enemy.behavior)
+            _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.45, start_deg=enemy.t * 30.0, projectile_type="bullet", source=enemy.behavior)
         else:
             for off in (-14.0, 0.0, 14.0):
                 a = _rotate(aim, off)
                 # The one extra shot goes to the centre fan of the three.
                 n_fan = boss_rage.volley(enemy, 3) if off == 0.0 else 3
-                _fire_fan(state, enemy.pos, a, count=n_fan, spread_deg=24.0, speed=proj_speed, damage=dmg + 1, ttl=2.35, projectile_type="plasma")
-            _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.78, damage=max(1, dmg - 1), ttl=2.4, start_deg=enemy.t * 34.0, projectile_type="bullet")
+                _fire_fan(state, enemy.pos, a, count=n_fan, spread_deg=24.0, speed=proj_speed, damage=dmg + 1, ttl=2.35, projectile_type="plasma", source=enemy.behavior)
+            _fire_ring(state, enemy.pos, count=8, speed=proj_speed * 0.78, damage=max(1, dmg - 1), ttl=2.4, start_deg=enemy.t * 34.0, projectile_type="bullet", source=enemy.behavior)
 
         beam_len = config.ROOM_RADIUS * 2.0
         if phase >= 1:
@@ -960,14 +962,14 @@ def _update_boss_womb_core(enemy: Enemy, player_pos: Vec2, state, dt: float, gam
         gun = cycle_gun(enemy, ["spread", "bullet", "plasma"])
 
         if phase == 0:
-            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 5), spread_deg=68.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type=gun)
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 5), spread_deg=68.0, speed=proj_speed, damage=dmg, ttl=2.6, projectile_type=gun, source=enemy.behavior)
         elif phase == 1:
-            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type=gun)
-            _fire_ring(state, enemy.pos, count=7, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.5, start_deg=enemy.t * 24.0, projectile_type="bullet")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=82.0, speed=proj_speed, damage=dmg + 1, ttl=2.65, projectile_type=gun, source=enemy.behavior)
+            _fire_ring(state, enemy.pos, count=7, speed=proj_speed * 0.8, damage=max(1, dmg - 1), ttl=2.5, start_deg=enemy.t * 24.0, projectile_type="bullet", source=enemy.behavior)
         else:
-            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=86.0, speed=proj_speed, damage=dmg + 1, ttl=2.5, projectile_type=gun)
-            _fire_fan(state, enemy.pos, perp(aim), count=4, spread_deg=34.0, speed=proj_speed * 0.9, damage=dmg, ttl=2.35, projectile_type="spread")
-            _fire_ring(state, enemy.pos, count=6, speed=proj_speed * 0.78, damage=max(1, dmg - 1), ttl=2.35, start_deg=enemy.t * 30.0, projectile_type="plasma")
+            _fire_fan(state, enemy.pos, aim, count=boss_rage.volley(enemy, 7), spread_deg=86.0, speed=proj_speed, damage=dmg + 1, ttl=2.5, projectile_type=gun, source=enemy.behavior)
+            _fire_fan(state, enemy.pos, perp(aim), count=4, spread_deg=34.0, speed=proj_speed * 0.9, damage=dmg, ttl=2.35, projectile_type="spread", source=enemy.behavior)
+            _fire_ring(state, enemy.pos, count=6, speed=proj_speed * 0.78, damage=max(1, dmg - 1), ttl=2.35, start_deg=enemy.t * 30.0, projectile_type="plasma", source=enemy.behavior)
 
         adds_cap = _boss_adds_cap(state, 3)
         if len(getattr(state, "enemies", [])) < adds_cap:
@@ -1044,18 +1046,46 @@ def update_enemy(enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_
             _dispatch_behavior_update(enemy.behavior, enemy, player_pos, state, dt, game, player_vel)
 
 
+_UPDATE_KWARG_FLAGS: dict = {}  # updater function -> (takes game, takes player_vel)
+
+
+def _update_kwarg_flags(updater) -> tuple:
+    """Which optional keywords ``updater`` takes. Computed once per function, not once per unit per step.
+
+    ``inspect.signature`` costs tens of microseconds, and this ran for every unit on every step. With
+    ``config.ENABLE_MULTICORE_FRAME`` off, the signature is read on every call, as before.
+    """
+    if not config.ENABLE_MULTICORE_FRAME:
+        return _probe_update_kwargs(updater)
+    key = getattr(updater, "__func__", updater)
+    try:
+        flags = _UPDATE_KWARG_FLAGS.get(key)
+    except TypeError:  # an unhashable callable is inspected each time, as before
+        return _probe_update_kwargs(updater)
+    if flags is None:
+        flags = _probe_update_kwargs(updater)
+        _UPDATE_KWARG_FLAGS[key] = flags
+    return flags
+
+
+def _probe_update_kwargs(updater) -> tuple:
+    params = inspect.signature(updater).parameters
+    return ("game" in params, "player_vel" in params)
+
+
 def _dispatch_behavior_update(behavior_impl, enemy: Enemy, player_pos: Vec2, state, dt: float, game, player_vel: Vec2) -> None:
     """Call behavior.update with backward-compatible argument mapping."""
     updater = getattr(behavior_impl, "update", None)
     if not callable(updater):
         return
 
-    kwargs = {}
-    params = inspect.signature(updater).parameters
-
-    if "game" in params:
-        kwargs["game"] = game
-    if "player_vel" in params:
-        kwargs["player_vel"] = player_vel
-
-    updater(enemy, player_pos, state, dt, **kwargs)
+    takes_game, takes_player_vel = _update_kwarg_flags(updater)
+    # Direct calls, not a kwargs dict: this runs for every unit on every step.
+    if takes_game and takes_player_vel:
+        updater(enemy, player_pos, state, dt, game=game, player_vel=player_vel)
+    elif takes_game:
+        updater(enemy, player_pos, state, dt, game=game)
+    elif takes_player_vel:
+        updater(enemy, player_pos, state, dt, player_vel=player_vel)
+    else:
+        updater(enemy, player_pos, state, dt)

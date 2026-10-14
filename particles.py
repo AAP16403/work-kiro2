@@ -291,9 +291,13 @@ class ParticleSystem:
             kind="glow",
         ))
 
-    def add_shockwave(self, pos: Vec2, color: tuple[int, int, int], max_radius: float = 110.0, ttl: float = 0.35):
-        """Expanding energy ring that grows from pos to max_radius (ease-out) and fades."""
-        self._add_ring(pos, color, max_radius, ttl)
+    def add_shockwave(self, pos: Vec2, color: tuple[int, int, int], max_radius: float = 110.0, ttl: float = 0.35,
+                      grow: bool = True):
+        """Expanding energy ring that grows from pos to max_radius (ease-out) and fades.
+
+        grow=False holds the ring at max_radius and only fades it (used for reduced motion).
+        """
+        self._add_ring(pos, color, max_radius, ttl, grow=grow)
 
     def add_boss_death(self, pos: Vec2, color: tuple[int, int, int]):
         """Multi-stage boss explosion (about 70 new particles, capped)."""

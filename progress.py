@@ -112,6 +112,17 @@ def save(data: dict, path=None) -> bool:
     return savefile.save_versioned(target, _normalise(data), savefile.PROGRESS_VERSION)
 
 
+def ensure_file(path=None) -> bool:
+    """Create progress.json with default_progress() when it is missing. Never overwrites. Never raises.
+
+    Same folder rule as save(): the folder must exist already. Returns True only when this call wrote the file.
+    """
+    target = os.path.abspath(PROGRESS_FILE if path is None else path)
+    if not os.path.isdir(os.path.dirname(target)):
+        return False
+    return savefile.create_if_missing(target, default_progress(), savefile.PROGRESS_VERSION)
+
+
 def apply_run(data: dict, stats: dict) -> dict:
     """Fold one finished run into the lifetime record and return ``data``. Pure, no I/O.
 

@@ -1,5 +1,5 @@
 """Ranged behavior for enemies."""
-from enemy_behaviors.base import Behavior, sustained_cd_scale
+from enemy_behaviors.base import Behavior, separation_steer, sustained_cd_scale
 from utils import Vec2, perp
 from projectile import Projectile
 import math
@@ -74,7 +74,7 @@ class Ranged(Behavior):
                 proj_speed = 235.0 + state.wave * 3
                 aim = _lead_dir(peek_pos, player_pos, player_vel, proj_speed, mult=0.75)
                 vel = aim * proj_speed
-                state.projectiles.append(Projectile(peek_pos, vel, 8 + state.wave // 2, ttl=2.6, owner="enemy"))
+                state.projectiles.append(Projectile(peek_pos, vel, 8 + state.wave // 2, ttl=2.6, owner="enemy", source="ranged"))
                 enemy.attack_cd = (2.0 + random.uniform(0.0, 0.5)) / sustained_cd_scale(enemy)
 
     def _do_kiting_behavior(self, enemy, player_pos, state, dt, player_vel):
@@ -121,7 +121,7 @@ class Ranged(Behavior):
                 sa = math.sin(math.radians(aim_jitter))
                 aim = Vec2(aim.x * ca - aim.y * sa, aim.x * sa + aim.y * ca).normalized()
                 vel = aim * proj_speed
-                state.projectiles.append(Projectile(enemy.pos, vel, 6 + state.wave // 3, ttl=2.4, owner="enemy"))
+                state.projectiles.append(Projectile(enemy.pos, vel, 6 + state.wave // 3, ttl=2.4, owner="enemy", source="ranged"))
                 enemy.ai["burst_left"] -= 1
                 enemy.ai["burst_gap"] = 0.16 + random.uniform(0.0, 0.08)
                 if enemy.ai["burst_left"] <= 0:
@@ -133,21 +133,7 @@ class Ranged(Behavior):
 
     def _separation(self, enemy, others, radius: float = 44.0, weight: float = 1.1) -> Vec2:
         """Repel from nearby enemies to reduce stacking."""
-        r = float(radius)
-        acc = Vec2(0.0, 0.0)
-        count = 0
-        for o in others:
-            if o is enemy:
-                continue
-            dvec = enemy.pos - o.pos
-            d = dvec.length()
-            if d <= 1e-6 or d > r:
-                continue
-            acc = acc + dvec * (1.0 / (d * d))
-            count += 1
-        if count == 0:
-            return Vec2(0.0, 0.0)
-        return acc.normalized() * weight
+        return separation_steer(enemy, others, radius, weight)
 
     def _dodge_player_projectiles(self, enemy, projectiles, danger_radius: float = 90.0) -> Vec2:
         steer = Vec2(0.0, 0.0)

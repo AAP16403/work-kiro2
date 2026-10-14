@@ -4,10 +4,23 @@ import math
 import random
 from dataclasses import dataclass
 
+import config
 from config import ISO_SCALE_X, ISO_SCALE_Y, SCREEN_H, SCREEN_W, MAP_CIRCLE, MAP_DONUT, MAP_CROSS, MAP_DIAMOND
 
 VIEW_W = SCREEN_W
 VIEW_H = SCREEN_H
+
+
+def round_countdown(seconds: float) -> float:
+    """Seconds left on a countdown, rounded to COUNTDOWN_ROUND_DIGITS before the caller takes ceil or tests for 0.
+
+    Run-clock differences carry float noise: 10.000000000000002 seconds left must read 10, not 11. With
+    ENABLE_POWERUP_EDGES off the value comes back unrounded, as in wave 6.
+    """
+    if not config.ENABLE_POWERUP_EDGES:
+        return float(seconds)
+    return round(float(seconds), int(config.COUNTDOWN_ROUND_DIGITS))
+
 
 ENEMY_BEHAVIOR_ALIASES = {
     "bomber": "bomber",

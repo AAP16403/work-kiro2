@@ -36,6 +36,8 @@ from powerup import (
 import shot_mods
 import chain
 import repulsor
+import echo
+import shards
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
 from drone import drone_bullets
@@ -52,6 +54,9 @@ import audio_cues
 # Render-only randomness (screen shake). Kept off the seeded run RNG so gameplay
 # stays reproducible regardless of frame rate or time spent paused.
 _SHAKE_RNG = random.Random()
+
+# The world origin for the Afterburn screen origin, built once so the frame does not allocate it.
+_WORLD_ORIGIN = Vec2(0.0, 0.0)
 
 
 def add_shake(s, amount: float, limit: float | None = None) -> None:
@@ -393,12 +398,67 @@ class PlayingState(State):
             e.hp -= amount
 
     @staticmethod
+    def _afterburn_hit(game, e, amount: int) -> bool:
+        """One Afterburn tick through the normal damage and kill path. True when it kills, and the kill scores as usual."""
+        s = game.state
+        PlayingState._damage_enemy(game, s, e, amount)
+        if e.hp > 0:
+            return False
+        PlayingState._kill_enemy(game, s, e)
+        return True
+
+    @staticmethod
     def _chain_hit(game, s, target, amount: int) -> bool:
         """One Chain Lightning arc's damage. True when it kills the target, which is then removed and scored."""
         PlayingState._damage_enemy(game, s, target, amount)
         if target.hp > 0:
             return False
         PlayingState._kill_enemy(game, s, target)
+        return True
+
+    @staticmethod
+    def _reflect_back(game, s, e, damage: int) -> bool:
+        """Reflector affix: the first player shot in each cooldown window is sent back at the player instead of hurting
+        the reflector. A flash and a sound mark the reflection. True when the shot was reflected, so the caller removes it.
+        False when the enemy has no reflector affix or its cooldown is still running.
+        """
+        if getattr(e, "elite_affix", None) != "reflector" or s.time < float(e.ai.get("reflect_ready_at", 0.0)):
+            return False
+        e.ai["reflect_ready_at"] = s.time + float(config.ELITE_REFLECT_COOLDOWN)
+        to_player = game.player.pos - e.pos
+        aim_len = to_player.length() or 1.0
+        s.projectiles.append(Projectile(
+            Vec2(e.pos.x, e.pos.y), to_player / aim_len * float(config.ELITE_REFLECT_SPEED),
+            int(damage), ttl=2.0, owner="enemy", projectile_type="bullet",
+        ))
+        if game.particle_system:
+            game.particle_system.add_shockwave(e.pos, (255, 220, 120), max_radius=34.0, ttl=0.25)
+        audio_cues.cue(game.audio, "reflect")
+        return True
+
+    @staticmethod
+    def _tank_death_blast(game, s, e, behavior_name: str) -> None:
+        """A tank that dies within its blast radius hurts the player. Every kill path runs this: a bullet or a shard."""
+        if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
+            game._damage_player(game.balance.tank_death_blast_damage)
+            add_shake(s, 15.0)
+
+    def _shard_hit(self, target, amount: int) -> bool:
+        """One shard's hit, under the same affix rules as the player shot that made it.
+
+        A Reflector sends the shard back when its cooldown is ready, and the shard then does no damage. Otherwise the
+        shard deals its damage, and a kill runs the same tank death blast a direct kill does. True when the shard kills.
+        """
+        game = self.game
+        s = game.state
+        if self._reflect_back(game, s, target, amount):
+            return False
+        behavior_name = getattr(target, "_behavior_name", enemy_behavior_name(target))
+        PlayingState._damage_enemy(game, s, target, amount)
+        if target.hp > 0:
+            return False
+        PlayingState._kill_enemy(game, s, target)
+        self._tank_death_blast(game, s, target, behavior_name)
         return True
 
     @staticmethod
@@ -540,6 +600,30 @@ class PlayingState(State):
                 combo=float(getattr(getattr(game, 'score', None), 'combo', 1.0)),
             )
 
+    @staticmethod
+    def _chain_from(game, s, e) -> None:
+        """Chain Lightning arcs from a dead enemy, when the pickup runs at this moment."""
+        if chain.chain_active(game.player, s.time):
+            chain.resolve_chain(
+                e, s.enemies, game.player, s.time,
+                lambda target, amount: PlayingState._chain_hit(game, s, target, amount),
+                pool=game.chain_pool,
+            )
+
+    @staticmethod
+    def _player_kill(game, s, e, death_particles: bool = True, chains: bool = True) -> None:
+        """A kill the player makes: the kill, then a Chain Lightning chain from the dead enemy when ``chains``.
+
+        Every player-caused kill goes through here: bullets, lasers, the vortex, a boost ram and the Ultra. Enemy-caused
+        kills (contact, the volatile blast, splitter copies) stay on _kill_enemy and never chain. The bullet path with
+        ENABLE_POWERUP_EDGES off runs _kill_enemy, the tank blast and _chain_from itself, in wave 6's order.
+        """
+        if getattr(e, "_is_dead", False):
+            return
+        PlayingState._kill_enemy(game, s, e, death_particles=death_particles)
+        if chains:
+            PlayingState._chain_from(game, s, e)
+
     def update(self, dt: float):
         game = self.game
         if not game.state:
@@ -612,7 +696,7 @@ class PlayingState(State):
                         PlayingState._damage_enemy(game, s, e, dmg)
                         hit_shake += float(config.SHAKE_HIT_IMPULSE)
                         if e.hp <= 0:
-                            self._kill_enemy(game, s, e, death_particles=False)
+                            self._player_kill(game, s, e, death_particles=False, chains=config.ENABLE_POWERUP_EDGES)
 
         player_radius = game._player_radius()
         for tr in list(getattr(s, "traps", [])):
@@ -647,11 +731,13 @@ class PlayingState(State):
         update_arena_event(s, game, dt)
 
         old_pos = Vec2(game.player.pos.x, game.player.pos.y)
+        dash_ended = False  # True on the frame the dash timer runs out; the Echo drops once the end point is settled
         if game.player.is_dashing:
             game.player.pos += game.player.dash_direction * game.player.dash_speed * dt
             game.player.dash_timer -= dt
             if game.player.dash_timer <= 0:
                 game.player.is_dashing = False
+                dash_ended = True
         else:
             moving = idir.length() > 0
             desired_vel = Vec2(0.0, 0.0)
@@ -679,10 +765,17 @@ class PlayingState(State):
         if config.ENABLE_OBSTACLES and getattr(s, "obstacles", None):
             game.player.pos = resolve_circle_obstacles(game.player.pos, player_radius, s.obstacles)
             game.player.pos = clamp_to_map(game.player.pos, config.ROOM_RADIUS * 0.9, s.map_type)
+        if dash_ended:
+            # Echo: exactly one homing echo per dash, dropped where the dash settled (echo.py, ENABLE_ECHO).
+            echo.on_dash_end(game, s)
         if dt > 1e-6:
             player_vel = (game.player.pos - old_pos) * (1.0 / dt)
         else:
             player_vel = Vec2(0.0, 0.0)
+
+        # Afterburn: while the dash runs, a segment drops at the pod on the drop clock (afterburn.py).
+        if game.afterburn is not None:
+            game.afterburn.update_dash(game.player.is_dashing, game.player.pos.x, game.player.pos.y, s.time)
 
         weapon = game.player.current_weapon
         if weapon and game.player.recoil > 0:
@@ -715,7 +808,7 @@ class PlayingState(State):
                         PlayingState._damage_enemy(game, s, e, dmg)
                         hit_shake += float(config.SHAKE_HIT_IMPULSE)
                         if e.hp <= 0:
-                            self._kill_enemy(game, s, e, death_particles=False)
+                            self._player_kill(game, s, e, death_particles=False, chains=config.ENABLE_POWERUP_EDGES)
             else:
                 game.player.recoil = min(float(weapon.recoil_max), float(game.player.recoil) + float(weapon.recoil_kick))
                 crit_cb = game._effective_crit_chance()
@@ -791,7 +884,7 @@ class PlayingState(State):
                         e.pos = clamp_to_map(e.pos + push_dir * push_dist, config.ROOM_RADIUS * 0.96, s.map_type)
 
                     if e.hp <= 0:
-                        self._kill_enemy(game, s, e)
+                        self._player_kill(game, s, e, chains=config.ENABLE_POWERUP_EDGES)
 
                     if game.player.invincibility_timer <= 0:
                         game._damage_player(int(game.balance.enemy_contact_damage * 0.4))
@@ -804,9 +897,18 @@ class PlayingState(State):
                     cur_d = math.sqrt(d_sq)
                     push_dir = (game.player.pos - e.pos) / cur_d if cur_d > 1e-4 else Vec2(1.0, 0.0)
                     game.player.pos = clamp_to_map(game.player.pos + push_dir * 40.0, config.ROOM_RADIUS * 0.90, s.map_type)
+                elif config.ENABLE_POWERUP_EDGES and repulsor.is_stunned(e, s.time):
+                    # A stunned enemy is inert on contact: no damage, and no suicide. A boost ram (above) still lands,
+                    # because the ram is the player's action.
+                    pass
                 else:
                     game._damage_player(game.balance.enemy_contact_damage)
                     self._kill_enemy(game, s, e, death_particles=False)
+
+        # Afterburn: enemies within reach of a live segment burn, each on its own tick timer (afterburn.py). This runs
+        # after they moved, so the reach is checked where they stand now.
+        if game.afterburn is not None:
+            game.afterburn.tick(s.enemies, s.time, game.afterburn_deal)
 
         psd2 = point_segment_distance_sq
         projectile_radius = game._projectile_radius
@@ -814,10 +916,14 @@ class PlayingState(State):
 
         for p in list(s.projectiles):
             if p.owner == "player":
-                locked = shot_mods.steer_homing(p, s.enemies, game.player, s.time, dt)
-                if locked is not None and getattr(p, "_homing_lock_id", None) != id(locked):
-                    p._homing_lock_id = id(locked)  # a new target: the lock sound plays once per target
-                    audio_cues.cue(game.audio, "homing_lock")
+                if echo.is_echo(p):
+                    # An echo homes on its own timer (echo.py). The Homing pickup does not add to it.
+                    echo.steer(p, s.enemies, s.time, dt)
+                else:
+                    locked = shot_mods.steer_homing(p, s.enemies, game.player, s.time, dt)
+                    if locked is not None and getattr(p, "_homing_lock_id", None) != id(locked):
+                        p._homing_lock_id = id(locked)  # a new target: the lock sound plays once per target
+                        audio_cues.cue(game.audio, "homing_lock")
             p.update(dt if p.owner == "player" else enemy_dt)
             if p.owner == "player":
                 ricochet = shot_mods.ricochet_step(p, game.player, s.time, s.map_type, config.ROOM_RADIUS)
@@ -841,6 +947,11 @@ class PlayingState(State):
                     self._explode_enemy_bomb(game, s, p)
                 self._remove_projectile(game, s, p)
                 continue
+
+        # Shards from critical hits move, hit and expire once per fixed step, beside the projectile update.
+        shard_pool = getattr(game, "shard_pool", None)
+        if shard_pool is not None and shard_pool.live_count:
+            shard_pool.step(s.enemies, dt, self._shard_hit, game._enemy_radius)
 
         for p in list(s.projectiles):
             pr = projectile_radius(p)
@@ -871,19 +982,8 @@ class PlayingState(State):
                     if self._segment_hits_circle(psd2, e.pos, p_prev, p.pos, hit_r2):
                         hit_entities.add(id(e))
                         is_crit = getattr(p, "is_crit", False)
-                        if getattr(e, "elite_affix", None) == "reflector" and s.time >= float(e.ai.get("reflect_ready_at", 0.0)):
-                            # Reflector affix: the first player shot in each cooldown window is sent back at the player
-                            # instead of hurting the reflector. A flash and a sound mark the reflection.
-                            e.ai["reflect_ready_at"] = s.time + float(config.ELITE_REFLECT_COOLDOWN)
-                            to_player = game.player.pos - e.pos
-                            aim_len = to_player.length() or 1.0
-                            s.projectiles.append(Projectile(
-                                Vec2(e.pos.x, e.pos.y), to_player / aim_len * float(config.ELITE_REFLECT_SPEED),
-                                int(p.damage), ttl=2.0, owner="enemy", projectile_type="bullet",
-                            ))
-                            if game.particle_system:
-                                game.particle_system.add_shockwave(e.pos, (255, 220, 120), max_radius=34.0, ttl=0.25)
-                            audio_cues.cue(game.audio, "reflect")
+                        if self._reflect_back(game, s, e, p.damage):
+                            # The reflected shot leaves its path and hurts nobody, so a crit reflected here never splits.
                             self._remove_projectile(game, s, p, detonating_enemy=e)
                             break
                         PlayingState._damage_enemy(game, s, e, p.damage, is_crit=is_crit)
@@ -893,18 +993,22 @@ class PlayingState(State):
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
                         spawn_impact(game.particle_system, p, e.pos, enemy_color)
 
+                        if is_crit and getattr(game, "shard_pool", None) is not None:
+                            # A crit splits the bullet where it entered the enemy. That enemy is the shards' origin.
+                            ix, iy = shards.impact_point(p_prev, p.pos, e.pos, reach)
+                            tint = game.visuals.player_bullet_tint if game.visuals is not None else None
+                            shards.split_crit(game.shard_pool, p, ix, iy, e, tint=tint)
+
                         if e.hp <= 0:
-                            self._kill_enemy(game, s, e)
-                            if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
-                                game._damage_player(game.balance.tank_death_blast_damage)
-                                add_shake(s, 15.0)
-                            # Chain Lightning: a kill the player makes throws arcs from the dead enemy.
-                            if chain.chain_active(game.player, s.time):
-                                chain.resolve_chain(
-                                    e, s.enemies, game.player, s.time,
-                                    lambda target, amount: self._chain_hit(game, s, target, amount),
-                                    pool=game.chain_pool,
-                                )
+                            if config.ENABLE_POWERUP_EDGES:
+                                # A kill the player makes: Chain Lightning throws arcs from the dead enemy, then the blast.
+                                self._player_kill(game, s, e)
+                                self._tank_death_blast(game, s, e, behavior_name)
+                            else:
+                                # Wave 6's order: the kill, the tank blast (its damage resets the combo), then the arcs.
+                                self._kill_enemy(game, s, e)
+                                self._tank_death_blast(game, s, e, behavior_name)
+                                self._chain_from(game, s, e)
 
                         pierce = getattr(p, "pierce", 0)
                         if pierce > 0:
@@ -1096,6 +1200,11 @@ class PlayingState(State):
 
         game.visuals.sync_fx(game.state, game.player, shake, t=s.time, aim_dir=aim_dir)
         game.chain_pool.update(s.time, lambda x, y: to_iso(Vec2(x, y), shake))
+        if game.afterburn_pool is not None:
+            ox, oy = to_iso(_WORLD_ORIGIN, shake)  # the screen origin of the world this frame, shake included
+            game.afterburn_pool.update(s.time, game.afterburn, ox, oy)
+        if getattr(game, "shard_pool", None) is not None:
+            game.shard_pool.draw(s.time, shake.x, shake.y)
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:

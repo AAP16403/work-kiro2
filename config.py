@@ -323,3 +323,117 @@ COLORBLIND_ENEMY_COLORS = {
     "boss_abyss_gaze": (123, 137, 249),
     "boss_womb_core": (238, 42, 104),
 }
+
+# wave8 saves-untracked
+# At launch, create each missing save file (high_scores.json, progress.json, user_settings.json) with its
+# defaults. An existing file is never overwritten. Off means the files appear on the first save, as before.
+ENABLE_SAVES_UNTRACKED = True
+
+# wave8 multicore-frame
+# ENABLE_MULTICORE_FRAME gates two pure frame-cost changes. Both return bit-identical results to the
+# reference code they replace, so this switch changes speed only, never enemy movement or the run:
+#   - enemy._dispatch_behavior_update reads each behaviour's optional keywords once per function instead of
+#     calling inspect.signature for every unit on every step (tens of microseconds each).
+#   - enemy_behaviors.base.separation_steer replaces the per-pair Vec2 loop that bomber, chase, engineer,
+#     ranged, spitter and tank each ran for every unit (one Vec2 per pair before, none now).
+# The shipped PARALLEL_* defaults above are unchanged. Measure with tools/bench_frame_pool.py.
+ENABLE_MULTICORE_FRAME = True
+# wave8 bullet-signatures
+# Enemy bullets take a look named for the behaviour that fired them (projectile_art.SIGNATURE_STYLES). Player
+# shots, and enemies with no signature (tank, reflected shots), keep the red-orange shot look. Visual only: no
+# damage, speed or ttl value here changes the simulation.
+ENABLE_BULLET_SIGNATURES = True     # False draws every enemy shot with the old red-orange look
+SIG_SPITTER_COLOR = (120, 255, 110) # spitter: green blob with a short trail dot
+SIG_SPITTER_CORE = (200, 255, 170)  # the blob's highlight
+SIG_SPITTER_RADIUS = 4.6            # blob body radius, screen px
+SIG_SPITTER_TRAIL = 12.0            # trail dot distance behind the blob at rest, screen px
+SIG_RANGED_COLOR = (255, 110, 120)  # ranged: thin needle, shaft colour
+SIG_RANGED_CORE = (255, 236, 232)   # the needle's tip
+SIG_RANGED_LENGTH = 30.0            # needle length at rest, screen px
+SIG_BOMBER_COLOR = (255, 150, 40)   # bomber: orange pulse ring around the bomb
+SIG_BOMBER_CORE = (255, 228, 170)   # the bomb's centre
+SIG_BOMBER_RING = 10.0              # bomber ring radius at rest, screen px
+SIG_BOSS_COLOR = (255, 70, 225)     # boss shots (every boss_* behaviour): larger magenta ring
+SIG_BOSS_CORE = (255, 205, 250)     # the boss shot's centre
+SIG_BOSS_RING = 15.0                # boss ring radius at rest, screen px
+SIG_RING_PULSE = 0.18               # a pulse ring swells and shrinks by this fraction of its radius (0 under REDUCE_MOTION)
+SIG_PULSE_RATE = 9.0                # pulse rate in radians per second of shot ttl (frozen under REDUCE_MOTION)
+SIG_GLOW_OPACITY = 110              # head glow of a signed shot
+# wave8 neon-obsidian
+# Two more pod skins, in skins.py. Neon Surge Pod unlocks at a best wave, Obsidian Pod at a best score in one run.
+# ENABLE_NEON_OBSIDIAN False hides both skins: they leave the Hangar, cannot be selected, and drop out of the Guide.
+ENABLE_NEON_OBSIDIAN = True
+NEON_SURGE_UNLOCK_WAVE = 15         # progress best_wave at which Neon Surge Pod unlocks
+OBSIDIAN_UNLOCK_SCORE = 20000       # progress best_score (one run) at which Obsidian Pod unlocks
+
+# wave8 echo-dash
+# Echo: the frame a dash ends, the pod drops one player-owned homing echo at the dash end point (echo.py).
+ENABLE_ECHO = True               # switch: off means dashes drop nothing (echo.on_dash_end returns None)
+ECHO_DAMAGE_PERCENT = 60         # echo damage = this percent of the effective player damage, rounded half up
+ECHO_SPEED = 520.0               # world units per second; the echo leaves along the dash direction
+ECHO_TTL = 1.6                   # seconds the echo lives before it expires
+ECHO_HOMING_SECONDS = 1.2        # the echo steers toward a target only during its first this many seconds
+ECHO_HOMING_RANGE = 300.0        # world units, measured from the echo: the nearest live enemy within this is the target
+ECHO_HOMING_TURN_RATE = 3.6      # max steering in radians per second (tighter than HOMING_TURN_RATE so it reaches its target)
+ECHO_RING_RADIUS = 34.0          # screen px: the shockwave ring at the drop point, at full size
+ECHO_RING_SECONDS = 0.3          # ring lifetime; with reduced motion the ring holds its full size and only fades
+ECHO_COLOR = (150, 240, 255)     # ring colour and the echo's trail colour (projectile_art TYPE_STYLES["echo"])
+
+# wave8 combo-ring
+ENABLE_COMBO_RING = True                 # combo timer ring beside the score panel (hud.py, combo_ring.py)
+COMBO_RING_RADIUS = 22.0                 # reference px (980x620 scale): centre line of the ring band
+COMBO_RING_THICKNESS = 5.0               # reference px: width of the ring band
+COMBO_RING_SEGMENTS = 20                 # straight pieces per circle (track, sweep, halo); 20 keeps the chord error under 0.4 px at 1080p
+COMBO_RING_TRACK_ALPHA = 60              # opacity of the empty track, shown at every combo level
+COMBO_RING_SWEEP_ALPHA = 235             # opacity of the sweep that shows the combo window left
+COMBO_RING_TIER_MIN = (1.0, 2.0, 4.0, 6.0)  # multiplier at which each tier starts: grey, blue, gold, magenta
+COMBO_RING_TIER_COLORS = ((150, 160, 172), (84, 176, 255), (255, 200, 60), (240, 90, 230))
+COMBO_RING_PULSE_SECONDS = 0.35          # one pulse per tier change lasts this long
+COMBO_RING_PULSE_GROW = 0.30             # full motion: the halo grows to (1 + this) times the radius while it fades
+COMBO_RING_HALO_THICKNESS = 0.60         # the halo band is this share of the ring's thickness
+COMBO_RING_FLASH_WHITE = 0.50            # reduced motion: the sweep flashes this far toward white, then settles
+COMBO_RING_MIN_REACH = 14.0              # reference px: the ring shrinks to the room beside the wave chip, and hides below this reach
+
+# wave8 death-fade
+# At hp 0 the death dissolve starts. With this on, the engine glow and the low-health vignette fade with the
+# dissolve (1 at death, 0 at its end) instead of cutting off on the frame hp reaches 0. Off restores the cut.
+ENABLE_DEATH_FADE = True
+
+# wave8 afterburn
+ENABLE_AFTERBURN = True            # a dash leaves a burning strip on the ground (afterburn.py); False turns it all off
+AFTERBURN_DROP_SECONDS = 0.05      # while dashing, a segment drops at the pod this often
+AFTERBURN_LIFE_SECONDS = 2.5       # a segment burns this long, then fades out
+AFTERBURN_MAX_SEGMENTS = 12        # live segments at most; when full, the oldest one is reused
+AFTERBURN_HIT_RADIUS = 26.0        # world px: an enemy body centre this close to a live segment burns
+AFTERBURN_TICK_SECONDS = 0.5       # each enemy burns once per this long while in reach (its own timer)
+AFTERBURN_DAMAGE = 4               # damage per tick
+AFTERBURN_BOSS_MULT = 0.5          # bosses take this fraction of each tick's damage
+AFTERBURN_CORE_RADIUS = 14.0       # world px: the dark scorch core inside the glow
+AFTERBURN_GLOW_OPACITY = 150       # glow alpha at a fresh segment's centre (0 to 255)
+AFTERBURN_CORE_OPACITY = 215       # scorch core alpha at a fresh segment's centre (0 to 255)
+AFTERBURN_CORE_SHADE = 0.22        # the scorch core is the trail colour scaled by this
+AFTERBURN_FLICKER_HZ = 9.0         # glow flicker rate; no flicker with REDUCE_MOTION (the fade stays)
+AFTERBURN_FLICKER_DEPTH = 0.25     # the glow dims by up to this fraction while it flickers
+AFTERBURN_LAYER_ORDER = 3          # draw order: above the room floor (0) and floor effects (2), below entities (60+)
+AFTERBURN_COLOR = (255, 140, 40)   # warm orange: the colour for the default skin, and the fallback
+
+# wave8 powerup-edges
+# Four edges from the verification batch, fixed together. ENABLE_POWERUP_EDGES = False restores the wave-6 rules:
+# only bullet kills chain, a Repulsor cooldown starts at the pickup, countdowns are not rounded before ceil, and a
+# stunned enemy deals contact damage and kills itself on contact like any other.
+ENABLE_POWERUP_EDGES = True
+COUNTDOWN_ROUND_DIGITS = 6  # countdown seconds are rounded to this many decimals before ceil (float noise is not a second)
+# wave8 shards
+# Shards (shards.py). A critical player bullet that hits an enemy splits into three shards at the impact point.
+ENABLE_SHARDS = True             # False: no shards spawn and the pool is not built (see game._init_game)
+SHARD_SPREAD_DEG = 35.0          # the two side shards fly this far either side of the bullet's own direction
+SHARD_SPEED_FRACTION = 0.6       # shard speed as a fraction of the bullet's speed
+SHARD_SECONDS = 0.35             # shard lifetime, fixed-step time
+SHARD_DAMAGE_PERCENT = 35        # shard damage = this percent of the bullet's damage, rounded half up
+SHARD_CAP = 24                   # live shards at once; a new shard drops the oldest one
+SHARD_HIT_RADIUS = 2.5           # world units added to an enemy's body radius for a shard's hit
+SHARD_STREAK_PX = 16.0           # on-screen length of a shard, along its flight
+SHARD_WIDTH_PX = 7.0             # on-screen width of a shard across its flight
+SHARD_SHIMMER_DEPTH = 0.3        # full motion only: brightness dips by up to this fraction in a slow pulse
+SHARD_SHIMMER_RATE = 18.0        # shimmer speed in radians per second of run time; reduced motion stops it
+SHARD_LAYER_ORDER = 14005        # draw order: above the projectile flare layer (14004), below the glow pool (14500)

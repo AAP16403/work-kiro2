@@ -34,7 +34,11 @@ from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
 from chain import ChainArcPool
-from audio import AudioManager, load_audio_settings, save_audio_settings
+from afterburn import AfterburnTrail
+from afterburn_art import AfterburnPool
+from functools import partial
+from audio import AudioManager, ensure_settings_file, load_audio_settings, save_audio_settings
+from shards import ShardPool
 import shake_prefs
 import access_prefs
 from popups import DamagePopups
@@ -187,6 +191,10 @@ class Game(pyglet.window.Window):
         self.visuals = None
         self.particle_system = None
         self.chain_pool = None  # Chain Lightning arcs; built per run beside the particle system
+        self.afterburn = None       # Afterburn strip segments (afterburn.py); built per run with the chain pool
+        self.afterburn_pool = None  # Afterburn ground discs (afterburn_art.py)
+        self.afterburn_deal = None  # the damage callable the strip's ticks use (PlayingState._afterburn_hit)
+        self.shard_pool = None  # critical-hit shards (shards.py); built per run beside the chain pool, None when disabled
         self.run_skin = default_run_skin()  # replaced with the selected skin at each run start
 
         self.keys = pyglet.window.key.KeyStateHandler()
@@ -366,6 +374,19 @@ class Game(pyglet.window.Window):
 
         self.particle_system = ParticleSystem(self.batch)
         self.chain_pool = ChainArcPool(self.batch, group=pyglet.graphics.Group(order=config.CHAIN_LAYER_ORDER))
+        if config.ENABLE_AFTERBURN:
+            self.afterburn = AfterburnTrail()
+            self.afterburn_pool = AfterburnPool(
+                self.batch, group=pyglet.graphics.Group(order=config.AFTERBURN_LAYER_ORDER),
+                colour=self.visuals.afterburn_color,
+            )
+            self.afterburn_deal = partial(PlayingState._afterburn_hit, self)
+        else:
+            # Switch off: no trail, no disc pool, no disc vertex lists in the batch (the states skip None).
+            self.afterburn = None
+            self.afterburn_pool = None
+            self.afterburn_deal = None
+        self.shard_pool = ShardPool(self.batch) if config.ENABLE_SHARDS else None
         self.popups = DamagePopups()
         self._hitstop = 0.0
 
@@ -573,13 +594,16 @@ class Game(pyglet.window.Window):
 
         def _hit_enemy(e, amount: int):
             # Shared damage/kill path: respects shields, elite affixes and the kill guard.
+            # With the switch off, wave 6 damaged a dead enemy here too (popup and hit sound), so the guard is gated.
+            if config.ENABLE_POWERUP_EDGES and getattr(e, "_is_dead", False):
+                return  # a Chain Lightning arc from an earlier kill in this Ultra may have taken it already
             PlayingState._damage_enemy(self, s, e, int(amount))
             behavior_name = enemy_behavior_name(e)
             enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
             if self.particle_system:
                 self.particle_system.add_hit_particles(e.pos, enemy_color)
             if e.hp <= 0:
-                PlayingState._kill_enemy(self, s, e)
+                PlayingState._player_kill(self, s, e, chains=config.ENABLE_POWERUP_EDGES)
 
         def _spawn_player_beam(start: Vec2, direction: Vec2, length: float, damage: int, thickness: float, color):
             end = start + direction * length
@@ -889,6 +913,10 @@ class Game(pyglet.window.Window):
         self.visuals = None
         self.particle_system = None
         self.chain_pool = None
+        self.afterburn = None
+        self.afterburn_pool = None
+        self.afterburn_deal = None
+        self.shard_pool = None
         self.popups = None
         self._hitstop = 0.0
 
@@ -1035,11 +1063,35 @@ class Game(pyglet.window.Window):
         self.advanced_fx.render(self._render_time, ci, hp_ratio=hp_ratio, boss_active=boss_active)
 
 
+def ensure_save_files() -> list:
+    """At launch, create each missing save file with its defaults. Returns the names it created. Never raises.
+
+    Only a file that does not exist yet is written, so a saved board, progress record or volume is never
+    overwritten, and a corrupt file is left for the load path to quarantine. Gated by ENABLE_SAVES_UNTRACKED.
+    """
+    if not config.ENABLE_SAVES_UNTRACKED:
+        return []
+    created = []
+    steps = (
+        ("high_scores.json", ScoreTracker.ensure_high_scores_file),
+        ("progress.json", meta_progress.ensure_file),
+        ("user_settings.json", ensure_settings_file),
+    )
+    for name, step in steps:
+        try:
+            if step():
+                created.append(name)
+        except Exception:
+            pass
+    return created
+
+
 def main():
     """Start the game. ``--record`` saves every finished run's inputs to replays/last_run.json (off by default)."""
     import sys
     record = "--record" in sys.argv[1:]
     try:
+        ensure_save_files()
         _ = Game(record_runs=record)
         pyglet.app.run()
     except KeyboardInterrupt:

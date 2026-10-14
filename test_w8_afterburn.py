@@ -3,7 +3,8 @@
 Covers: the config block; the drop cadence (every 0.05 s while dashing, the first drop at once, none while not
 dashing); the 12-segment cap with the oldest reused; expiry at 2.5 s; the damage cadence (4 per 0.5 s, each enemy on
 its own timer, a re-entry after a gap ticks at once); the 26 px reach edge; boss halving; the kill going through
-the normal kill path and scoring; nothing happening with ENABLE_AFTERBURN False; the trail colour from the run
+the normal kill path and scoring; nothing happening, and nothing built (no trail, no disc pool, no disc vertex
+lists), with ENABLE_AFTERBURN False; the test_* windows staying hidden; the trail colour from the run
 skin (warm orange for the default skin); REDUCE_MOTION stopping the flicker while the fade stays; the disc matching
 utils.to_iso; steady frames building no objects; the frame cost; and in play, a scripted dash across a line of
 chasers that reports hits, kills and the segment count.
@@ -14,6 +15,7 @@ Plain functions that print [PASS] lines, run from run_all().
 import math
 import os
 import random
+import re
 import tempfile
 import time
 import tracemalloc
@@ -26,7 +28,7 @@ import score
 from afterburn import AfterburnTrail, damage_for
 from afterburn_art import AfterburnPool, scorch_rgb
 from enemy import Enemy
-from game import Game
+from game import Game, headless_requested
 from skin_apply import RunSkin, complete_palette, default_run_skin
 from states import GameStateName
 from utils import Vec2, to_iso
@@ -450,10 +452,11 @@ def _dash_across_chasers(g, s, lane_y=22.0, duration=2.6):
     steps = int(round(duration * 60))
     for k in range(steps):
         _steps(g, 1)
-        peak = max(peak, sum(1 for seg in g.afterburn.segments if seg.live))
+        if g.afterburn is not None:  # None with the switch off: nothing is built, so nothing is live
+            peak = max(peak, sum(1 for seg in g.afterburn.segments if seg.live))
         if k == 40:  # draw in mid-burn so the discs are placed
             g.on_draw()
-            mid_shown = g.afterburn_pool.shown_count
+            mid_shown = 0 if g.afterburn_pool is None else g.afterburn_pool.shown_count
     return lane, peak, mid_shown
 
 
@@ -515,8 +518,7 @@ def test_strip_is_drawn_in_a_real_frame():
     for enabled in (True, False):
         random.seed(8)  # the same particles in both frames, so the only difference is the strip
         with _cfg(ENABLE_AFTERBURN=enabled):
-            g = Game()
-            g.set_visible(True)
+            g = Game()  # a test_* run builds its game hidden (game.headless_requested), so no set_visible here
             try:
                 s = _new_run(g)
                 s.enemies[:] = []
@@ -546,12 +548,72 @@ def test_in_play_disabled_does_nothing():
         with _cfg(ENABLE_AFTERBURN=False):
             s = _new_run(g)
             lane, peak, mid_shown = _dash_across_chasers(g, s)
-            assert g.afterburn.hits == 0 and g.afterburn.kills == 0 and g.afterburn.drops == 0
-            assert peak == 0 and mid_shown == 0 and g.afterburn_pool.shown_count == 0
+            # With the switch off there is no trail to count on: the counts are read as 0 and the trail is None.
+            trail_hits = 0 if g.afterburn is None else g.afterburn.hits
+            trail_kills = 0 if g.afterburn is None else g.afterburn.kills
+            trail_drops = 0 if g.afterburn is None else g.afterburn.drops
+            assert trail_hits == 0 and trail_kills == 0 and trail_drops == 0
+            assert peak == 0 and mid_shown == 0
+            assert g.afterburn_pool is None or g.afterburn_pool.shown_count == 0
             assert all(e.hp == 20 and not getattr(e, "_is_dead", False) for e in lane), [e.hp for e in lane]
     finally:
         g.close()
     print("[PASS] test_in_play_disabled_does_nothing passed (switch off: no drops, no hits, nothing drawn, chasers untouched)")
+
+
+def _count_disc_builds(fn):
+    """Runs ``fn`` and returns how many disc vertex lists AfterburnPool built meanwhile. Each is 36 vertices."""
+    real = AfterburnPool._make_disc
+    built = [0]
+
+    def counting(self, rgb):
+        built[0] += 1
+        return real(self, rgb)
+
+    AfterburnPool._make_disc = counting
+    try:
+        fn()
+    finally:
+        AfterburnPool._make_disc = real
+    return built[0]
+
+
+def test_switch_off_builds_no_trail_pool_or_discs():
+    """With ENABLE_AFTERBURN False a run builds no trail, no disc pool and no disc vertex lists (24 of them before)."""
+    g = Game()
+    g.set_visible(False)
+    try:
+        with _cfg(ENABLE_AFTERBURN=True):
+            on = _count_disc_builds(lambda: _new_run(g))
+            assert isinstance(g.afterburn, AfterburnTrail) and isinstance(g.afterburn_pool, AfterburnPool)
+            assert on == 2 * int(config.AFTERBURN_MAX_SEGMENTS) == 24, on
+        # The run after an on run must drop the old trail and pool, not keep them.
+        with _cfg(ENABLE_AFTERBURN=False):
+            off = _count_disc_builds(lambda: _new_run(g))
+            assert g.afterburn is None and g.afterburn_pool is None and g.afterburn_deal is None
+            assert off == 0, f"{off} disc vertex lists built with the switch off"
+            _steps(g, 30)  # the frame still runs with no afterburn objects
+            g.on_draw()
+            assert g.state is not None
+    finally:
+        g.close()
+    print(f"[PASS] test_switch_off_builds_no_trail_pool_or_discs passed (switch on: {on} disc vertex lists; off: {off}, "
+          f"no trail, pool or deal)")
+
+
+def test_test_windows_stay_hidden():
+    """The strip test no longer shows the game window, and a game built in this test_* run starts hidden."""
+    with open(os.path.join(ROOT, "test_w8_afterburn.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    assert not re.search(r"set_visible\(\s*True", src), "no test in this file shows the game window"
+    if os.environ.get("PLOUTO_SHOW_WINDOW", "0") in ("", "0"):
+        assert headless_requested(), "a test_* script runs headless"
+        g = Game()
+        try:
+            assert g.visible is False, "a game built by a test run starts hidden"
+        finally:
+            g.close()
+    print("[PASS] test_test_windows_stay_hidden passed (no call here shows the window; a test_* game starts hidden)")
 
 
 def run_all():
@@ -577,6 +639,8 @@ def run_all():
     test_strip_is_drawn_in_a_real_frame()
     test_in_play_dash_across_chasers()
     test_in_play_disabled_does_nothing()
+    test_switch_off_builds_no_trail_pool_or_discs()
+    test_test_windows_stay_hidden()
     print("ALL W8 AFTERBURN TESTS PASSED")
 
 

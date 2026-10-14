@@ -372,12 +372,18 @@ class Game(pyglet.window.Window):
 
         self.particle_system = ParticleSystem(self.batch)
         self.chain_pool = ChainArcPool(self.batch, group=pyglet.graphics.Group(order=config.CHAIN_LAYER_ORDER))
-        self.afterburn = AfterburnTrail()
-        self.afterburn_pool = AfterburnPool(
-            self.batch, group=pyglet.graphics.Group(order=config.AFTERBURN_LAYER_ORDER),
-            colour=self.visuals.afterburn_color,
-        )
-        self.afterburn_deal = partial(PlayingState._afterburn_hit, self)
+        if config.ENABLE_AFTERBURN:
+            self.afterburn = AfterburnTrail()
+            self.afterburn_pool = AfterburnPool(
+                self.batch, group=pyglet.graphics.Group(order=config.AFTERBURN_LAYER_ORDER),
+                colour=self.visuals.afterburn_color,
+            )
+            self.afterburn_deal = partial(PlayingState._afterburn_hit, self)
+        else:
+            # Switch off: no trail, no disc pool, no disc vertex lists in the batch (the states skip None).
+            self.afterburn = None
+            self.afterburn_pool = None
+            self.afterburn_deal = None
         self.popups = DamagePopups()
         self._hitstop = 0.0
 

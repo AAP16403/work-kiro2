@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import config
 import motion
-from utils import Vec2
+from utils import Vec2, round_countdown
 
 
 @dataclass
@@ -41,13 +41,27 @@ def state_of(player) -> RepulsorState:
     return st
 
 
+def _ready(now: float, until: float) -> bool:
+    """True once the cooldown that ends at run time ``until`` has run out at run time ``now``, to the microsecond.
+
+    The rounding keeps float noise from holding a shot back a frame: 720 frames at 60 FPS is exactly 12 s, and the
+    HUD reads ready on the same frame the shot fires.
+    """
+    return round_countdown(float(now) - float(until)) >= 0.0
+
+
 def pickup(player, now: float) -> None:
-    """A Repulsor pickup. On a ready Repulsor it fires next frame; otherwise it stores one charge, up to the cap."""
+    """A Repulsor pickup. On a ready Repulsor it fires next frame; otherwise it stores one charge, up to the cap.
+
+    The cooldown starts when the shot fires (update), so a pickup never moves ``cooldown_until`` on its own. With
+    ENABLE_POWERUP_EDGES off, wave 6 started the cooldown here.
+    """
     st = state_of(player)
     now = float(now)
-    if now >= st.cooldown_until and not st.fire_pending:
+    if _ready(now, st.cooldown_until) and not st.fire_pending:
         st.fire_pending = True
-        st.cooldown_until = now + float(config.REPULSOR_COOLDOWN_SECONDS)
+        if not config.ENABLE_POWERUP_EDGES:
+            st.cooldown_until = now + float(config.REPULSOR_COOLDOWN_SECONDS)
     else:
         st.charges = min(int(config.REPULSOR_MAX_CHARGES), st.charges + 1)
 
@@ -55,6 +69,7 @@ def pickup(player, now: float) -> None:
 def update(player, s, now: float, particles=None) -> int:
     """Once per frame. Fires the pending shockwave, or a stored charge when the cooldown has ended.
 
+    Every shot starts the cooldown at the moment it fires, so the next shot lands REPULSOR_COOLDOWN_SECONDS later.
     Returns 1 when a shockwave fired this frame, else 0. Idle frames for a player who never picked one up
     allocate nothing.
     """
@@ -64,9 +79,11 @@ def update(player, s, now: float, particles=None) -> int:
     now = float(now)
     if st.fire_pending:
         st.fire_pending = False
+        if config.ENABLE_POWERUP_EDGES:
+            st.cooldown_until = now + float(config.REPULSOR_COOLDOWN_SECONDS)
         fire(player, s, now, particles)
         return 1
-    if st.charges > 0 and now >= st.cooldown_until:
+    if st.charges > 0 and _ready(now, st.cooldown_until):
         st.charges -= 1
         st.cooldown_until = now + float(config.REPULSOR_COOLDOWN_SECONDS)
         fire(player, s, now, particles)
@@ -146,7 +163,7 @@ def hud_text(player, now: float) -> str:
     st = getattr(player, "repulsor_state", None)
     if st is None:
         return ""
-    left = float(st.cooldown_until) - float(now)
+    left = round_countdown(float(st.cooldown_until) - float(now))  # whole seconds read exactly, not one high
     text = f"Repulsor {math.ceil(left)}s" if left > 0.0 else "Repulsor"
     if st.charges > 0:
         text += f" x{st.charges}"

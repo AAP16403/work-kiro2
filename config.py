@@ -416,3 +416,10 @@ AFTERBURN_FLICKER_HZ = 9.0         # glow flicker rate; no flicker with REDUCE_M
 AFTERBURN_FLICKER_DEPTH = 0.25     # the glow dims by up to this fraction while it flickers
 AFTERBURN_LAYER_ORDER = 3          # draw order: above the room floor (0) and floor effects (2), below entities (60+)
 AFTERBURN_COLOR = (255, 140, 40)   # warm orange: the colour for the default skin, and the fallback
+
+# wave8 powerup-edges
+# Four edges from the verification batch, fixed together. ENABLE_POWERUP_EDGES = False restores the wave-6 rules:
+# only bullet kills chain, a Repulsor cooldown starts at the pickup, countdowns are not rounded before ceil, and a
+# stunned enemy deals contact damage and kills itself on contact like any other.
+ENABLE_POWERUP_EDGES = True
+COUNTDOWN_ROUND_DIGITS = 6  # countdown seconds are rounded to this many decimals before ceil (float noise is not a second)

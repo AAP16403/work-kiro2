@@ -554,6 +554,37 @@ class PlayingState(State):
                 combo=float(getattr(getattr(game, 'score', None), 'combo', 1.0)),
             )
 
+    @staticmethod
+    def _chain_from(game, s, e) -> None:
+        """Chain Lightning arcs from a dead enemy, when the pickup runs at this moment."""
+        if chain.chain_active(game.player, s.time):
+            chain.resolve_chain(
+                e, s.enemies, game.player, s.time,
+                lambda target, amount: PlayingState._chain_hit(game, s, target, amount),
+                pool=game.chain_pool,
+            )
+
+    @staticmethod
+    def _tank_death_blast(game, s, e, behavior_name: str) -> None:
+        """A tank that dies within reach blasts the player. The damage resets the combo."""
+        if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
+            game._damage_player(game.balance.tank_death_blast_damage)
+            add_shake(s, 15.0)
+
+    @staticmethod
+    def _player_kill(game, s, e, death_particles: bool = True, chains: bool = True) -> None:
+        """A kill the player makes: the kill, then a Chain Lightning chain from the dead enemy when ``chains``.
+
+        Every player-caused kill goes through here: bullets, lasers, the vortex, a boost ram and the Ultra. Enemy-caused
+        kills (contact, the volatile blast, splitter copies) stay on _kill_enemy and never chain. The bullet path with
+        ENABLE_POWERUP_EDGES off runs _kill_enemy, the tank blast and _chain_from itself, in wave 6's order.
+        """
+        if getattr(e, "_is_dead", False):
+            return
+        PlayingState._kill_enemy(game, s, e, death_particles=death_particles)
+        if chains:
+            PlayingState._chain_from(game, s, e)
+
     def update(self, dt: float):
         game = self.game
         if not game.state:
@@ -626,7 +657,7 @@ class PlayingState(State):
                         PlayingState._damage_enemy(game, s, e, dmg)
                         hit_shake += float(config.SHAKE_HIT_IMPULSE)
                         if e.hp <= 0:
-                            self._kill_enemy(game, s, e, death_particles=False)
+                            self._player_kill(game, s, e, death_particles=False, chains=config.ENABLE_POWERUP_EDGES)
 
         player_radius = game._player_radius()
         for tr in list(getattr(s, "traps", [])):
@@ -738,7 +769,7 @@ class PlayingState(State):
                         PlayingState._damage_enemy(game, s, e, dmg)
                         hit_shake += float(config.SHAKE_HIT_IMPULSE)
                         if e.hp <= 0:
-                            self._kill_enemy(game, s, e, death_particles=False)
+                            self._player_kill(game, s, e, death_particles=False, chains=config.ENABLE_POWERUP_EDGES)
             else:
                 game.player.recoil = min(float(weapon.recoil_max), float(game.player.recoil) + float(weapon.recoil_kick))
                 crit_cb = game._effective_crit_chance()
@@ -814,7 +845,7 @@ class PlayingState(State):
                         e.pos = clamp_to_map(e.pos + push_dir * push_dist, config.ROOM_RADIUS * 0.96, s.map_type)
 
                     if e.hp <= 0:
-                        self._kill_enemy(game, s, e)
+                        self._player_kill(game, s, e, chains=config.ENABLE_POWERUP_EDGES)
 
                     if game.player.invincibility_timer <= 0:
                         game._damage_player(int(game.balance.enemy_contact_damage * 0.4))
@@ -827,6 +858,10 @@ class PlayingState(State):
                     cur_d = math.sqrt(d_sq)
                     push_dir = (game.player.pos - e.pos) / cur_d if cur_d > 1e-4 else Vec2(1.0, 0.0)
                     game.player.pos = clamp_to_map(game.player.pos + push_dir * 40.0, config.ROOM_RADIUS * 0.90, s.map_type)
+                elif config.ENABLE_POWERUP_EDGES and repulsor.is_stunned(e, s.time):
+                    # A stunned enemy is inert on contact: no damage, and no suicide. A boost ram (above) still lands,
+                    # because the ram is the player's action.
+                    pass
                 else:
                     game._damage_player(game.balance.enemy_contact_damage)
                     self._kill_enemy(game, s, e, death_particles=False)
@@ -926,17 +961,15 @@ class PlayingState(State):
                         spawn_impact(game.particle_system, p, e.pos, enemy_color)
 
                         if e.hp <= 0:
-                            self._kill_enemy(game, s, e)
-                            if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
-                                game._damage_player(game.balance.tank_death_blast_damage)
-                                add_shake(s, 15.0)
-                            # Chain Lightning: a kill the player makes throws arcs from the dead enemy.
-                            if chain.chain_active(game.player, s.time):
-                                chain.resolve_chain(
-                                    e, s.enemies, game.player, s.time,
-                                    lambda target, amount: self._chain_hit(game, s, target, amount),
-                                    pool=game.chain_pool,
-                                )
+                            if config.ENABLE_POWERUP_EDGES:
+                                # A kill the player makes: Chain Lightning throws arcs from the dead enemy, then the blast.
+                                self._player_kill(game, s, e)
+                                self._tank_death_blast(game, s, e, behavior_name)
+                            else:
+                                # Wave 6's order: the kill, the tank blast (its damage resets the combo), then the arcs.
+                                self._kill_enemy(game, s, e)
+                                self._tank_death_blast(game, s, e, behavior_name)
+                                self._chain_from(game, s, e)
 
                         pierce = getattr(p, "pierce", 0)
                         if pierce > 0:

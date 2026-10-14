@@ -573,7 +573,8 @@ class Game(pyglet.window.Window):
 
         def _hit_enemy(e, amount: int):
             # Shared damage/kill path: respects shields, elite affixes and the kill guard.
-            if getattr(e, "_is_dead", False):
+            # With the switch off, wave 6 damaged a dead enemy here too (popup and hit sound), so the guard is gated.
+            if config.ENABLE_POWERUP_EDGES and getattr(e, "_is_dead", False):
                 return  # a Chain Lightning arc from an earlier kill in this Ultra may have taken it already
             PlayingState._damage_enemy(self, s, e, int(amount))
             behavior_name = enemy_behavior_name(e)

@@ -541,21 +541,35 @@ class PlayingState(State):
             )
 
     @staticmethod
-    def _player_kill(game, s, e, death_particles: bool = True, chains: bool = True) -> None:
-        """A kill the player makes: the kill, then a Chain Lightning chain from the dead enemy when ``chains``.
-
-        Every player-caused kill goes through here: bullets, lasers, the vortex, a boost ram and the Ultra. Enemy-caused
-        kills (contact, the volatile blast, splitter copies) stay on _kill_enemy and never chain.
-        """
-        if getattr(e, "_is_dead", False):
-            return
-        PlayingState._kill_enemy(game, s, e, death_particles=death_particles)
-        if chains and chain.chain_active(game.player, s.time):
+    def _chain_from(game, s, e) -> None:
+        """Chain Lightning arcs from a dead enemy, when the pickup runs at this moment."""
+        if chain.chain_active(game.player, s.time):
             chain.resolve_chain(
                 e, s.enemies, game.player, s.time,
                 lambda target, amount: PlayingState._chain_hit(game, s, target, amount),
                 pool=game.chain_pool,
             )
+
+    @staticmethod
+    def _tank_death_blast(game, s, e, behavior_name: str) -> None:
+        """A tank that dies within reach blasts the player. The damage resets the combo."""
+        if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
+            game._damage_player(game.balance.tank_death_blast_damage)
+            add_shake(s, 15.0)
+
+    @staticmethod
+    def _player_kill(game, s, e, death_particles: bool = True, chains: bool = True) -> None:
+        """A kill the player makes: the kill, then a Chain Lightning chain from the dead enemy when ``chains``.
+
+        Every player-caused kill goes through here: bullets, lasers, the vortex, a boost ram and the Ultra. Enemy-caused
+        kills (contact, the volatile blast, splitter copies) stay on _kill_enemy and never chain. The bullet path with
+        ENABLE_POWERUP_EDGES off runs _kill_enemy, the tank blast and _chain_from itself, in wave 6's order.
+        """
+        if getattr(e, "_is_dead", False):
+            return
+        PlayingState._kill_enemy(game, s, e, death_particles=death_particles)
+        if chains:
+            PlayingState._chain_from(game, s, e)
 
     def update(self, dt: float):
         game = self.game
@@ -915,11 +929,15 @@ class PlayingState(State):
                         spawn_impact(game.particle_system, p, e.pos, enemy_color)
 
                         if e.hp <= 0:
-                            # A kill the player makes: Chain Lightning throws arcs from the dead enemy.
-                            self._player_kill(game, s, e)
-                            if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
-                                game._damage_player(game.balance.tank_death_blast_damage)
-                                add_shake(s, 15.0)
+                            if config.ENABLE_POWERUP_EDGES:
+                                # A kill the player makes: Chain Lightning throws arcs from the dead enemy, then the blast.
+                                self._player_kill(game, s, e)
+                                self._tank_death_blast(game, s, e, behavior_name)
+                            else:
+                                # Wave 6's order: the kill, the tank blast (its damage resets the combo), then the arcs.
+                                self._kill_enemy(game, s, e)
+                                self._tank_death_blast(game, s, e, behavior_name)
+                                self._chain_from(game, s, e)
 
                         pierce = getattr(p, "pierce", 0)
                         if pierce > 0:

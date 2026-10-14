@@ -8,6 +8,9 @@
        cooldown, the timed powerup labels and the weapon chip.
     4. A stunned non-boss enemy deals no contact damage and does not kill itself on contact. A boost ram into it
        still works. Bosses are unchanged.
+    5. Verifier fixes, switch off: a bullet kill keeps wave 6's order (the kill, the tank blast, then the arcs), so the
+       arc kill scores at combo 1.0. The Ultra beam damages a dead enemy again, as wave 6 did. Switch on, the arcs go
+       first and the Ultra beam skips the dead enemy.
 
 The real-run checks drive a Game through _fixed_step and on_draw, the way test_w6_wiring does. A far, slow guard
 enemy keeps the wave open so no wave spawns mid-check. ENABLE_POWERUP_EDGES = False restores the wave-6 rules,
@@ -25,7 +28,7 @@ from enemy import Enemy
 from game import Game
 from player import Player
 from powerup import PowerUp, apply_powerup, format_timed_powerups_hud, weapon_pickup_secs_left
-from states import GameStateName
+from states import GameStateName, PlayingState
 from utils import Vec2, to_iso
 
 FRAME = 1.0 / 60.0
@@ -422,6 +425,88 @@ def test_switch_off_restores_the_wave6_rules():
     print("[PASS] test_switch_off_restores_the_wave6_rules passed (switch off: 11 s, cooldown at pickup, no laser chain, stunned contact hurts)")
 
 
+# ---------------------------------------------------------------- verifier fixes: switch off matches wave 6
+
+def test_bullet_kill_order_follows_the_switch():
+    """A bullet kills a tank, and the tank's arc kills a neighbour. Switch off is wave 6's order: the kill, then the
+    tank blast (its damage resets the combo), then the arc. So the arc kill scores at combo 1.0, not at the 3.25 the
+    kill built up. Switch on, the arc goes first, as wave 8 has it, and the arc kill scores at 3.25."""
+    prev = config.ENABLE_POWERUP_EDGES
+    try:
+        for switch, arc_combo in ((False, 1.0), (True, 3.25)):
+            config.ENABLE_POWERUP_EDGES = switch
+            g = Game()
+            g.set_visible(False)
+            try:
+                s = _new_run(g)
+                g.auto_shoot = True
+                _aim_east(g)
+                _pickup(g.player, "chain", s.time)
+                g.player.shield = 0           # the blast must reach hp, or it does not reset the combo
+                g.score.combo = 3.0
+                kills = []
+                real_kill = g.score.on_enemy_kill
+
+                def recording_kill(behavior, multiplier=1.0):
+                    kills.append((behavior, float(g.score.combo)))
+                    return real_kill(behavior, multiplier=multiplier)
+
+                g.score.on_enemy_kill = recording_kill
+                tank = Enemy(pos=Vec2(60.0, 0.0), hp=1, speed=0.0, behavior="tank")  # 60 px out: inside the blast
+                neighbour = _enemy(60.0, 100.0, hp=1)  # 100 px from the tank (inside CHAIN_RANGE)
+                s.enemies.extend([tank, neighbour])
+                for _ in range(90):
+                    _steps(g, 1)
+                    if tank not in s.enemies:
+                        break
+                assert tank not in s.enemies, f"switch {switch}: the bullet should kill the one-hp tank"
+                assert neighbour not in s.enemies, f"switch {switch}: the arc should kill the one-hp neighbour"
+                assert kills == [("tank", 3.0), ("chaser", arc_combo)], f"switch {switch}: kill order {kills}"
+            finally:
+                g.close()
+    finally:
+        config.ENABLE_POWERUP_EDGES = prev
+    print("[PASS] test_bullet_kill_order_follows_the_switch passed (off: arc kill at combo 1.0; on: at 3.25)")
+
+
+def test_ultra_beam_dead_enemy_follows_the_switch():
+    """A volatile elite on the Ultra beam dies, and its blast kills a second enemy that is also on the beam. The beam
+    then reaches the second enemy, which is already dead. Wave 6 damaged it again (popup and hit sound, no kill). The
+    early return that skips it is gated on the switch. Each enemy's damage calls on the second enemy: the volatile
+    blast's, plus the beam's phantom with the switch off. So 2 off, 1 on."""
+    prev = config.ENABLE_POWERUP_EDGES
+    real = PlayingState._damage_enemy
+    try:
+        for switch, expected in ((False, 2), (True, 1)):
+            config.ENABLE_POWERUP_EDGES = switch
+            g = Game()
+            g.set_visible(False)
+            calls = []
+
+            def counting(game, s, e, amount, is_crit=False):
+                calls.append(e)
+                return real(game, s, e, amount, is_crit=is_crit)
+
+            try:
+                s = _new_run(g)
+                _aim_east(g)
+                g.player.ultra_charges = 1
+                elite = _enemy(120.0, 0.0, hp=1, is_elite=True, elite_affix="volatile", max_hp=20)  # on the beam
+                second = _enemy(180.0, 0.0, hp=1)  # on the beam, 60 px from the elite: inside the volatile blast
+                s.enemies.extend([elite, second])
+                PlayingState._damage_enemy = staticmethod(counting)
+                g._use_ultra()
+                assert elite not in s.enemies and second not in s.enemies, f"switch {switch}: both should be dead"
+                on_second = sum(1 for e in calls if e is second)
+                assert on_second == expected, f"switch {switch}: {on_second} damage calls on the dead enemy, want {expected}"
+            finally:
+                PlayingState._damage_enemy = staticmethod(real)
+                g.close()
+    finally:
+        config.ENABLE_POWERUP_EDGES = prev
+    print("[PASS] test_ultra_beam_dead_enemy_follows_the_switch passed (off: beam hits the dead enemy again; on: skipped)")
+
+
 def run_all():
     test_config_switch_and_rounding_block()
     test_laser_kill_throws_an_arc()
@@ -435,6 +520,8 @@ def run_all():
     test_stunned_chaser_on_player_takes_no_damage_for_60_steps()
     test_stunned_boss_still_hits_on_contact()
     test_switch_off_restores_the_wave6_rules()
+    test_bullet_kill_order_follows_the_switch()
+    test_ultra_beam_dead_enemy_follows_the_switch()
     print("\nALL W8 POWERUP-EDGES TESTS PASSED")
 
 

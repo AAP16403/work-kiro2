@@ -393,3 +393,8 @@ COMBO_RING_PULSE_GROW = 0.30             # full motion: the halo grows to (1 + t
 COMBO_RING_HALO_THICKNESS = 0.60         # the halo band is this share of the ring's thickness
 COMBO_RING_FLASH_WHITE = 0.50            # reduced motion: the sweep flashes this far toward white, then settles
 COMBO_RING_MIN_REACH = 14.0              # reference px: the ring shrinks to the room beside the wave chip, and hides below this reach
+
+# wave8 death-fade
+# At hp 0 the death dissolve starts. With this on, the engine glow and the low-health vignette fade with the
+# dissolve (1 at death, 0 at its end) instead of cutting off on the frame hp reaches 0. Off restores the cut.
+ENABLE_DEATH_FADE = True

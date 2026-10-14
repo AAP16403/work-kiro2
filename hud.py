@@ -9,6 +9,7 @@ from pyglet import shapes
 
 import config
 from anim import clamp, ease_in_out_sine, ease_out_back, ease_out_cubic
+from combo_ring import ComboRing, fit_ring, ring_reach
 from config import SHIELD_MAX
 from menu import UI_FONT_HEAD, UI_FONT_BODY, UI_FONT_META
 from hud_widgets import (
@@ -91,7 +92,7 @@ def achievement_name(achievement_id) -> str:
 
 
 class HUD:
-    """In-game overlay: HP/shield/boost, wave chip, status bar, score, Ultra gauge, weapon and
+    """In-game overlay: HP/shield/boost, wave chip, status bar, score, combo timer ring, Ultra gauge, weapon and
     skin chips, achievement toasts, banners and boss bar."""
 
     def __init__(self, width: int, height: int):
@@ -148,6 +149,12 @@ class HUD:
 
         # Radial Ultra gauge (bottom-left)
         self.ultra_gauge = RadialGauge(self.batch, self._label)
+
+        # Combo timer ring beside the score panel (wave8 combo-ring; off when config.ENABLE_COMBO_RING is False)
+        self.combo_ring = ComboRing(self.batch) if config.ENABLE_COMBO_RING else None
+        self._combo_ring_span = None  # (left, bottom, top) of the ring's box as last laid out
+        self._combo_ring_reach = None  # (left, bottom, top) of the ring's pulse reach as last laid out
+        self._wave_panel = None  # (left, bottom, right, top) of the wave chip panel with its drop shadow
 
         # Wave chip labels sit on baselines (title above the meta line), so they cannot leave the chip.
         self.wave_label = self._label("", UI_FONT_HEAD, 22, ax="center", ay="baseline", color=(*text_color, 255))
@@ -348,6 +355,38 @@ class HUD:
     # Layout
     # ------------------------------------------------------------------
 
+    def _place_combo_ring(self, score_x: float, cy: float, min_gap: int) -> bool:
+        """Place the combo ring left of the score panel (its left edge at score_x), centred at height cy.
+
+        The ring's right edge sits min_gap left of the panel, measured at its pulse reach (combo_ring.ring_reach), so a
+        pulse never reaches the panel. The wave chip is centred and grows with the window, so at some sizes less room
+        is left between it and the panel than the ring needs at full size. The ring then shrinks to that room, with
+        min_gap clear of the chip's panel and shadow on the left. Below COMBO_RING_MIN_REACH the room is too small and
+        the ring hides (the returned flag is False). Sets _combo_ring_span (the ring's box) and _combo_ring_reach (its
+        pulse reach box). Returns whether the ring is drawn.
+        """
+        sz = self._sz
+        radius = float(sz(config.COMBO_RING_RADIUS))
+        thickness = float(max(2, sz(config.COMBO_RING_THICKNESS)))
+        reach = ring_reach(radius, thickness)
+        _, wave_bottom, wave_right, wave_top = self._wave_panel
+        # The ring's height band clears the chip when the whole band lies above or below the chip's panel.
+        clear_of_chip = (cy + reach + min_gap <= wave_bottom) or (cy - reach - min_gap >= wave_top)
+        fits = True
+        if not clear_of_chip:
+            # The ring's left edge is score_x - min_gap - 2 * reach, which must stay min_gap right of the chip.
+            room = ((score_x - min_gap) - (wave_right + min_gap)) / 2.0
+            fits = room >= float(sz(config.COMBO_RING_MIN_REACH))
+            if fits:
+                radius, thickness = fit_ring(radius, thickness, room)
+                reach = ring_reach(radius, thickness)
+        cx = score_x - min_gap - reach
+        self.combo_ring.place(cx, cy, radius, thickness)
+        outer = radius + thickness
+        self._combo_ring_span = (cx - outer, cy - outer, cy + outer)
+        self._combo_ring_reach = (cx - reach, cy - reach, cy + reach)
+        return fits
+
     def layout(self, width: int, height: int) -> None:
         self.width = width
         self.height = height
@@ -439,6 +478,9 @@ class HUD:
         wave_y = height - margin - wave_h
         chip_right = chip_x + chip_w
         self._frame("wave", chip_x, wave_y, chip_w, wave_h, edge)
+        # The panel as drawn: _frame puts its drop shadow sz(3) right and down. The combo ring must clear this box.
+        wave_shadow = self._sz(3)
+        self._wave_panel = (chip_x, wave_y - wave_shadow, chip_right + wave_shadow, wave_y + wave_h)
 
         self.wave_label.x = chip_x + chip_w // 2
         self.wave_label.y = wave_y + sz(28)
@@ -466,8 +508,17 @@ class HUD:
         self.combo_label.x = score_panel_x + score_panel_w - score_pad
         self.combo_label.y = score_panel_y + sz(8)
 
-        # Status bar (under the wave chip). Where it shares a row with the Ultra gauge block or the
-        # score panel, it is centred within the free span so it never runs into either one.
+        # Combo ring: beside the score panel, on the panel's row (see _place_combo_ring). When the ring is drawn, its
+        # pulse reach is the space the status line must keep clear of.
+        self._combo_ring_span = None
+        self._combo_ring_reach = None
+        ring_fits = False
+        if self.combo_ring is not None:
+            ring_fits = self._place_combo_ring(score_panel_x, score_panel_y + score_panel_h / 2.0, min_gap)
+        ring_zone = self._combo_ring_reach if ring_fits else None
+
+        # Status bar (under the wave chip). Where it shares a row with the Ultra gauge block, the score panel
+        # or the combo ring, it is centred within the free span so it never runs into any of them.
         status_w = max(sz(240), min(sz(640), int(width * 0.58)))
         status_h = sz(28)
         status_y = max(sz(6), wave_y - status_h - sz(10))
@@ -477,8 +528,21 @@ class HUD:
             half = min(half, center - (ring_block_right + min_gap))
         if _spans_overlap(status_y, status_y + status_h, score_panel_y, score_panel_y + score_panel_h):
             half = min(half, (score_panel_x - min_gap) - center)
+        if ring_zone is not None:
+            span_left, span_bottom, span_top = ring_zone
+            if _spans_overlap(status_y, status_y + status_h, span_bottom, span_top):
+                half = min(half, (span_left - min_gap) - center)
         status_w = min(status_w, max(sz(220), 2 * half))
         status_x = (width - status_w) // 2
+        if self.combo_ring is not None:
+            # At tiny sizes the status line cannot clear the ring even at its minimum width, so the ring hides
+            # rather than overlap it. The status line itself is never narrowed for the ring below its minimum.
+            clear = True
+            if ring_zone is not None:
+                span_left, span_bottom, span_top = ring_zone
+                clear = not (_spans_overlap(status_y, status_y + status_h, span_bottom, span_top)
+                             and status_x + status_w > span_left - min_gap)
+            self.combo_ring.set_enabled(ring_fits and clear)
         self._frame("status", status_x, status_y, status_w, status_h, max(1, sz(1)), shadow=False)
         self.status_label.x = status_x + status_w // 2
         self.status_label.y = status_y + status_h // 2
@@ -755,6 +819,8 @@ class HUD:
         self._sync_toast()
         self._pulse_t += dt
         self.ultra_gauge.animate(self._pulse_t, reduce_motion=_reduce_motion())
+        if self.combo_ring is not None:
+            self.combo_ring.tick(dt, reduce_motion=_reduce_motion())
 
     # ------------------------------------------------------------------
     # Per-frame update
@@ -925,6 +991,13 @@ class HUD:
         else:
             _set_text(self.score_value_label, "0")
             _set_text(self.combo_label, "")
+
+        # Combo ring: the tier colour, and the share of the combo timeout still open (read from the score tracker)
+        if self.combo_ring is not None:
+            if score is not None:
+                self.combo_ring.update(score.combo, score.combo_window_left())
+            else:
+                self.combo_ring.update(1.0, 0.0)
 
     def draw(self) -> None:
         self._sync_number_plates()

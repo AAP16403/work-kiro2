@@ -113,9 +113,14 @@ def test_config_block():
         src = fh.read()
     head = src.rfind("# wave8 afterburn")
     assert head > 0, "the block is headed '# wave8 afterburn'"
-    body = [ln for ln in src[head:].splitlines()[1:] if ln.strip()]
+    body = []
+    for ln in src[head:].splitlines()[1:]:
+        if ln.startswith("# wave8 "):
+            break  # the next feature's block starts here
+        if ln.strip():
+            body.append(ln)
     assert all(ln.startswith(("ENABLE_AFTERBURN", "AFTERBURN_")) for ln in body), body
-    print("[PASS] test_config_block passed (0.05 s drops, 2.5 s life, 12 segments, 26 px, 4 per 0.5 s, orange, block at the end)")
+    print("[PASS] test_config_block passed (0.05 s drops, 2.5 s life, 12 segments, 26 px, 4 per 0.5 s, orange, block read to the next wave8 header)")
 
 
 def test_drops_every_fifty_ms_while_dashing():

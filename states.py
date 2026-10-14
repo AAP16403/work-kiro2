@@ -54,6 +54,9 @@ import audio_cues
 # stays reproducible regardless of frame rate or time spent paused.
 _SHAKE_RNG = random.Random()
 
+# The world origin for the Afterburn screen origin, built once so the frame does not allocate it.
+_WORLD_ORIGIN = Vec2(0.0, 0.0)
+
 
 def add_shake(s, amount: float, limit: float | None = None) -> None:
     """Stack screen shake onto state ``s``: scaled by the Screen Shake setting (Full, Reduced or Off), capped at SHAKE_CAP.
@@ -394,6 +397,16 @@ class PlayingState(State):
             e.hp -= amount
 
     @staticmethod
+    def _afterburn_hit(game, e, amount: int) -> bool:
+        """One Afterburn tick through the normal damage and kill path. True when it kills, and the kill scores as usual."""
+        s = game.state
+        PlayingState._damage_enemy(game, s, e, amount)
+        if e.hp > 0:
+            return False
+        PlayingState._kill_enemy(game, s, e)
+        return True
+
+    @staticmethod
     def _chain_hit(game, s, target, amount: int) -> bool:
         """One Chain Lightning arc's damage. True when it kills the target, which is then removed and scored."""
         PlayingState._damage_enemy(game, s, target, amount)
@@ -690,6 +703,10 @@ class PlayingState(State):
         else:
             player_vel = Vec2(0.0, 0.0)
 
+        # Afterburn: while the dash runs, a segment drops at the pod on the drop clock (afterburn.py).
+        if game.afterburn is not None:
+            game.afterburn.update_dash(game.player.is_dashing, game.player.pos.x, game.player.pos.y, s.time)
+
         weapon = game.player.current_weapon
         if weapon and game.player.recoil > 0:
             game.player.recoil = max(0.0, game.player.recoil - float(weapon.recoil_recover) * dt)
@@ -813,6 +830,11 @@ class PlayingState(State):
                 else:
                     game._damage_player(game.balance.enemy_contact_damage)
                     self._kill_enemy(game, s, e, death_particles=False)
+
+        # Afterburn: enemies within reach of a live segment burn, each on its own tick timer (afterburn.py). This runs
+        # after they moved, so the reach is checked where they stand now.
+        if game.afterburn is not None:
+            game.afterburn.tick(s.enemies, s.time, game.afterburn_deal)
 
         psd2 = point_segment_distance_sq
         projectile_radius = game._projectile_radius
@@ -1106,6 +1128,9 @@ class PlayingState(State):
 
         game.visuals.sync_fx(game.state, game.player, shake, t=s.time, aim_dir=aim_dir)
         game.chain_pool.update(s.time, lambda x, y: to_iso(Vec2(x, y), shake))
+        if game.afterburn_pool is not None:
+            ox, oy = to_iso(_WORLD_ORIGIN, shake)  # the screen origin of the world this frame, shake included
+            game.afterburn_pool.update(s.time, game.afterburn, ox, oy)
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:

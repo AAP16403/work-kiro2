@@ -34,6 +34,9 @@ from weapons import get_weapon_for_wave, get_effective_fire_rate
 
 from particles import ParticleSystem
 from chain import ChainArcPool
+from afterburn import AfterburnTrail
+from afterburn_art import AfterburnPool
+from functools import partial
 from audio import AudioManager, ensure_settings_file, load_audio_settings, save_audio_settings
 import shake_prefs
 import access_prefs
@@ -187,6 +190,9 @@ class Game(pyglet.window.Window):
         self.visuals = None
         self.particle_system = None
         self.chain_pool = None  # Chain Lightning arcs; built per run beside the particle system
+        self.afterburn = None       # Afterburn strip segments (afterburn.py); built per run with the chain pool
+        self.afterburn_pool = None  # Afterburn ground discs (afterburn_art.py)
+        self.afterburn_deal = None  # the damage callable the strip's ticks use (PlayingState._afterburn_hit)
         self.run_skin = default_run_skin()  # replaced with the selected skin at each run start
 
         self.keys = pyglet.window.key.KeyStateHandler()
@@ -366,6 +372,18 @@ class Game(pyglet.window.Window):
 
         self.particle_system = ParticleSystem(self.batch)
         self.chain_pool = ChainArcPool(self.batch, group=pyglet.graphics.Group(order=config.CHAIN_LAYER_ORDER))
+        if config.ENABLE_AFTERBURN:
+            self.afterburn = AfterburnTrail()
+            self.afterburn_pool = AfterburnPool(
+                self.batch, group=pyglet.graphics.Group(order=config.AFTERBURN_LAYER_ORDER),
+                colour=self.visuals.afterburn_color,
+            )
+            self.afterburn_deal = partial(PlayingState._afterburn_hit, self)
+        else:
+            # Switch off: no trail, no disc pool, no disc vertex lists in the batch (the states skip None).
+            self.afterburn = None
+            self.afterburn_pool = None
+            self.afterburn_deal = None
         self.popups = DamagePopups()
         self._hitstop = 0.0
 
@@ -889,6 +907,9 @@ class Game(pyglet.window.Window):
         self.visuals = None
         self.particle_system = None
         self.chain_pool = None
+        self.afterburn = None
+        self.afterburn_pool = None
+        self.afterburn_deal = None
         self.popups = None
         self._hitstop = 0.0
 

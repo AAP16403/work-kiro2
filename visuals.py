@@ -524,6 +524,7 @@ class Visuals:
         self.player_palette = dict(DEFAULT_PALETTE)            # PlayerArt colours
         self.ship_palette = complete_palette(LEGACY_PALETTE)   # legacy ship colours
         self.shot_palette: dict | None = None                  # player shot colours; None keeps the weapon colours
+        self._afterburn_rgb = tuple(config.AFTERBURN_COLOR)    # Afterburn strip colour; apply_skin sets the skin's trail
         self._scene_stars: list[tuple[shapes.Circle, float, float, float]] = []
         self._scene_rings: list[shapes.Arc] = []
         self._vignette: list[shapes.Rectangle] = []
@@ -677,6 +678,15 @@ class Visuals:
         self.player_palette = dict(run_skin.palette)
         self.ship_palette = dict(run_skin.ship_palette)
         self.shot_palette = run_skin.shot_palette
+        # The Afterburn strip takes the skin's trail colour. The default skin has none (dash_color is None), so it
+        # keeps the warm orange default.
+        trail = run_skin.dash_color
+        self._afterburn_rgb = tuple(int(c) for c in (config.AFTERBURN_COLOR if trail is None else trail)[:3])
+
+    @property
+    def afterburn_color(self) -> tuple:
+        """Colour of the Afterburn strip: the run skin's trail colour, or the warm orange default (AFTERBURN_COLOR)."""
+        return self._afterburn_rgb
 
     def _thruster_palette(self) -> dict:
         """The palette the player's engine glow and dash streak read: the pod-robot's, or the legacy ship's."""

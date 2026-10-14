@@ -398,3 +398,21 @@ COMBO_RING_MIN_REACH = 14.0              # reference px: the ring shrinks to the
 # At hp 0 the death dissolve starts. With this on, the engine glow and the low-health vignette fade with the
 # dissolve (1 at death, 0 at its end) instead of cutting off on the frame hp reaches 0. Off restores the cut.
 ENABLE_DEATH_FADE = True
+
+# wave8 afterburn
+ENABLE_AFTERBURN = True            # a dash leaves a burning strip on the ground (afterburn.py); False turns it all off
+AFTERBURN_DROP_SECONDS = 0.05      # while dashing, a segment drops at the pod this often
+AFTERBURN_LIFE_SECONDS = 2.5       # a segment burns this long, then fades out
+AFTERBURN_MAX_SEGMENTS = 12        # live segments at most; when full, the oldest one is reused
+AFTERBURN_HIT_RADIUS = 26.0        # world px: an enemy body centre this close to a live segment burns
+AFTERBURN_TICK_SECONDS = 0.5       # each enemy burns once per this long while in reach (its own timer)
+AFTERBURN_DAMAGE = 4               # damage per tick
+AFTERBURN_BOSS_MULT = 0.5          # bosses take this fraction of each tick's damage
+AFTERBURN_CORE_RADIUS = 14.0       # world px: the dark scorch core inside the glow
+AFTERBURN_GLOW_OPACITY = 150       # glow alpha at a fresh segment's centre (0 to 255)
+AFTERBURN_CORE_OPACITY = 215       # scorch core alpha at a fresh segment's centre (0 to 255)
+AFTERBURN_CORE_SHADE = 0.22        # the scorch core is the trail colour scaled by this
+AFTERBURN_FLICKER_HZ = 9.0         # glow flicker rate; no flicker with REDUCE_MOTION (the fade stays)
+AFTERBURN_FLICKER_DEPTH = 0.25     # the glow dims by up to this fraction while it flickers
+AFTERBURN_LAYER_ORDER = 3          # draw order: above the room floor (0) and floor effects (2), below entities (60+)
+AFTERBURN_COLOR = (255, 140, 40)   # warm orange: the colour for the default skin, and the fallback

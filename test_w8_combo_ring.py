@@ -1,6 +1,7 @@
 """Wave 8 combo ring tests: the combo timeout's sweep, the tier colours, the pulse on a tier change (full and reduced
-motion), steady frames that build no objects, a ring clear of every HUD label at 980x620 and 1920x1080, the feature
-switch, and a scripted run with real kills that reports the tier changes.
+motion), steady frames that build no objects, a ring clear of every HUD label at 980x620 and 1920x1080, a ring clear of
+the WAVE chip panel at the sizes where it used to overlap it (its pulse peak included), the shrink that makes it fit,
+the feature switch, and a scripted run with real kills that reports the tier changes.
 
 Covers: combo_window_fraction and ScoreTracker.combo_window_left (the sweep maths); combo_tier and combo_tier_color
 (the tier mapping); ComboRing's pulse on each tier change, one per change, with the halo in full motion and a colour
@@ -20,7 +21,7 @@ import pyglet
 import config
 import progress
 import score as score_mod
-from combo_ring import ComboRing, combo_tier, combo_tier_color
+from combo_ring import ComboRing, combo_tier, combo_tier_color, fit_ring, ring_reach
 from enemy import Enemy
 from game import Game
 from projectile import Projectile
@@ -372,6 +373,71 @@ def test_ring_clears_every_label_at_both_sizes():
 
 
 # ----------------------------------------------------------------------
+# Layout: the ring clears the WAVE chip panel, at the sizes where it used to overlap it
+# ----------------------------------------------------------------------
+
+# The sizes where the ring used to run into the wave chip panel. The ring must stay drawn at them: shrunk to the room
+# beside the chip, not hidden.
+CHIP_SIZES_SHOWN = ((1280, 800), (1280, 960), (1280, 1024), (640, 400))
+
+
+def test_ring_clears_wave_chip_panel_at_problem_sizes():
+    _redirect_saves()
+    g = Game()
+    g.set_visible(False)
+    try:
+        s = _new_run(g)
+        for _ in range(4):
+            g.score.on_enemy_kill("chaser")
+        hud = g.hud
+        sizes = CHIP_SIZES_SHOWN + ((980, 620), (1920, 1080), (800, 500), (1280, 720), (1440, 900), (2560, 1440), (480, 320))
+        checked = []
+        hidden_at = []
+        for w, h in sizes:
+            hud.layout(w, h)
+            hud.update_bars(g.player, s, score=g.score, status_segments=[(0, "Boost 100%"), (3, "AUTO OFF")])
+            ring = hud.combo_ring
+            if (w, h) in CHIP_SIZES_SHOWN:
+                assert ring.enabled, f"{w}x{h}: the ring must stay drawn here, shrunk to the room beside the chip"
+            if not ring.enabled:
+                hidden_at.append(f"{w}x{h}")
+                continue
+            # A tier change starts one pulse. Run it to just short of its end, where the halo is at its largest.
+            ring.update(6.0, 1.0)
+            ring.tick(float(config.COMBO_RING_PULSE_SECONDS) * 0.999)
+            assert ring.halo_visible, f"{w}x{h}: the pulse must be running to measure the ring's largest reach"
+            cx, cy, r, t = ring.geometry
+            reach = max(r + t, ring.halo_radius + float(ring._halo.thickness))
+            box = (cx - reach, cy - reach, cx + reach, cy + reach)
+            panel = hud._wave_panel
+            assert not _overlaps(box, panel), (
+                f"{w}x{h}: the combo ring at its pulse peak {box} overlaps the WAVE chip panel {panel}")
+            assert box[2] <= hud.score_title_label.x, f"{w}x{h}: the ring's pulse reaches into the score panel"
+            checked.append(f"{w}x{h}")
+        assert "480x320" in hidden_at, "at 480x320 there is no room beside the chip, so the ring hides"
+        assert len(checked) >= len(CHIP_SIZES_SHOWN) + 2, f"only {checked} were measured"
+        print("[PASS] test_ring_clears_wave_chip_panel_at_problem_sizes passed (pulse peak clear of the WAVE chip panel, "
+              f"shadow included, at {', '.join(checked)}; hidden at {', '.join(hidden_at)})")
+    finally:
+        g.close()
+        _restore_saves()
+
+
+def test_fit_ring_keeps_the_pulse_inside_the_room():
+    full = (22.0, 5.0)
+    assert fit_ring(full[0], full[1], 60.0) == full, "a ring that already fits its room is unchanged"
+    for room in (31.6, 23.5, 20.5, 18.0, 15.0, 10.0):
+        r, t = fit_ring(full[0], full[1], room)
+        assert ring_reach(r, t) <= room + 1e-6, f"room {room}: the reach {ring_reach(r, t)} overflows the room"
+        assert abs(r / t - full[0] / full[1]) < 1e-6, "the ring shrinks in proportion"
+    assert fit_ring(full[0], full[1], 0.0)[0] == 0.0, "no room, no ring"
+    r, t = fit_ring(28.0, 6.0, 23.5)
+    assert 0.0 < r < 28.0 and 0.0 < t < 6.0, "a tight room shrinks the ring"
+    print("[PASS] test_fit_ring_keeps_the_pulse_inside_the_room passed (the shrunk ring's pulse reach fits the room, "
+          "in proportion)")
+
+
+# ----------------------------------------------------------------------
 # The switch
 # ----------------------------------------------------------------------
 
@@ -471,6 +537,8 @@ def run_all():
     test_steady_frames_build_no_new_objects()
     test_hud_steady_frames_build_no_new_objects()
     test_ring_clears_every_label_at_both_sizes()
+    test_ring_clears_wave_chip_panel_at_problem_sizes()
+    test_fit_ring_keeps_the_pulse_inside_the_room()
     test_switch_off_builds_no_ring()
     test_scripted_run_with_kills_reports_tier_changes()
     print("ALL W8 COMBO RING TESTS PASSED")

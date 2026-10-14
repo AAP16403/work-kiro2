@@ -49,6 +49,41 @@ def _mix(a, b, t: float) -> tuple:
     )
 
 
+def ring_reach(radius: float, thickness: float) -> float:
+    """Outer reach of a ring from its centre, at the pulse's largest extent.
+
+    The track and sweep reach radius + thickness (more than their band's edge, which is radius + thickness / 2). The halo
+    reaches its largest at (1 + COMBO_RING_PULSE_GROW) times the radius, with the thickness place() gives it. The larger
+    of the two is what layout must keep clear of its neighbours, so a pulse never runs into them.
+    """
+    radius = float(radius)
+    thickness = float(thickness)
+    halo = max(1.0, thickness * float(config.COMBO_RING_HALO_THICKNESS))
+    return max(radius + thickness, radius * (1.0 + float(config.COMBO_RING_PULSE_GROW)) + halo)
+
+
+def fit_ring(radius: float, thickness: float, room: float) -> tuple:
+    """(radius, thickness) scaled down together until ring_reach fits in room. A ring that already fits is unchanged.
+
+    The halo's thickness has a floor, so the reach does not scale exactly with the pair. The scale is corrected until
+    the reach fits. A room of zero or less gives a ring of zero size.
+    """
+    radius = float(radius)
+    thickness = float(thickness)
+    room = max(0.0, float(room))
+    if ring_reach(radius, thickness) <= room:
+        return radius, thickness
+    k = room / ring_reach(radius, thickness)
+    for _ in range(16):
+        if k <= 0.0:
+            break
+        reach = ring_reach(radius * k, thickness * k)
+        if reach <= room + 1e-9:
+            break
+        k *= room / reach
+    return radius * k, thickness * k
+
+
 class ComboRing:
     """Track, sweep and halo arcs around the score panel. update() takes the combo state, tick() runs the pulse."""
 

@@ -337,3 +337,4 @@ COMBO_RING_PULSE_SECONDS = 0.35          # one pulse per tier change lasts this 
 COMBO_RING_PULSE_GROW = 0.30             # full motion: the halo grows to (1 + this) times the radius while it fades
 COMBO_RING_HALO_THICKNESS = 0.60         # the halo band is this share of the ring's thickness
 COMBO_RING_FLASH_WHITE = 0.50            # reduced motion: the sweep flashes this far toward white, then settles
+COMBO_RING_MIN_REACH = 14.0              # reference px: the ring shrinks to the room beside the wave chip, and hides below this reach

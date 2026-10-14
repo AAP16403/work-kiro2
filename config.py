@@ -423,3 +423,17 @@ AFTERBURN_COLOR = (255, 140, 40)   # warm orange: the colour for the default ski
 # stunned enemy deals contact damage and kills itself on contact like any other.
 ENABLE_POWERUP_EDGES = True
 COUNTDOWN_ROUND_DIGITS = 6  # countdown seconds are rounded to this many decimals before ceil (float noise is not a second)
+# wave8 shards
+# Shards (shards.py). A critical player bullet that hits an enemy splits into three shards at the impact point.
+ENABLE_SHARDS = True             # False: no shards spawn and the pool is not built (see game._init_game)
+SHARD_SPREAD_DEG = 35.0          # the two side shards fly this far either side of the bullet's own direction
+SHARD_SPEED_FRACTION = 0.6       # shard speed as a fraction of the bullet's speed
+SHARD_SECONDS = 0.35             # shard lifetime, fixed-step time
+SHARD_DAMAGE_PERCENT = 35        # shard damage = this percent of the bullet's damage, rounded half up
+SHARD_CAP = 24                   # live shards at once; a new shard drops the oldest one
+SHARD_HIT_RADIUS = 2.5           # world units added to an enemy's body radius for a shard's hit
+SHARD_STREAK_PX = 16.0           # on-screen length of a shard, along its flight
+SHARD_WIDTH_PX = 7.0             # on-screen width of a shard across its flight
+SHARD_SHIMMER_DEPTH = 0.3        # full motion only: brightness dips by up to this fraction in a slow pulse
+SHARD_SHIMMER_RATE = 18.0        # shimmer speed in radians per second of run time; reduced motion stops it
+SHARD_LAYER_ORDER = 14005        # draw order: above the projectile flare layer (14004), below the glow pool (14500)

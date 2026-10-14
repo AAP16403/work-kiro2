@@ -37,6 +37,7 @@ import shot_mods
 import chain
 import repulsor
 import echo
+import shards
 from weapons import get_effective_fire_rate, roll_wave_clear_upgrade
 from projectile import spawn_projectiles, Projectile
 from drone import drone_bullets
@@ -416,6 +417,51 @@ class PlayingState(State):
         return True
 
     @staticmethod
+    def _reflect_back(game, s, e, damage: int) -> bool:
+        """Reflector affix: the first player shot in each cooldown window is sent back at the player instead of hurting
+        the reflector. A flash and a sound mark the reflection. True when the shot was reflected, so the caller removes it.
+        False when the enemy has no reflector affix or its cooldown is still running.
+        """
+        if getattr(e, "elite_affix", None) != "reflector" or s.time < float(e.ai.get("reflect_ready_at", 0.0)):
+            return False
+        e.ai["reflect_ready_at"] = s.time + float(config.ELITE_REFLECT_COOLDOWN)
+        to_player = game.player.pos - e.pos
+        aim_len = to_player.length() or 1.0
+        s.projectiles.append(Projectile(
+            Vec2(e.pos.x, e.pos.y), to_player / aim_len * float(config.ELITE_REFLECT_SPEED),
+            int(damage), ttl=2.0, owner="enemy", projectile_type="bullet",
+        ))
+        if game.particle_system:
+            game.particle_system.add_shockwave(e.pos, (255, 220, 120), max_radius=34.0, ttl=0.25)
+        audio_cues.cue(game.audio, "reflect")
+        return True
+
+    @staticmethod
+    def _tank_death_blast(game, s, e, behavior_name: str) -> None:
+        """A tank that dies within its blast radius hurts the player. Every kill path runs this: a bullet or a shard."""
+        if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
+            game._damage_player(game.balance.tank_death_blast_damage)
+            add_shake(s, 15.0)
+
+    def _shard_hit(self, target, amount: int) -> bool:
+        """One shard's hit, under the same affix rules as the player shot that made it.
+
+        A Reflector sends the shard back when its cooldown is ready, and the shard then does no damage. Otherwise the
+        shard deals its damage, and a kill runs the same tank death blast a direct kill does. True when the shard kills.
+        """
+        game = self.game
+        s = game.state
+        if self._reflect_back(game, s, target, amount):
+            return False
+        behavior_name = getattr(target, "_behavior_name", enemy_behavior_name(target))
+        PlayingState._damage_enemy(game, s, target, amount)
+        if target.hp > 0:
+            return False
+        PlayingState._kill_enemy(game, s, target)
+        self._tank_death_blast(game, s, target, behavior_name)
+        return True
+
+    @staticmethod
     def _spawn_cluster_shrapnel(game, s, p, ignore_entity_id: int | None = None) -> None:
         if game.particle_system:
             flak_detonation(game.particle_system, p.pos)
@@ -563,13 +609,6 @@ class PlayingState(State):
                 lambda target, amount: PlayingState._chain_hit(game, s, target, amount),
                 pool=game.chain_pool,
             )
-
-    @staticmethod
-    def _tank_death_blast(game, s, e, behavior_name: str) -> None:
-        """A tank that dies within reach blasts the player. The damage resets the combo."""
-        if behavior_name == "tank" and dist(e.pos, game.player.pos) < game.balance.tank_death_blast_radius:
-            game._damage_player(game.balance.tank_death_blast_damage)
-            add_shake(s, 15.0)
 
     @staticmethod
     def _player_kill(game, s, e, death_particles: bool = True, chains: bool = True) -> None:
@@ -909,6 +948,11 @@ class PlayingState(State):
                 self._remove_projectile(game, s, p)
                 continue
 
+        # Shards from critical hits move, hit and expire once per fixed step, beside the projectile update.
+        shard_pool = getattr(game, "shard_pool", None)
+        if shard_pool is not None and shard_pool.live_count:
+            shard_pool.step(s.enemies, dt, self._shard_hit, game._enemy_radius)
+
         for p in list(s.projectiles):
             pr = projectile_radius(p)
             p_prev = p.prev_pos or p.pos
@@ -938,19 +982,8 @@ class PlayingState(State):
                     if self._segment_hits_circle(psd2, e.pos, p_prev, p.pos, hit_r2):
                         hit_entities.add(id(e))
                         is_crit = getattr(p, "is_crit", False)
-                        if getattr(e, "elite_affix", None) == "reflector" and s.time >= float(e.ai.get("reflect_ready_at", 0.0)):
-                            # Reflector affix: the first player shot in each cooldown window is sent back at the player
-                            # instead of hurting the reflector. A flash and a sound mark the reflection.
-                            e.ai["reflect_ready_at"] = s.time + float(config.ELITE_REFLECT_COOLDOWN)
-                            to_player = game.player.pos - e.pos
-                            aim_len = to_player.length() or 1.0
-                            s.projectiles.append(Projectile(
-                                Vec2(e.pos.x, e.pos.y), to_player / aim_len * float(config.ELITE_REFLECT_SPEED),
-                                int(p.damage), ttl=2.0, owner="enemy", projectile_type="bullet",
-                            ))
-                            if game.particle_system:
-                                game.particle_system.add_shockwave(e.pos, (255, 220, 120), max_radius=34.0, ttl=0.25)
-                            audio_cues.cue(game.audio, "reflect")
+                        if self._reflect_back(game, s, e, p.damage):
+                            # The reflected shot leaves its path and hurts nobody, so a crit reflected here never splits.
                             self._remove_projectile(game, s, p, detonating_enemy=e)
                             break
                         PlayingState._damage_enemy(game, s, e, p.damage, is_crit=is_crit)
@@ -959,6 +992,12 @@ class PlayingState(State):
                         behavior_name = getattr(e, "_behavior_name", enemy_behavior_name(e))
                         enemy_color = ENEMY_COLORS.get(behavior_name, (200, 200, 200))
                         spawn_impact(game.particle_system, p, e.pos, enemy_color)
+
+                        if is_crit and getattr(game, "shard_pool", None) is not None:
+                            # A crit splits the bullet where it entered the enemy. That enemy is the shards' origin.
+                            ix, iy = shards.impact_point(p_prev, p.pos, e.pos, reach)
+                            tint = game.visuals.player_bullet_tint if game.visuals is not None else None
+                            shards.split_crit(game.shard_pool, p, ix, iy, e, tint=tint)
 
                         if e.hp <= 0:
                             if config.ENABLE_POWERUP_EDGES:
@@ -1164,6 +1203,8 @@ class PlayingState(State):
         if game.afterburn_pool is not None:
             ox, oy = to_iso(_WORLD_ORIGIN, shake)  # the screen origin of the world this frame, shake included
             game.afterburn_pool.update(s.time, game.afterburn, ox, oy)
+        if getattr(game, "shard_pool", None) is not None:
+            game.shard_pool.draw(s.time, shake.x, shake.y)
         game.particle_system.render(shake)
         game.batch.draw()
         if game.popups:

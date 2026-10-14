@@ -38,6 +38,7 @@ from afterburn import AfterburnTrail
 from afterburn_art import AfterburnPool
 from functools import partial
 from audio import AudioManager, ensure_settings_file, load_audio_settings, save_audio_settings
+from shards import ShardPool
 import shake_prefs
 import access_prefs
 from popups import DamagePopups
@@ -193,6 +194,7 @@ class Game(pyglet.window.Window):
         self.afterburn = None       # Afterburn strip segments (afterburn.py); built per run with the chain pool
         self.afterburn_pool = None  # Afterburn ground discs (afterburn_art.py)
         self.afterburn_deal = None  # the damage callable the strip's ticks use (PlayingState._afterburn_hit)
+        self.shard_pool = None  # critical-hit shards (shards.py); built per run beside the chain pool, None when disabled
         self.run_skin = default_run_skin()  # replaced with the selected skin at each run start
 
         self.keys = pyglet.window.key.KeyStateHandler()
@@ -384,6 +386,7 @@ class Game(pyglet.window.Window):
             self.afterburn = None
             self.afterburn_pool = None
             self.afterburn_deal = None
+        self.shard_pool = ShardPool(self.batch) if config.ENABLE_SHARDS else None
         self.popups = DamagePopups()
         self._hitstop = 0.0
 
@@ -913,6 +916,7 @@ class Game(pyglet.window.Window):
         self.afterburn = None
         self.afterburn_pool = None
         self.afterburn_deal = None
+        self.shard_pool = None
         self.popups = None
         self._hitstop = 0.0
 

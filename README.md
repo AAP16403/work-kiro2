@@ -62,7 +62,7 @@ cargo run --bin plouto -- --replay run.json
 
 Use `--help` to see command options. Replays verify the deterministic simulation result recorded in the file.
 
-- The replay file records `SIMULATION_RULES_VERSION` (currently 12, defined in `plouto_rs\src\sim\replay.rs`). Replays recorded under older rules versions are rejected and must be recorded again.
+- The replay file records `SIMULATION_RULES_VERSION` (currently 13, defined in `plouto_rs\src\sim\replay.rs`). Replays recorded under older rules versions are rejected and must be recorded again.
 - A recorded run (`--record`) does not write progress. A replay (`--replay`) never grants achievements.
 
 ## Development

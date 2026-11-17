@@ -3,10 +3,12 @@ __pycache__/
 
 .venv/
 
-build/
-dist/
-release/
-_build_*/
+/build/
+/dist/
+/release/
+/_build_*/
+target/
+**/target/
 
 .pytest_cache/
 .mypy_cache/
@@ -29,6 +31,22 @@ android/.python-for-android/
 android/.p4a/
 android/.kivy/
 
+# Android Rust port (docs/plans/ANDROID_PLAN.md): Gradle outputs, native libs and
+# assets copied in at build time, signing keys, and packaged apps
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/jniLibs/
+android/app/src/main/assets/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Rust debug symbols and profiling output
+*.pdb
+*.profraw
+
 # Editor/OS
 .vscode/
 .idea/
@@ -38,19 +56,19 @@ android/.kivy/
 Thumbs.db
 Desktop.ini
 
-# Local meta-progress save (progress.py)
+# Local game progress
 progress.json
 
-# Run recordings written with --record (replay.py)
+# Deterministic run recordings
 replays/
 
 # Local user settings (audio, shake, accessibility, run mutator selection)
 user_settings.json
 
-# Local high-score board (score.py). Written at game over, never committed.
+# Local high-score board, written at game over.
 high_scores.json
 
-# Save-file leftovers: corrupt files moved aside by savefile.py, and temp files from an interrupted atomic write
+# Save-file leftovers and temporary files from an interrupted atomic write
 *.json.corrupt-*
 .progress-*.tmp
 .user_settings-*.tmp

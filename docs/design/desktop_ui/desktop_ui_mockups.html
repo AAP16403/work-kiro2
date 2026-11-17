@@ -1,0 +1,1314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PLOUTO Desktop UI</title>
+<style>
+@font-face { font-family: "Orbitron"; src: url("../../../assets/fonts/Orbitron-Variable.ttf") format("truetype"); font-weight: 400 900; }
+@font-face { font-family: "Rajdhani"; src: url("../../../assets/fonts/Rajdhani-Regular.ttf") format("truetype"); font-weight: 400; }
+@font-face { font-family: "Rajdhani"; src: url("../../../assets/fonts/Rajdhani-SemiBold.ttf") format("truetype"); font-weight: 600; }
+
+:root {
+  /* Game theme (plouto_rs/src/ui/theme.rs) — same tokens as the Android mockups */
+  --bg: #09101a;
+  --panel: #0a1422;
+  --panel-2: #0f1d30;
+  --accent: #9bcdff;
+  --text: #e0ecff;
+  --muted: #a6b8ca;
+  --danger: #c8465a;
+  --success: #2daa7d;
+  --gold: #ffd45f;
+  --shield: #6fd8ff;
+  --boost: #ff9f43;
+  --line: rgba(155, 205, 255, 0.22);
+  --line-strong: rgba(155, 205, 255, 0.5);
+  --focus: #ffffff;
+  --head: "Orbitron", "Segoe UI", system-ui, sans-serif;
+  --body: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+
+  /* Window in physical px (set by JS) and UI scale u = min(W/1280, H/720) */
+  --W: 1280px; --H: 720px; --u: 1; --LW: 1280px; --LH: 720px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: #05090f; color: var(--text); font-family: var(--body); font-size: 16px; line-height: 1.4; }
+
+/* ───────── Page chrome ───────── */
+.page { max-width: 1400px; margin: 0 auto; padding: 24px 16px 80px; }
+.page-head h1 { font-family: var(--head); font-weight: 800; letter-spacing: 0.08em; font-size: 28px; margin: 0 0 4px; }
+.page-head p { color: var(--muted); margin: 0 0 4px; max-width: 920px; }
+.toolbar { position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 10px 16px; margin: 16px -16px 0; background: rgba(5, 9, 15, 0.92); backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+.toolbar label { color: var(--muted); font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+.toolbar select { background: var(--panel); color: var(--text); border: 1px solid var(--line-strong); border-radius: 6px; padding: 4px 6px; font: inherit; }
+.toolbar input { accent-color: var(--accent); }
+.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 0; }
+.toc a { color: var(--accent); text-decoration: none; font-size: 14px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+.toc a:hover { border-color: var(--accent); }
+section.shot { margin-top: 48px; scroll-margin-top: 70px; }
+section.shot > h2 { font-family: var(--head); font-size: 18px; letter-spacing: 0.06em; margin: 0 0 4px; }
+section.shot > h2 small { font-family: var(--body); color: var(--muted); font-weight: 400; letter-spacing: 0; font-size: 14px; margin-left: 8px; }
+section.shot > p.lede { color: var(--muted); margin: 0 0 12px; max-width: 920px; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px 24px; margin-top: 12px; }
+.notes h4 { font-family: var(--head); font-size: 12px; letter-spacing: 0.08em; color: var(--accent); margin: 8px 0 2px; }
+.notes ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+.notes code { color: var(--text); font-size: 13px; }
+
+/* ───────── Window frame ───────── */
+.win-wrap { width: 100%; overflow: hidden; }
+.win { width: var(--W); height: calc(var(--H) + 30px); transform-origin: 0 0; margin: 8px; border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 1px #2a3646, 0 24px 70px rgba(0, 0, 0, 0.6); background: #000; }
+.titlebar { height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #141b25; color: #b7c3d2; font: 13px "Segoe UI", system-ui, sans-serif; }
+.titlebar .dots { margin-left: auto; display: flex; gap: 18px; color: #7d8a9b; }
+.fullscreen .titlebar { display: none; }
+.fullscreen .win { height: var(--H); }
+.screen { position: relative; width: var(--W); height: var(--H); overflow: hidden; background: var(--bg); isolation: isolate; }
+/* Logical UI layer: laid out at LW×LH and scaled by u (mirrors ui_scale) */
+.ui { position: absolute; left: 0; top: 0; width: var(--LW); height: var(--LH); transform: scale(var(--u)); transform-origin: 0 0; }
+
+/* ───────── Atoms ───────── */
+.h-title { font-family: var(--head); font-weight: 800; letter-spacing: 0.12em; }
+.label { font-family: var(--head); font-size: 11px; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+.panel { background: rgba(10, 20, 34, 0.86); border: 1px solid var(--line-strong); border-radius: 10px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 16px; font-family: var(--head); font-weight: 700; font-size: 13px; letter-spacing: 0.1em; color: var(--text); background: var(--panel-2); border: 1px solid var(--line-strong); border-radius: 8px; cursor: pointer; user-select: none; transition: background 0.12s, border-color 0.12s, box-shadow 0.12s; }
+.btn:hover, .btn.is-hover { background: #16304d; border-color: var(--accent); }
+.btn:active, .btn.is-pressed { background: #1d3a5e; transform: translateY(1px); }
+.btn.primary { background: linear-gradient(180deg, #2a5a8c, #1a3b62); border-color: var(--accent); color: #fff; }
+.btn.gold { background: linear-gradient(180deg, #5a4614, #3a2c08); border-color: var(--gold); color: var(--gold); }
+.btn.danger { border-color: var(--danger); color: #ffb8c3; }
+.btn.ghost { background: transparent; }
+.btn.disabled { opacity: 0.4; pointer-events: none; }
+.focus, .btn:focus-visible, .seg button:focus-visible, .toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; box-shadow: 0 0 0 6px rgba(155, 205, 255, 0.25); }
+.ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.seg { display: inline-flex; background: var(--panel); border: 1px solid var(--line-strong); border-radius: 8px; padding: 3px; gap: 2px; }
+.seg button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-family: var(--head); font-size: 11px; letter-spacing: 0.08em; font-weight: 700; cursor: pointer; }
+.seg button:hover { color: var(--text); background: rgba(155, 205, 255, 0.08); }
+.seg button[aria-pressed="true"] { background: #1d3a5e; color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+.bar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.bar > i { display: block; height: 100%; border-radius: 4px; }
+.toggle { width: 46px; height: 26px; border-radius: 13px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.06); position: relative; cursor: pointer; padding: 0; flex: none; }
+.toggle::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--muted); transition: transform 0.15s; }
+.toggle[aria-pressed="true"] { background: rgba(45, 170, 125, 0.35); border-color: var(--success); }
+.toggle[aria-pressed="true"]::after { transform: translateX(20px); background: #fff; }
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 24px; background: transparent; margin: 0; cursor: pointer; }
+input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) var(--p, 50%), rgba(255, 255, 255, 0.1) var(--p, 50%)); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; margin-top: -6px; background: var(--text); border: 3px solid var(--accent); }
+input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); }
+input[type="range"]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--accent); }
+input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--text); border: 3px solid var(--accent); }
+
+/* Key / button glyphs: text swaps with the toolbar toggle (pure CSS) */
+.k { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 22px; padding: 0 6px; border-radius: 5px; font-family: var(--head); font-size: 10px; font-weight: 800; letter-spacing: 0.04em; color: var(--text); background: linear-gradient(180deg, #24364d, #16243a); border: 1px solid rgba(155, 205, 255, 0.45); border-bottom-width: 3px; white-space: nowrap; vertical-align: middle; }
+.k::after { content: attr(data-kb); }
+.pad .k::after { content: attr(data-pad); }
+.pad .k { border-radius: 999px; border-bottom-width: 1px; min-width: 22px; padding: 0 5px; }
+.pad .k[data-pad="A"] { background: #1f7a52; border-color: #5fe0a0; }
+.pad .k[data-pad="B"] { background: #8a2236; border-color: #ff9fae; }
+.pad .k[data-pad="X"] { background: #1f4f8a; border-color: #8fc0ff; }
+.pad .k[data-pad="Y"] { background: #7a6214; border-color: var(--gold); }
+.pad .k[data-pad="LB"], .pad .k[data-pad="RB"], .pad .k[data-pad="LT"], .pad .k[data-pad="RT"], .pad .k[data-pad="Start"], .pad .k[data-pad="View"] { border-radius: 6px; }
+.k.lg { height: 26px; min-width: 30px; font-size: 11px; }
+.hints { position: absolute; left: 0; right: 0; bottom: 0; height: 40px; display: flex; align-items: center; gap: 22px; padding: 0 24px; background: linear-gradient(0deg, rgba(4, 8, 14, 0.9), rgba(4, 8, 14, 0)); font-size: 14px; color: var(--muted); font-weight: 600; }
+.hints span { display: inline-flex; gap: 7px; align-items: center; }
+.hints .r { margin-left: auto; }
+
+/* ───────── Backdrops ───────── */
+.arena { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.dim { position: absolute; inset: 0; background: rgba(4, 8, 14, 0.7); backdrop-filter: blur(3px); }
+.menu-bg { position: absolute; inset: 0; background: radial-gradient(ellipse 50% 70% at 30% 50%, rgba(80, 140, 220, 0.18), transparent 70%), radial-gradient(ellipse 40% 50% at 85% 20%, rgba(200, 70, 90, 0.08), transparent 70%), var(--bg); }
+.stars { position: absolute; inset: 0; background-image: radial-gradient(1px 1px at 10% 20%, #fff8, transparent), radial-gradient(1px 1px at 30% 70%, #fff6, transparent), radial-gradient(1.5px 1.5px at 55% 30%, #fffa, transparent), radial-gradient(1px 1px at 75% 80%, #fff5, transparent), radial-gradient(1px 1px at 90% 45%, #fff7, transparent), radial-gradient(1px 1px at 45% 90%, #fff5, transparent), radial-gradient(1.5px 1.5px at 65% 60%, #fff8, transparent), radial-gradient(1px 1px at 20% 85%, #fff6, transparent); }
+.cursor { position: absolute; width: 22px; height: 22px; z-index: 30; pointer-events: none; }
+
+/* ───────── Combat HUD ───────── */
+.hud { position: absolute; inset: 16px; }
+.vitals { position: absolute; left: 0; top: 0; width: 280px; padding: 10px 12px; display: grid; gap: 7px; }
+.vrow { display: grid; grid-template-columns: 52px 1fr 64px; align-items: center; gap: 8px; }
+.vrow .bar { height: 10px; }
+.vrow b { font-family: var(--head); font-size: 13px; text-align: right; font-weight: 700; }
+.vrow b small { color: var(--muted); font-weight: 500; font-size: 10px; }
+.wavechip { position: absolute; left: 50%; top: 0; transform: translateX(-50%); text-align: center; }
+.wavechip .w { font-family: var(--head); font-weight: 800; font-size: 15px; letter-spacing: 0.14em; padding: 6px 18px; border-radius: 999px; border: 1px solid var(--line-strong); background: rgba(10, 20, 34, 0.8); display: inline-flex; gap: 12px; align-items: center; }
+.wavechip .w span { color: var(--muted); font-weight: 600; font-size: 12px; letter-spacing: 0.08em; }
+.event { display: inline-flex; gap: 6px; align-items: center; margin-top: 6px; padding: 3px 12px; border-radius: 999px; background: rgba(255, 159, 67, 0.12); border: 1px solid rgba(255, 159, 67, 0.55); color: #ffd2a6; font-family: var(--head); font-size: 11px; letter-spacing: 0.08em; }
+.scorebox { position: absolute; right: 0; top: 0; display: flex; gap: 12px; align-items: center; }
+.scorebox .s { text-align: right; }
+.scorebox .s b { font-family: var(--head); font-size: 24px; font-weight: 800; display: block; line-height: 1.1; }
+.scorebox .s small { font-family: var(--head); font-size: 10px; color: var(--muted); letter-spacing: 0.12em; }
+.comboring { width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center; position: relative; }
+.comboring::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--gold) 0 var(--c, 65%), rgba(255, 255, 255, 0.08) var(--c, 65%) 100%); -webkit-mask: radial-gradient(circle, transparent 25px, #000 26px); mask: radial-gradient(circle, transparent 25px, #000 26px); }
+.comboring b { font-family: var(--head); font-size: 17px; font-weight: 900; color: var(--gold); text-shadow: 0 0 10px rgba(255, 212, 95, 0.45); }
+.toast { position: absolute; right: 0; top: 78px; width: 250px; padding: 8px 12px; display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: center; border-color: rgba(255, 212, 95, 0.6); }
+.toast .t { font-weight: 600; line-height: 1.1; }
+.toast .t small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+.loadout { position: absolute; left: 0; bottom: 0; display: grid; gap: 8px; }
+.badges { display: flex; gap: 6px; }
+.badge { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; border: 1px solid var(--line-strong); background: rgba(10, 20, 34, 0.85); position: relative; }
+.badge .ic { width: 18px; height: 18px; }
+.badge.relic { border-color: var(--gold); color: var(--gold); }
+.badge .t { position: absolute; bottom: -3px; right: -3px; font-family: var(--head); font-size: 9px; font-weight: 700; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; }
+.badge .tip { display: none; }
+.weaponcard { width: 280px; padding: 10px 12px; display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+.weaponcard b { font-family: var(--head); font-size: 14px; letter-spacing: 0.08em; color: var(--accent); }
+.weaponcard .auto { font-family: var(--head); font-size: 10px; letter-spacing: 0.1em; padding: 2px 6px; border-radius: 4px; }
+.weaponcard .bar { grid-column: 1 / -1; height: 5px; }
+.weaponcard .wmeta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.abilities { position: absolute; right: 0; bottom: 0; display: flex; gap: 10px; align-items: flex-end; padding: 10px; }
+.ab { width: 68px; display: grid; justify-items: center; gap: 4px; }
+.ab .tile { width: 60px; height: 60px; border-radius: 12px; border: 1px solid var(--line-strong); background: rgba(10, 20, 34, 0.85); display: grid; place-items: center; position: relative; overflow: hidden; }
+.ab .tile .ic { width: 26px; height: 26px; position: relative; }
+.ab .fill { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(155, 205, 255, 0.18); }
+.ab .cd { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--head); font-size: 15px; font-weight: 800; background: rgba(4, 8, 14, 0.55); }
+.ab .name { white-space: nowrap; font-family: var(--head); font-size: 9px; letter-spacing: 0.12em; color: var(--muted); }
+.ab.dash { color: var(--accent); }
+.ab.boost { color: var(--boost); width: 150px; }
+.ab.boost .tile { width: 150px; grid-template-columns: 30px 1fr; padding: 0 12px; gap: 10px; justify-items: stretch; }
+.ab.boost .tile > div { width: 100%; }
+.ab.boost .ebar { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.ab.boost .ebar i { display: block; height: 100%; background: linear-gradient(90deg, #c46a1a, var(--boost)); }
+.ab.boost .enum { font-family: var(--head); font-size: 10px; color: var(--muted); margin-top: 3px; text-align: left; }
+.ab.ultra { color: var(--gold); }
+.ab.ultra .tile { width: 68px; height: 68px; border-radius: 50%; }
+.ab.ultra .tile::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--gold) 0 var(--c, 55%), rgba(255, 255, 255, 0.08) var(--c, 55%) 100%); -webkit-mask: radial-gradient(circle, transparent 29px, #000 30px); mask: radial-gradient(circle, transparent 29px, #000 30px); }
+.ab .pips { display: flex; gap: 4px; }
+.ab .pips i { width: 8px; height: 8px; transform: rotate(45deg); border: 1px solid var(--gold); background: var(--gold); }
+.ab .pips i.e { background: transparent; }
+.ab.ready .tile { border-color: currentColor; box-shadow: 0 0 16px currentColor; }
+.ab.held .tile { border-color: currentColor; background: rgba(255, 159, 67, 0.18); }
+.bossbar { position: absolute; left: 50%; top: 0; width: 46%; transform: translateX(-50%); text-align: center; }
+.bossbar .top { display: flex; justify-content: space-between; align-items: baseline; }
+.bossbar .name { font-family: var(--head); font-size: 13px; letter-spacing: 0.14em; font-weight: 800; color: #ffc2cb; }
+.bossbar .phase { font-family: var(--head); font-size: 10px; letter-spacing: 0.1em; color: var(--muted); }
+.bossbar .bar { height: 16px; border-radius: 4px; border: 1px solid rgba(200, 70, 90, 0.8); margin-top: 4px; position: relative; }
+.bossbar .bar .seg-tick { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255, 255, 255, 0.75); }
+.bossbar .wavesmall { margin-top: 6px; font-family: var(--head); font-size: 11px; color: var(--muted); letter-spacing: 0.1em; }
+.perf { position: absolute; left: 0; top: 96px; font: 11px/1.3 Consolas, monospace; color: #7dffbd; background: rgba(0, 0, 0, 0.55); padding: 4px 8px; border-radius: 4px; }
+
+/* ───────── Main menu ───────── */
+.menu { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 440px; gap: 40px; padding: 48px 64px 56px; }
+.brand { display: flex; flex-direction: column; justify-content: center; }
+.logo { font-family: var(--head); font-weight: 900; font-size: 84px; letter-spacing: 0.16em; line-height: 1; background: linear-gradient(180deg, #fff, #9bcdff 70%, #5f8fd0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sub { font-family: var(--head); font-size: 16px; letter-spacing: 0.5em; color: var(--accent); margin-top: 10px; }
+.records { display: flex; gap: 32px; margin-top: 34px; }
+.records div { display: grid; }
+.records b { font-family: var(--head); font-size: 22px; }
+.lastrun { margin-top: 26px; padding: 12px 14px; max-width: 420px; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+.lastrun .v { font-family: var(--head); font-size: 14px; }
+.nav { display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.navitem { height: 48px; display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 12px; padding: 0 16px; border-radius: 10px; border: 1px solid transparent; font-family: var(--head); font-weight: 700; letter-spacing: 0.12em; font-size: 15px; color: var(--muted); cursor: pointer; }
+.navitem small { font-family: var(--body); letter-spacing: 0; font-weight: 600; font-size: 14px; color: var(--muted); }
+.navitem:hover { color: var(--text); background: rgba(155, 205, 255, 0.06); border-color: var(--line); }
+.navitem.sel { color: #fff; background: linear-gradient(90deg, rgba(42, 90, 140, 0.9), rgba(26, 59, 98, 0.4)); border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 24px rgba(155, 205, 255, 0.25); }
+.navitem.sel::before { content: ""; position: absolute; }
+.navitem.quit { color: #c7a0a8; }
+.mutbox { margin-top: 10px; padding: 12px; }
+.mutchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mchip { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line-strong); display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; color: var(--muted); background: rgba(10, 20, 34, 0.7); cursor: pointer; }
+.mchip:hover { color: var(--text); border-color: var(--accent); }
+.mchip.on { border-color: var(--danger); color: #ffc2cb; background: rgba(200, 70, 90, 0.16); }
+.mutdesc { margin-top: 8px; font-size: 14px; color: var(--muted); line-height: 1.25; }
+.mutdesc b { color: var(--text); }
+.ver { position: absolute; right: 24px; top: 14px; font-size: 13px; color: rgba(166, 184, 202, 0.6); }
+
+/* ───────── Shared screen scaffolding ───────── */
+.frame { position: absolute; inset: 0; display: grid; grid-template-rows: 64px 1fr 40px; padding: 0 32px; }
+.topbar { display: flex; align-items: center; gap: 14px; }
+.topbar .h-title { font-size: 20px; }
+.topbar .spacer { flex: 1; }
+.body { min-height: 0; padding-bottom: 12px; }
+.frame .hints { position: static; background: none; padding: 0; border-top: 1px solid rgba(155, 205, 255, 0.12); }
+.list { overflow: hidden auto; scrollbar-width: thin; scrollbar-color: rgba(155, 205, 255, 0.35) transparent; }
+
+/* ───────── Settings ───────── */
+.settings { display: grid; grid-template-columns: 210px minmax(0, 1fr) 300px; min-height: 0; gap: 20px; height: 100%; }
+.rail { display: flex; flex-direction: column; gap: 4px; }
+.rail button { height: 44px; text-align: left; padding: 0 12px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--muted); font-family: var(--head); font-size: 12px; letter-spacing: 0.08em; font-weight: 700; display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.rail button:hover { color: var(--text); background: rgba(155, 205, 255, 0.06); }
+.rail button[aria-selected="true"] { background: #13263f; border-color: var(--line-strong); color: var(--text); }
+.rail .rk { margin-top: auto; font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.srow { min-height: 50px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; padding: 6px 10px; border-radius: 8px; }
+.srow:hover { background: rgba(155, 205, 255, 0.05); }
+.srow.focusrow { background: rgba(155, 205, 255, 0.08); box-shadow: inset 3px 0 0 var(--accent); }
+.srow .t { font-weight: 600; font-size: 16px; line-height: 1.15; }
+.srow .d { font-size: 13px; color: var(--muted); line-height: 1.2; }
+.srow.slider { grid-template-columns: 1fr 220px 50px; }
+.srow.slider b { font-family: var(--head); font-size: 12px; color: var(--accent); text-align: right; }
+.sec-h { font-family: var(--head); font-size: 11px; letter-spacing: 0.14em; color: var(--accent); margin: 16px 10px 4px; }
+.sec-h:first-child { margin-top: 2px; }
+.helpcard { padding: 14px; display: flex; flex-direction: column; gap: 8px; align-self: start; }
+.helpcard h3 { font-family: var(--head); font-size: 14px; margin: 0; letter-spacing: 0.06em; }
+.helpcard p { margin: 0; font-size: 14px; color: var(--muted); }
+.bindtable { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 15px; }
+.bindtable th { text-align: left; font-family: var(--head); font-size: 10px; letter-spacing: 0.12em; color: var(--muted); font-weight: 700; padding: 0 10px; }
+.bindtable td { padding: 6px 10px; background: rgba(10, 20, 34, 0.7); }
+.bindtable td:first-child { border-radius: 8px 0 0 8px; font-weight: 600; }
+.bindtable td:last-child { border-radius: 0 8px 8px 0; }
+.bind { display: inline-flex; min-width: 92px; height: 30px; align-items: center; justify-content: center; gap: 4px; border-radius: 6px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); cursor: pointer; font-family: var(--head); font-size: 11px; }
+.bind:hover { border-color: var(--accent); }
+.bind.listen { border-color: var(--gold); color: var(--gold); background: rgba(255, 212, 95, 0.1); animation: blink 1s steps(2) infinite; }
+.bind.conflict { border-color: var(--danger); color: #ffb8c3; }
+@keyframes blink { 50% { opacity: 0.55; } }
+.dzprev { width: 120px; height: 120px; border-radius: 50%; border: 2px solid var(--line-strong); position: relative; margin: 6px auto; }
+.dzprev .dz { position: absolute; inset: 41%; border-radius: 50%; background: rgba(200, 70, 90, 0.25); border: 1px dashed #ff9fae; }
+.dzprev .dot { position: absolute; left: 66%; top: 34%; width: 12px; height: 12px; margin: -6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+/* ───────── Pause ───────── */
+.pause { position: absolute; inset: 0; display: grid; grid-template-columns: 340px 1fr 340px; gap: 32px; padding: 56px 48px 56px; }
+.pmenu { display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.pmenu .h-title { font-size: 34px; margin-bottom: 4px; }
+.pmenu .meta { color: var(--muted); font-weight: 600; margin-bottom: 14px; }
+.pside { padding: 16px; display: flex; flex-direction: column; gap: 10px; align-self: center; }
+.kv .k2 { font-size: 11px; color: var(--muted); font-family: var(--head); letter-spacing: 0.1em; }
+.kv .v { font-family: var(--head); font-size: 16px; font-weight: 700; }
+.kvgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+.eff { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; font-size: 14px; }
+.eff .t { font-weight: 600; line-height: 1.1; }
+.eff .t small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+.eff b { font-family: var(--head); font-size: 10px; color: var(--muted); }
+.ctlref { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 14px; color: var(--muted); }
+
+/* ───────── Boss reward ───────── */
+.reward { position: absolute; inset: 0; display: grid; grid-template-rows: auto auto auto; align-content: center; gap: 22px; padding: 44px 80px 56px; }
+.reward .hdr { text-align: center; }
+.reward .hdr .h-title { font-size: 28px; color: var(--gold); text-shadow: 0 0 18px rgba(255, 212, 95, 0.35); }
+.steps { display: inline-flex; gap: 8px; margin-top: 8px; align-items: center; color: var(--muted); font-weight: 600; }
+.steps i { width: 26px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.15); }
+.steps i.on { background: var(--gold); }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; max-width: 1040px; width: 100%; margin: 0 auto; }
+.card { min-height: 290px; border-radius: 14px; border: 1px solid var(--line-strong); background: linear-gradient(180deg, #112440, #0a1422); padding: 18px; display: grid; grid-template-rows: auto auto auto 1fr auto; gap: 8px; position: relative; cursor: pointer; transition: transform 0.12s, box-shadow 0.12s; }
+.card:hover { transform: translateY(-3px); border-color: var(--accent); }
+.card .num { position: absolute; right: 14px; top: 14px; }
+.card .art { height: 92px; border-radius: 10px; display: grid; place-items: center; background: radial-gradient(circle, rgba(155, 205, 255, 0.16), transparent 70%); }
+.card .art .ic { width: 44px; height: 44px; stroke-width: 1.6; }
+.card .tag { justify-self: start; font-family: var(--head); font-size: 9px; letter-spacing: 0.12em; padding: 3px 7px; border-radius: 5px; font-weight: 800; }
+.tag.temp { background: rgba(111, 216, 255, 0.15); color: var(--shield); border: 1px solid rgba(111, 216, 255, 0.5); }
+.tag.perm { background: rgba(45, 170, 125, 0.15); color: #8ff0c8; border: 1px solid rgba(45, 170, 125, 0.6); }
+.tag.relic { background: rgba(255, 212, 95, 0.15); color: var(--gold); border: 1px solid rgba(255, 212, 95, 0.6); }
+.card h3 { font-family: var(--head); font-size: 18px; margin: 0; letter-spacing: 0.04em; }
+.card p { margin: 0; font-size: 16px; line-height: 1.3; }
+.card .dur { font-family: var(--head); font-size: 10px; color: var(--muted); letter-spacing: 0.08em; }
+.card.sel { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 0 0 5px rgba(255, 255, 255, 0.85), 0 0 30px rgba(255, 212, 95, 0.25); }
+.reward .foot { display: flex; justify-content: center; gap: 14px; align-items: center; }
+
+/* ───────── Game over ───────── */
+.go { position: absolute; inset: 0; display: grid; grid-template-columns: 1.1fr 1fr; grid-template-rows: auto auto auto; align-content: center; gap: 18px 24px; padding: 40px 72px 56px; }
+.go .hdr { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 18px; }
+.go .hdr .h-title { font-size: 34px; color: #ff9fae; }
+.go .hdr .cause { color: var(--muted); font-weight: 600; font-size: 17px; }
+.go .stats { padding: 18px 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 20px; align-content: start; }
+.go .score { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; }
+.go .score b { font-family: var(--head); font-size: 48px; font-weight: 900; }
+.newbest { font-family: var(--head); font-size: 11px; letter-spacing: 0.12em; padding: 3px 8px; border-radius: 5px; background: var(--gold); color: #2a2000; font-weight: 800; }
+.spark { grid-column: 1 / -1; width: 100%; height: 110px; margin-top: 6px; }
+.go .right { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.unlock { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: center; padding: 8px 10px; border-radius: 10px; background: rgba(255, 212, 95, 0.08); border: 1px solid rgba(255, 212, 95, 0.4); }
+.unlock .t { font-weight: 600; line-height: 1.15; }
+.unlock .t small { display: block; font-size: 13px; color: var(--muted); font-weight: 400; }
+.near .t { font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; margin-bottom: 4px; }
+.near .t span { font-family: var(--head); font-size: 11px; color: var(--muted); }
+.go .foot { grid-column: 1 / -1; display: flex; gap: 12px; justify-content: flex-end; align-items: center; }
+.go .foot .daily { margin-right: auto; color: var(--muted); }
+
+/* ───────── Hangar ───────── */
+.hangar { display: grid; grid-template-columns: minmax(0, 1fr) 360px; min-height: 0; gap: 22px; height: 100%; }
+.skingrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 12px; min-height: 0; }
+.skin { border-radius: 12px; border: 1px solid var(--line); background: rgba(10, 20, 34, 0.85); display: grid; grid-template-rows: 1fr auto; padding: 8px; position: relative; cursor: pointer; min-height: 0; }
+.skin:hover { border-color: var(--accent); }
+.skin svg { width: 100%; height: 100%; min-height: 0; }
+.skin .n { font-family: var(--head); font-size: 10px; letter-spacing: 0.06em; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skin.sel { border-color: var(--accent); box-shadow: 0 0 0 2px #fff, 0 0 18px rgba(155, 205, 255, 0.3); }
+.skin.eq::after { content: "EQUIPPED"; position: absolute; top: 6px; left: 6px; font-family: var(--head); font-size: 8px; letter-spacing: 0.1em; padding: 2px 5px; border-radius: 4px; background: var(--success); color: #032; font-weight: 800; }
+.skin.lock { opacity: 0.5; }
+.skin.lock::before { content: ""; position: absolute; top: 8px; right: 8px; width: 14px; height: 14px; background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a6b8ca' stroke-width='2.4'%3E%3Crect x='5' y='11' width='14' height='10' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 0 1 8 0v4'/%3E%3C/svg%3E"); }
+.detail { padding: 18px; display: grid; grid-template-rows: 1fr auto auto auto auto; gap: 8px; min-height: 0; background: linear-gradient(180deg, #102038, #0a1422); }
+.detail .prev { min-height: 0; display: grid; place-items: center; background: radial-gradient(circle, rgba(255, 79, 216, 0.16), transparent 65%); border-radius: 12px; }
+.detail .prev svg { width: 170px; height: 170px; }
+.detail h3 { font-family: var(--head); font-size: 20px; margin: 0; letter-spacing: 0.06em; }
+.detail p { margin: 0; font-size: 15px; color: var(--muted); }
+.swatchrow { display: flex; gap: 6px; }
+.swatchrow i { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.25); }
+.ach { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 22px; height: 100%; min-height: 0; }
+.achsum { padding: 18px; display: flex; flex-direction: column; gap: 14px; align-self: start; }
+.donut-wrap { position: relative; width: 130px; height: 130px; margin: 0 auto; }
+.donut { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--gold) 0 40%, rgba(255, 255, 255, 0.08) 40% 100%); -webkit-mask: radial-gradient(circle, transparent 50px, #000 51px); mask: radial-gradient(circle, transparent 50px, #000 51px); }
+.donut-label { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; font-family: var(--head); font-weight: 800; font-size: 24px; }
+.donut-label small { display: block; font-size: 11px; color: var(--muted); letter-spacing: 0.1em; }
+.cats { display: grid; gap: 6px; font-size: 14px; }
+.cats div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.cats .bar { grid-column: 1 / -1; height: 4px; }
+.achgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; align-content: start; padding-right: 6px; }
+.arow { min-height: 66px; display: grid; grid-template-columns: 42px 1fr auto; gap: 12px; align-items: center; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(155, 205, 255, 0.12); background: rgba(10, 20, 34, 0.6); }
+.arow:hover { border-color: var(--line-strong); }
+.arow .medal { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; border: 1px solid var(--line-strong); color: var(--accent); }
+.arow.done .medal { border-color: var(--gold); color: var(--gold); background: rgba(255, 212, 95, 0.1); }
+.arow .t { font-weight: 600; font-size: 15px; line-height: 1.1; }
+.arow .t small { font-family: var(--head); font-size: 9px; letter-spacing: 0.1em; color: var(--muted); margin-left: 6px; }
+.arow .d { font-size: 13px; color: var(--muted); line-height: 1.2; }
+.arow .bar { height: 4px; margin-top: 5px; }
+.arow .v { font-family: var(--head); font-size: 11px; color: var(--muted); }
+.arow.secret .t { color: var(--muted); letter-spacing: 0.2em; }
+
+/* ───────── Guide ───────── */
+.guide { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 22px; height: 100%; min-height: 0; }
+.glist { padding-right: 6px; }
+.ghead { font-family: var(--head); font-size: 10px; letter-spacing: 0.14em; color: var(--accent); margin: 10px 8px 4px; }
+.gitem { height: 48px; display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; padding: 0 10px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; }
+.gitem:hover { background: rgba(155, 205, 255, 0.06); }
+.gitem .gi { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: rgba(255, 255, 255, 0.04); }
+.gitem .t { font-weight: 600; font-size: 15px; line-height: 1.1; }
+.gitem .s { font-size: 12px; color: var(--muted); }
+.gitem[aria-selected="true"] { background: #13263f; border-color: var(--accent); }
+.gdetail { padding: 22px 26px; display: grid; grid-template-columns: 1fr 260px; gap: 6px 26px; align-content: start; overflow: hidden; }
+.gdetail .role { font-family: var(--head); font-size: 11px; letter-spacing: 0.14em; color: var(--accent); }
+.gdetail h3 { font-family: var(--head); font-size: 26px; margin: 0; letter-spacing: 0.06em; }
+.gdetail .art { grid-column: 2; grid-row: 1 / span 5; height: 230px; border-radius: 12px; display: grid; place-items: center; background: radial-gradient(circle, rgba(200, 70, 90, 0.2), transparent 70%); border: 1px solid var(--line); }
+.gdetail p { margin: 8px 0 0; font-size: 17px; line-height: 1.35; }
+.gdetail ul { margin: 4px 0 0; padding-left: 20px; font-size: 15px; color: var(--muted); }
+.gdetail ul li::marker { color: var(--accent); }
+.gdetail .facts { display: flex; gap: 18px; margin-top: 10px; }
+
+/* ───────── Dialog ───────── */
+.dialog-wrap { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(2, 5, 9, 0.7); }
+.dialog { width: 440px; padding: 24px; border-radius: 14px; border: 1px solid var(--line-strong); background: #0d1a2c; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6); }
+.dialog h3 { font-family: var(--head); font-size: 20px; margin: 0 0 8px; letter-spacing: 0.06em; }
+.dialog p { margin: 0 0 20px; color: var(--muted); font-size: 16px; }
+.dialog .row { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ───────── Design system cards ───────── */
+.ds { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 12px; }
+.ds .card-ds { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+.ds h3 { font-family: var(--head); font-size: 13px; letter-spacing: 0.08em; color: var(--accent); margin: 0 0 10px; }
+.swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sw { border-radius: 8px; border: 1px solid var(--line); overflow: hidden; font-size: 12px; }
+.sw i { display: block; height: 34px; }
+.sw div { padding: 4px 6px; color: var(--muted); }
+.sw div b { color: var(--text); display: block; font-weight: 600; }
+.typo div { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid rgba(155, 205, 255, 0.08); padding: 4px 0; gap: 8px; }
+.typo small { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.states { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.rules { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+.rules b { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- Icon symbols -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-dash" viewBox="0 0 24 24"><path d="M4 6l6 6-6 6M12 6l6 6-6 6"/></symbol>
+    <symbol id="i-boost" viewBox="0 0 24 24"><path d="M12 3c3 3.5 4.5 6.5 4.5 9.5A4.5 4.5 0 0 1 12 17a4.5 4.5 0 0 1-4.5-4.5C7.5 10 9 8 10 6c.5 2 1.5 3 2 3 0-2 0-4 0-6z"/><path d="M9 20h6"/></symbol>
+    <symbol id="i-ultra" viewBox="0 0 24 24"><path d="M12 2l2.4 6.3L21 9l-5 4.4L17.5 20 12 16.6 6.5 20 8 13.4 3 9l6.6-.7z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-ship" viewBox="0 0 24 24"><path d="M12 2l7 18-7-4-7 4z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/></symbol>
+    <symbol id="i-game" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 13V5a2 2 0 0 1 4 0v6M12 10V4a2 2 0 0 1 4 0v7M16 9a2 2 0 0 1 4 0v5a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3.5L3.5 13a2 2 0 0 1 3.4-2L8 13"/></symbol>
+    <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM17 8a5 5 0 0 1 0 8M19.5 5.5a9 9 0 0 1 0 13"/></symbol>
+    <symbol id="i-screen" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="13" rx="2"/><path d="M8 21h8"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H4a3 3 0 0 0 4 4M16 6h4a3 3 0 0 1-4 4M12 13v4M8 21h8M10 17h4v4h-4z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+    <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M6 3v9a6 6 0 0 0 12 0V3M6 7h4M14 7h4M10 3v9a2 2 0 0 0 4 0V3"/></symbol>
+    <symbol id="i-gem" viewBox="0 0 24 24"><path d="M6 3h12l4 6-10 12L2 9z"/><path d="M2 9h20M12 21L8 9l4-6 4 6z"/></symbol>
+    <symbol id="i-cross" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-meteor" viewBox="0 0 24 24"><circle cx="15" cy="15" r="5"/><path d="M3 3l8 8M7 3l6 6M3 7l6 6"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M20 12a8 8 0 1 0-2.5 5.8M4 10a8 8 0 0 1 14-4"/></symbol>
+    <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18M8 7l-5 5 5 5M16 7l5 5-5 5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M20 4v6h-6"/><path d="M20 10a8 8 0 1 0 0 4"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-exit" viewBox="0 0 24 24"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/></symbol>
+
+    <!-- Arena artwork -->
+    <radialGradient id="floorG" cx="50%" cy="50%" r="60%">
+      <stop offset="0" stop-color="#16314f"/><stop offset="0.7" stop-color="#0c1a2c"/><stop offset="1" stop-color="#08111d"/>
+    </radialGradient>
+    <pattern id="gridP" width="44" height="22" patternUnits="userSpaceOnUse">
+      <path d="M0 11 L22 0 L44 11 L22 22 Z" fill="none" stroke="rgba(155,205,255,0.09)" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="bigglow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+
+    <symbol id="arena-wave" viewBox="0 0 900 400" preserveAspectRatio="xMidYMid slice">
+      <rect width="900" height="400" fill="#060b13"/>
+      <ellipse cx="450" cy="215" rx="410" ry="170" fill="url(#floorG)"/>
+      <ellipse cx="450" cy="215" rx="410" ry="170" fill="url(#gridP)"/>
+      <ellipse cx="450" cy="215" rx="410" ry="170" fill="none" stroke="#9bcdff" stroke-opacity="0.18" stroke-width="10"/>
+      <ellipse cx="450" cy="215" rx="410" ry="170" fill="none" stroke="#9bcdff" stroke-opacity="0.7" stroke-width="2" filter="url(#glow)"/>
+      <!-- meteor telegraph -->
+      <ellipse cx="350" cy="120" rx="44" ry="22" fill="rgba(255,159,67,0.12)" stroke="#ff9f43" stroke-width="2" stroke-dasharray="6 5"/>
+      <!-- pickup -->
+      <g transform="translate(540 262)" filter="url(#glow)"><path d="M0 -9 L8 0 L0 9 L-8 0Z" fill="#2daa7d"/></g>
+      <!-- aim line + reticle -->
+      <path d="M452 222 L640 150" stroke="#ffd45f" stroke-opacity="0.35" stroke-dasharray="4 6" stroke-width="1.5"/>
+      <g transform="translate(640 150)" stroke="#ffd45f" fill="none" stroke-width="1.5" opacity="0.8"><circle r="10"/><path d="M-15 0h6M9 0h6M0 -15v6M0 9v6"/></g>
+      <!-- player shots -->
+      <g stroke="#bfe3ff" stroke-width="3" stroke-linecap="round" filter="url(#glow)">
+        <path d="M490 207 l9 -3.5"/><path d="M530 192 l9 -3.5"/><path d="M572 176 l9 -3.5"/>
+      </g>
+      <!-- player -->
+      <g transform="translate(452 224)" filter="url(#bigglow)">
+        <ellipse rx="16" ry="7" cy="8" fill="rgba(155,205,255,0.25)"/>
+        <path d="M14 -6 L-12 -14 L-6 0 L-12 12 Z" fill="#9bcdff" stroke="#e0ecff" stroke-width="1.5" transform="rotate(-18)"/>
+      </g>
+      <!-- enemies -->
+      <g filter="url(#glow)">
+        <g fill="#c8465a" stroke="#ff9fae" stroke-width="1.2">
+          <path d="M650 140 l11 11 -11 11 -11 -11z"/><path d="M712 190 l10 10 -10 10 -10 -10z"/><path d="M240 132 l10 10 -10 10 -10 -10z"/>
+        </g>
+        <g fill="#ff9f43" stroke="#ffd2a6" stroke-width="1.2"><circle cx="300" cy="286" r="9"/><circle cx="600" cy="302" r="9"/></g>
+        <path d="M170 210 l14 -8 14 8 0 16 -14 8 -14 -8z" fill="#7a4bd1" stroke="#c9a8ff" stroke-width="1.5"/>
+        <g fill="#ff6f91"><circle cx="730" cy="270" r="4"/><circle cx="742" cy="282" r="4"/><circle cx="722" cy="286" r="4"/><circle cx="748" cy="262" r="4"/><circle cx="735" cy="296" r="4"/></g>
+      </g>
+      <!-- enemy shots -->
+      <g fill="#ff4fd8" filter="url(#glow)"><circle cx="330" cy="268" r="3.5"/><circle cx="360" cy="252" r="3.5"/><circle cx="570" cy="282" r="3.5"/></g>
+    </symbol>
+
+    <symbol id="arena-boss" viewBox="0 0 900 400" preserveAspectRatio="xMidYMid slice">
+      <rect width="900" height="400" fill="#07080f"/>
+      <ellipse cx="450" cy="215" rx="410" ry="170" fill="url(#floorG)"/>
+      <ellipse cx="450" cy="215" rx="410" ry="170" fill="url(#gridP)"/>
+      <ellipse cx="450" cy="215" rx="410" ry="170" fill="none" stroke="#c8465a" stroke-opacity="0.2" stroke-width="10"/>
+      <ellipse cx="450" cy="215" rx="410" ry="170" fill="none" stroke="#ff9fae" stroke-opacity="0.7" stroke-width="2" filter="url(#glow)"/>
+      <!-- lightning lane telegraphs -->
+      <path d="M450 120 L220 330" stroke="#ff4f6a" stroke-opacity="0.5" stroke-width="22" stroke-linecap="round"/>
+      <path d="M450 120 L680 330" stroke="#ff4f6a" stroke-opacity="0.5" stroke-width="22" stroke-linecap="round"/>
+      <path d="M450 120 L220 330 M450 120 L680 330" stroke="#ffd0d8" stroke-width="1.5" stroke-dasharray="8 6"/>
+      <!-- boss -->
+      <g transform="translate(450 112)" filter="url(#bigglow)">
+        <ellipse rx="70" ry="22" cy="22" fill="rgba(200,70,90,0.25)"/>
+        <path d="M0 -50 L48 -10 L36 30 L-36 30 L-48 -10 Z" fill="#3a2161" stroke="#c9a8ff" stroke-width="2"/>
+        <path d="M0 -30 L26 -6 L18 18 L-18 18 L-26 -6 Z" fill="#7a4bd1" stroke="#ffd45f" stroke-width="1.5"/>
+        <circle r="9" cy="-2" fill="#ffd45f"/>
+        <path d="M-60 -20 l-24 -10 M60 -20 l24 -10 M-56 14 l-26 8 M56 14 l26 8" stroke="#c9a8ff" stroke-width="3" stroke-linecap="round"/>
+      </g>
+      <!-- boss bullets ring -->
+      <g fill="#ff4fd8" filter="url(#glow)">
+        <circle cx="380" cy="170" r="4"/><circle cx="520" cy="170" r="4"/><circle cx="345" cy="205" r="4"/><circle cx="555" cy="205" r="4"/><circle cx="400" cy="235" r="4"/><circle cx="500" cy="235" r="4"/>
+      </g>
+      <!-- player boosting -->
+      <path d="M430 286 L400 300" stroke="#ff9f43" stroke-width="6" stroke-linecap="round" stroke-opacity="0.6" filter="url(#glow)"/>
+      <g transform="translate(445 280)" filter="url(#bigglow)">
+        <ellipse rx="16" ry="7" cy="8" fill="rgba(155,205,255,0.25)"/>
+        <path d="M14 -6 L-12 -14 L-6 0 L-12 12 Z" fill="#9bcdff" stroke="#e0ecff" stroke-width="1.5" transform="rotate(-70)"/>
+      </g>
+      <path d="M447 272 L450 150" stroke="#ffd45f" stroke-opacity="0.35" stroke-dasharray="4 6" stroke-width="1.5"/>
+      <g stroke="#bfe3ff" stroke-width="3" stroke-linecap="round" filter="url(#glow)"><path d="M448 248 l0.5 -10"/><path d="M449 214 l0.5 -10"/><path d="M450 180 l0.5 -10"/></g>
+      <g fill="#c8465a" stroke="#ff9fae" stroke-width="1.2" filter="url(#glow)"><path d="M250 210 l10 10 -10 10 -10 -10z"/><path d="M690 230 l10 10 -10 10 -10 -10z"/></g>
+    </symbol>
+
+    <symbol id="pod" viewBox="0 0 100 100">
+      <ellipse cx="50" cy="80" rx="30" ry="8" fill="currentColor" opacity="0.2"/>
+      <path d="M50 12 L76 70 L50 58 L24 70 Z" fill="currentColor" fill-opacity="0.35" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M50 26 L60 52 L50 47 L40 52 Z" fill="currentColor"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="page">
+  <header class="page-head">
+    <h1>PLOUTO · Desktop UI</h1>
+    <p>A redesign of every desktop screen for mouse, keyboard and gamepad. Each frame is a game window at the selected size. The UI inside is laid out at a 1280×720 reference and scaled by <code>u = min(W/1280, H/720)</code>, the same idea as <code>ui_scale</code> in <code>ui/theme.rs</code>. Wider windows get more horizontal room instead of bigger widgets.</p>
+    <p>These are design mockups and nothing here is implemented. Names for skins, weapons, rewards, mutators, bosses and achievements come from the source. Scores, counts, timers and Field Guide text are sample copy. Key rebinding (Settings → Controls) is a proposed feature; the current game has fixed bindings.</p>
+    <p>Companion: Android mockups in <code>docs/design/android_ui/android_ui_mockups.html</code>.</p>
+  </header>
+
+  <div class="toolbar" role="toolbar" aria-label="Mockup options">
+    <label>Window
+      <select id="win">
+        <option value="720" selected>1280×720</option>
+        <option value="900">1600×900</option>
+        <option value="1080">1920×1080</option>
+        <option value="uw">2560×1080 ultrawide</option>
+      </select>
+    </label>
+    <label>Input glyphs
+      <span class="seg" id="glyphs"><button aria-pressed="true" data-g="kb">KEYBOARD</button><button aria-pressed="false" data-g="pad">GAMEPAD</button></span>
+    </label>
+    <label><input type="checkbox" id="fs"> Borderless fullscreen</label>
+    <label><input type="checkbox" id="perf"> F3 perf overlay</label>
+  </div>
+
+  <nav class="toc" aria-label="Screens">
+    <a href="#ds">Design system</a><a href="#menu">Main menu</a><a href="#combat">Combat</a><a href="#boss">Boss fight</a><a href="#pause">Pause</a>
+    <a href="#reward">Boss reward</a><a href="#gameover">Game over</a><a href="#settings">Settings</a><a href="#hangar">Hangar · Skins</a>
+    <a href="#ach">Hangar · Achievements</a><a href="#guide">Field Guide</a><a href="#quit">Quit dialog</a>
+  </nav>
+
+  <!-- ═════════ DESIGN SYSTEM ═════════ -->
+  <section class="shot" id="ds">
+    <h2>Design system <small>shared with the Android mockups, plus desktop states</small></h2>
+    <div class="ds">
+      <div class="card-ds">
+        <h3>Color (ui/theme.rs)</h3>
+        <div class="swatches">
+          <div class="sw"><i style="background:#09101a"></i><div><b>Background</b>#09101A</div></div>
+          <div class="sw"><i style="background:#0a1422"></i><div><b>Panel</b>#0A1422</div></div>
+          <div class="sw"><i style="background:#9bcdff"></i><div><b>Accent</b>#9BCDFF</div></div>
+          <div class="sw"><i style="background:#e0ecff"></i><div><b>Text</b>#E0ECFF</div></div>
+          <div class="sw"><i style="background:#a6b8ca"></i><div><b>Muted</b>#A6B8CA</div></div>
+          <div class="sw"><i style="background:#ffffff"></i><div><b>Focus ring</b>#FFFFFF</div></div>
+          <div class="sw"><i style="background:#ffd45f"></i><div><b>Gold · Ultra</b>#FFD45F</div></div>
+          <div class="sw"><i style="background:#c8465a"></i><div><b>Danger · Hull</b>#C8465A</div></div>
+          <div class="sw"><i style="background:#ff9f43"></i><div><b>Boost · Events</b>#FF9F43</div></div>
+        </div>
+      </div>
+      <div class="card-ds">
+        <h3>Type (px at 1280×720)</h3>
+        <div class="typo">
+          <div><span class="h-title" style="font-size:30px">PAUSED</span><small>Orbitron 800 · 28–34</small></div>
+          <div><span style="font-family:var(--head);font-weight:700;font-size:18px;letter-spacing:.06em">HYPER RAILGUN</span><small>Orbitron 700 · 14–20</small></div>
+          <div><span style="font-family:var(--head);font-weight:800;font-size:24px">48,210</span><small>HUD numbers · 13–24</small></div>
+          <div><span style="font-size:16px;font-weight:600">Dash cooldown reduced this run</span><small>Rajdhani 600 · 15–17</small></div>
+          <div><span style="font-size:13px;color:var(--muted)">Secondary description</span><small>Rajdhani 400 · 13 (min)</small></div>
+        </div>
+      </div>
+      <div class="card-ds">
+        <h3>Interaction states</h3>
+        <div class="states">
+          <span class="btn">DEFAULT</span><span class="btn is-hover">HOVER</span><span class="btn focus">FOCUS</span><span class="btn is-pressed">PRESSED</span><span class="btn disabled">DISABLED</span>
+        </div>
+        <div class="states" style="margin-top:10px">
+          <span class="btn primary">PRIMARY</span><span class="btn gold">TAKE</span><span class="btn danger">QUIT</span>
+          <span class="seg"><button aria-pressed="true">ON</button><button aria-pressed="false">OFF</button></span>
+          <button class="toggle" aria-pressed="true" aria-label="example toggle"></button>
+        </div>
+        <div class="states" style="margin-top:10px">
+          <span class="k" data-kb="Esc" data-pad="B"></span><span class="k" data-kb="Enter" data-pad="A"></span><span class="k" data-kb="Space" data-pad="A"></span><span class="k" data-kb="Shift" data-pad="LT"></span><span class="k" data-kb="Q" data-pad="Y"></span><span class="k" data-kb="F11" data-pad="View"></span>
+          <span style="color:var(--muted);font-size:13px">← swap with "Input glyphs"</span>
+        </div>
+      </div>
+      <div class="card-ds">
+        <h3>Desktop rules</h3>
+        <ul class="rules">
+          <li><b>Every screen works from the keyboard and gamepad alone.</b> One element always has focus, shown by a white ring plus an accent fill. Hover only tints.</li>
+          <li><b>Key hints in a footer</b> on every screen, swapped automatically to gamepad glyphs when the pad is the active device (existing <code>InputDevice</code>).</li>
+          <li><b>Mouse hit areas</b> ≥ 32 px tall; primary buttons 40–54 px.</li>
+          <li><b>Esc / B</b> always goes back one level; on the main menu it focuses Quit rather than quitting.</li>
+          <li>The combat HUD stays in the corners. The center 50% of the screen is for the fight, the cursor and telegraphs.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════════ MAIN MENU ═════════ -->
+  <section class="shot" id="menu">
+    <h2>01 · Main menu <small>MenuScreen</small></h2>
+    <p class="lede">The centered button column becomes a left-aligned brand block and a right-hand navigation list. The focused item is unmistakable, mutators explain themselves on focus, and the last run is one glance away.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <div class="menu-bg"></div><div class="stars"></div>
+      <svg class="arena" style="opacity:.16"><use href="#arena-wave"/></svg>
+      <div class="ui">
+        <div class="menu">
+          <div class="brand">
+            <div class="logo">PLOUTO</div>
+            <div class="sub">STELLAR SURVIVAL</div>
+            <div class="records">
+              <div><span class="label">Best score</span><b>61,880</b></div>
+              <div><span class="label">Best wave</span><b>17</b></div>
+              <div><span class="label">Bosses</span><b>9</b></div>
+              <div><span class="label">Achievements</span><b>14 / 35</b></div>
+            </div>
+            <div class="panel lastrun">
+              <span class="label" style="grid-column:1/-1;margin-bottom:4px">Last run</span>
+              <span>Destroyed by Prisma Overlord</span><span class="v">48,210</span>
+              <span style="color:var(--muted);font-size:14px">Wave 14 · 12:41 · Normal · Circle</span><span class="v" style="color:var(--gold);font-size:11px">NEW BEST</span>
+            </div>
+          </div>
+          <div class="nav">
+            <div class="navitem sel"><svg class="ic"><use href="#i-play"/></svg>PLAY<small>Normal · Circle</small></div>
+            <div class="navitem"><svg class="ic"><use href="#i-cal"/></svg>DAILY RUN<small>17 Nov · not played</small></div>
+            <div class="navitem"><svg class="ic"><use href="#i-ship"/></svg>HANGAR<small>Neon Pod</small></div>
+            <div class="navitem"><svg class="ic"><use href="#i-book"/></svg>FIELD GUIDE<small></small></div>
+            <div class="navitem"><svg class="ic"><use href="#i-gear"/></svg>SETTINGS<small></small></div>
+            <div class="navitem quit"><svg class="ic"><use href="#i-exit"/></svg>QUIT<small></small></div>
+            <div class="panel mutbox">
+              <span class="label">Mutators · 1 active · score ×1.25</span>
+              <div class="mutchips" id="mutchips">
+                <span class="mchip on" data-d="Deal 1.5x damage, but your max HP drops to 60 percent.">✓ Glass Cannon</span>
+                <span class="mchip" data-d="Enemy shots fly 25 percent faster and every volley gains one extra shot.">Bullet Hell</span>
+                <span class="mchip" data-d="Steering is sluggish and the ship slides for a while after you let go.">Drift</span>
+                <span class="mchip" data-d="Enemies move 20 percent faster and early waves field more bodies, still within the wave cap.">Frenzy</span>
+                <span class="mchip" data-d="No pickups spawn, but your shields slowly recharge over time.">Iron Man</span>
+              </div>
+              <div class="mutdesc" id="mutdesc"><b>Glass Cannon:</b> Deal 1.5x damage, but your max HP drops to 60 percent.</div>
+            </div>
+          </div>
+        </div>
+        <div class="ver">v0.1.0 · rules 12</div>
+        <div class="hints">
+          <span><span class="k" data-kb="↑↓ / WS" data-pad="D-pad"></span>Navigate</span>
+          <span><span class="k" data-kb="Enter" data-pad="A"></span>Select</span>
+          <span><span class="k" data-kb="M" data-pad="X"></span>Mutators</span>
+          <span class="r"><span class="k" data-kb="F11" data-pad="View"></span>Fullscreen</span>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li>Brand and records take the left 60%, and a 440 px navigation column sits on the right, vertically centered.</li><li>Nav rows are 48 px, each with an icon, a label and live context (difficulty, daily state, equipped skin).</li><li>The mutator panel sits under the nav. Its description line follows hover or focus.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>Current: a centered 230 px button column with a single chip row along the bottom and no context. New: a two-pane layout, a last-run card, and a score-multiplier readout for mutators.</li><li>Field Guide moves above Settings, since new players need it more.</li></ul></div>
+      <div><h4>Input</h4><ul><li>↑/↓ or W/S or the D-pad move focus. Enter or A selects. <span class="k" data-kb="M" data-pad="X"></span> jumps to the mutator row, where ←/→ move and Enter toggles.</li><li>Esc or B focuses QUIT instead of quitting (matches the current "B does nothing on the main menu" rule).</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ COMBAT ═════════ -->
+  <section class="shot" id="combat">
+    <h2>02 · Combat HUD <small>hud.rs</small></h2>
+    <p class="lede">Status along the top edge, and loadout and abilities in the bottom corners, each with its key shown. Nothing persistent sits in the middle half of the screen, where the cursor, shots and telegraphs are.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <svg class="arena"><use href="#arena-wave"/></svg>
+      <div class="ui">
+        <div class="hud">
+          <div class="panel vitals">
+            <div class="vrow"><span class="label">Hull</span><div class="bar"><i style="width:82%;background:linear-gradient(90deg,#c8465a,#ff7b8e)"></i></div><b>82<small> / 100</small></b></div>
+            <div class="vrow"><span class="label">Shield</span><div class="bar"><i style="width:40%;background:linear-gradient(90deg,#3aa0d8,#6fd8ff)"></i></div><b>18<small> / 45</small></b></div>
+          </div>
+          <div class="perf" data-perf hidden>FPS 144 · frame 3.1 ms · sim 0.9 ms · actors 112</div>
+          <div class="wavechip">
+            <div class="w">WAVE 12 <span>SECTOR 3 · 14 LEFT</span></div><br>
+            <div class="event"><svg class="ic" style="width:14px;height:14px"><use href="#i-meteor"/></svg>METEOR SHOWER · 6s</div>
+          </div>
+          <div class="scorebox">
+            <div class="s"><small>SCORE</small><b>48,210</b><small>BEST 61,880</small></div>
+            <div class="comboring" style="--c:65%"><b>x3.4</b></div>
+          </div>
+          <div class="panel toast"><svg class="ic" style="color:var(--gold);width:26px;height:26px"><use href="#i-trophy"/></svg><span class="t">Achievement unlocked<small>Elite Slayer</small></span></div>
+
+          <div class="loadout">
+            <div class="badges">
+              <span class="badge" title="Overdrive"><svg class="ic"><use href="#i-bolt"/></svg><span class="t">2</span></span>
+              <span class="badge" title="Magnet Core"><svg class="ic"><use href="#i-magnet"/></svg><span class="t">3</span></span>
+              <span class="badge relic" title="Soul Rivet"><svg class="ic"><use href="#i-gem"/></svg></span>
+              <span class="badge relic" title="Graviton Charm"><svg class="ic"><use href="#i-magnet"/></svg></span>
+            </div>
+            <div class="panel weaponcard">
+              <b>HYPER RAILGUN</b><span class="auto" style="background:rgba(45,170,125,.18);border:1px solid var(--success);color:#9ff0cf">AUTO-FIRE</span>
+              <div class="bar"><i style="width:72%;background:var(--accent)"></i></div>
+              <div class="wmeta">Lv 3 · crit 18% · Neon Pod</div>
+            </div>
+          </div>
+
+          <div class="panel abilities">
+            <div class="ab dash ready"><div class="tile"><svg class="ic"><use href="#i-dash"/></svg></div><span class="k" data-kb="Space" data-pad="A"></span><span class="name">DASH</span></div>
+            <div class="ab boost"><div class="tile"><svg class="ic"><use href="#i-boost"/></svg><div><div class="ebar"><i style="width:72%"></i></div><div class="enum">72 / 100</div></div></div><span class="k" data-kb="Shift" data-pad="LT"></span><span class="name">BOOST</span></div>
+            <div class="ab ultra" style="--c:55%"><div class="tile"><svg class="ic"><use href="#i-ultra"/></svg></div><div class="pips"><i></i><i class="e"></i></div><span class="k" data-kb="Q / RMB" data-pad="Y"></span><span class="name">ULTRA</span></div>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li><b>Top-left</b>: vitals with current/max numbers. <b>Top-center</b>: wave chip with enemies left and the event pill. <b>Top-right</b>: score with best, a combo ring, then a toast queue.</li><li><b>Bottom-left</b>: buff/relic badges (hover for a tooltip) over a weapon card with reload, auto-fire state and skin.</li><li><b>Bottom-right</b>: ability bar, with the keybind printed under each tile.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>The hull/shield/boost panel moves from bottom-left (248×112) to top-left. Boost energy moves to its ability tile, and the ultra gauge joins Dash and Boost in one bar.</li><li>Keybinds are shown on the HUD for the first time. An auto-fire badge replaces the "AUTO-FIRE OFF" status text.</li><li>The center-screen wave/boss banner stays, but is limited to 1.2 s and never repeats while a telegraph is active.</li></ul></div>
+      <div><h4>Input</h4><ul><li>The reticle follows the mouse. In gamepad mode it sits at the virtual aim point 260 units from the ship, as the code already does.</li><li>Glyphs switch with the active device. F3 shows the existing perf overlay under the vitals (toolbar toggle).</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ BOSS ═════════ -->
+  <section class="shot" id="boss">
+    <h2>03 · Boss fight <small>worst-case density</small></h2>
+    <p class="lede">The boss bar moves from bottom-center, where it covered the player's lane, to the top, and the wave chip shrinks underneath it. Shown here: Dash on cooldown, Boost held, Ultra ready, and low hull.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <svg class="arena"><use href="#arena-boss"/></svg>
+      <div class="ui">
+        <div class="hud">
+          <div class="panel vitals" style="box-shadow:0 0 0 1px rgba(200,70,90,.7),0 0 18px rgba(200,70,90,.35)">
+            <div class="vrow"><span class="label" style="color:#ff9fae">Hull</span><div class="bar"><i style="width:31%;background:linear-gradient(90deg,#c8465a,#ff7b8e)"></i></div><b style="color:#ff9fae">31<small> / 100</small></b></div>
+            <div class="vrow"><span class="label">Shield</span><div class="bar"><i style="width:0%"></i></div><b style="color:var(--muted)">0<small> / 45</small></b></div>
+          </div>
+          <div class="perf" data-perf hidden>FPS 138 · frame 3.6 ms · sim 1.2 ms · actors 131</div>
+          <div class="bossbar">
+            <div class="top"><span class="name">STORM SOVEREIGN</span><span class="phase">PHASE II · LIGHTNING LANES</span></div>
+            <div class="bar"><i style="width:58%;background:linear-gradient(90deg,#8a2236,#ff4f6a)"></i><span class="seg-tick" style="left:66%"></span><span class="seg-tick" style="left:33%"></span></div>
+            <div class="wavesmall">WAVE 15 · BOSS</div>
+          </div>
+          <div class="scorebox">
+            <div class="s"><small>SCORE</small><b>72,904</b><small>BEST 61,880 ▲</small></div>
+            <div class="comboring" style="--c:90%"><b>x6</b></div>
+          </div>
+          <div class="loadout">
+            <div class="badges">
+              <span class="badge"><svg class="ic"><use href="#i-shield"/></svg><span class="t">1</span></span>
+              <span class="badge relic"><svg class="ic"><use href="#i-gem"/></svg></span>
+              <span class="badge relic"><svg class="ic"><use href="#i-magnet"/></svg></span>
+              <span class="badge"><svg class="ic"><use href="#i-bolt"/></svg><span class="t">2</span></span>
+              <span class="badge"><svg class="ic"><use href="#i-dash"/></svg></span>
+            </div>
+            <div class="panel weaponcard">
+              <b>PLASMA RIFLE</b><span class="auto" style="background:rgba(45,170,125,.18);border:1px solid var(--success);color:#9ff0cf">AUTO-FIRE</span>
+              <div class="bar"><i style="width:22%;background:var(--accent)"></i></div>
+              <div class="wmeta">Lv 4 · reloading</div>
+            </div>
+          </div>
+          <div class="panel abilities">
+            <div class="ab dash"><div class="tile"><div class="fill" style="height:35%"></div><svg class="ic" style="opacity:.4"><use href="#i-dash"/></svg><div class="cd">0.9</div></div><span class="k" data-kb="Space" data-pad="A"></span><span class="name">DASH</span></div>
+            <div class="ab boost held"><div class="tile"><svg class="ic"><use href="#i-boost"/></svg><div><div class="ebar"><i style="width:38%"></i></div><div class="enum">38 / 100</div></div></div><span class="k" data-kb="Shift" data-pad="LT"></span><span class="name">BOOST · HELD</span></div>
+            <div class="ab ultra ready" style="--c:100%"><div class="tile"><svg class="ic"><use href="#i-ultra"/></svg></div><div class="pips"><i></i><i></i><i class="e"></i></div><span class="k" data-kb="Q / RMB" data-pad="Y"></span><span class="name">ULTRA · READY</span></div>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Boss band</h4><ul><li>The bar is 46% of the width and 16 px tall, with ticks at each phase threshold. The name sits on the left and the phase and attack name on the right, so the player learns the attack names.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>The boss bar moves from bottom-center to top-center. The wave chip collapses to one line under it.</li><li>The Dash cooldown shows a number and a rising fill. The current HUD has no Dash gauge.</li></ul></div>
+      <div><h4>Danger and accessibility</h4><ul><li>Low hull (≤ 35%): red glow, red label and red number. With reduced motion there's no pulse, just a static outline.</li><li>High-contrast HUD makes panels solid and doubles outline width.</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ PAUSE ═════════ -->
+  <section class="shot" id="pause">
+    <h2>04 · Pause <small>PauseScreen</small></h2>
+    <p class="lede">A left-hand menu with the frozen fight visible in the middle, and a right-hand panel for the run: stats, every active effect, and a controls reminder. The current screen is two centered buttons.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <svg class="arena"><use href="#arena-boss"/></svg>
+      <div class="dim" style="background:linear-gradient(90deg,rgba(4,8,14,.92) 0,rgba(4,8,14,.55) 32%,rgba(4,8,14,.55) 68%,rgba(4,8,14,.92) 100%);backdrop-filter:blur(2px)"></div>
+      <div class="ui">
+        <div class="pause">
+          <div class="pmenu">
+            <div class="h-title">PAUSED</div>
+            <div class="meta">Storm Sovereign · Phase II · 11:02</div>
+            <div class="navitem sel"><svg class="ic"><use href="#i-play"/></svg>RESUME<span class="k" data-kb="Esc" data-pad="Start"></span></div>
+            <div class="navitem"><svg class="ic"><use href="#i-gear"/></svg>SETTINGS<small></small></div>
+            <div class="navitem"><svg class="ic"><use href="#i-book"/></svg>FIELD GUIDE<small>Storm Sovereign</small></div>
+            <div class="navitem"><svg class="ic"><use href="#i-retry"/></svg>RESTART RUN<small></small></div>
+            <div class="navitem quit"><svg class="ic"><use href="#i-exit"/></svg>QUIT TO MENU<small></small></div>
+          </div>
+          <div></div>
+          <div class="panel pside">
+            <div class="kvgrid">
+              <div class="kv"><div class="k2">WAVE</div><div class="v">15</div></div>
+              <div class="kv"><div class="k2">SCORE</div><div class="v">72,904</div></div>
+              <div class="kv"><div class="k2">KILLS</div><div class="v">688</div></div>
+              <div class="kv"><div class="k2">MUTATORS</div><div class="v" style="font-size:12px;color:#ffc2cb">Glass Cannon</div></div>
+            </div>
+            <div class="label" style="margin-top:4px">Active effects · 5</div>
+            <div class="eff"><span class="badge"><svg class="ic"><use href="#i-shield"/></svg></span><span class="t">Aegis Skin<small>−18% incoming damage</small></span><b>1 WAVE</b></div>
+            <div class="eff"><span class="badge"><svg class="ic"><use href="#i-bolt"/></svg></span><span class="t">Overdrive<small>+28% damage</small></span><b>2 WAVES</b></div>
+            <div class="eff"><span class="badge relic"><svg class="ic"><use href="#i-gem"/></svg></span><span class="t">Soul Rivet<small>Recover 4 hull after every wave clear</small></span><b style="color:var(--gold)">RELIC</b></div>
+            <div class="eff"><span class="badge relic"><svg class="ic"><use href="#i-magnet"/></svg></span><span class="t">Graviton Charm<small>Power-ups pulled from farther away</small></span><b style="color:var(--gold)">RELIC</b></div>
+            <div class="label" style="margin-top:4px">Controls</div>
+            <div class="ctlref">
+              <span class="k" data-kb="WASD" data-pad="LS"></span><span>Move</span>
+              <span class="k" data-kb="Mouse" data-pad="RS"></span><span>Aim · fire</span>
+              <span class="k" data-kb="Space" data-pad="A"></span><span>Dash</span>
+              <span class="k" data-kb="Shift" data-pad="LT"></span><span>Boost</span>
+              <span class="k" data-kb="Q" data-pad="Y"></span><span>Ultra</span>
+            </div>
+          </div>
+        </div>
+        <div class="hints">
+          <span><span class="k" data-kb="↑↓" data-pad="D-pad"></span>Navigate</span>
+          <span><span class="k" data-kb="Enter" data-pad="A"></span>Select</span>
+          <span><span class="k" data-kb="Esc" data-pad="Start"></span>Resume</span>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li>A 340 px menu on the left, a clear middle so the frozen fight stays readable, and a 340 px run panel on the right. A side gradient keeps the text legible over the arena.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>Adds Settings, a contextual Field Guide (it opens on the current boss), Restart, run stats, the full effects list and a controls reference.</li><li>Quit to menu asks for confirmation (dialog 11).</li></ul></div>
+      <div><h4>Input</h4><ul><li>Esc or Start resumes from anywhere on this screen. Losing window focus pauses automatically (proposed).</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ REWARD ═════════ -->
+  <section class="shot" id="reward">
+    <h2>05 · Boss reward <small>BossRewardScreen · click a card</small></h2>
+    <p class="lede">Three large cards with number-key shortcuts and a step indicator. Selecting doesn't confirm, so a stray click or a held fire button can't take a reward.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <svg class="arena"><use href="#arena-boss"/></svg><div class="dim"></div>
+      <div class="ui">
+        <div class="reward">
+          <div class="hdr"><div class="h-title">STORM SOVEREIGN DEFEATED</div><div class="steps"><i class="on"></i><i></i>&nbsp;Choose a run boost · 1 of 2</div></div>
+          <div class="cards" id="cards">
+            <div class="card"><span class="k num" data-kb="1" data-pad="←"></span><div class="art"><svg class="ic" style="color:var(--shield)"><use href="#i-bolt"/></svg></div><span class="tag temp">TEMPORARY</span><h3>Overdrive</h3><p>+28% damage for 2 waves</p><span class="dur">LASTS 2 WAVES</span></div>
+            <div class="card sel"><span class="k num" data-kb="2" data-pad="↑"></span><div class="art" style="background:radial-gradient(circle,rgba(255,212,95,.2),transparent 70%)"><svg class="ic" style="color:var(--gold)"><use href="#i-gem"/></svg></div><span class="tag relic">NEW RELIC</span><h3>Soul Rivet</h3><p>Recover 4 hull after every wave clear</p><span class="dur">WHOLE RUN</span></div>
+            <div class="card"><span class="k num" data-kb="3" data-pad="→"></span><div class="art" style="background:radial-gradient(circle,rgba(45,170,125,.2),transparent 70%)"><svg class="ic" style="color:#8ff0c8"><use href="#i-dash"/></svg></div><span class="tag perm">PERMANENT</span><h3>Double Dash</h3><p>+1 dash charge this run</p><span class="dur">WHOLE RUN</span></div>
+          </div>
+          <div class="foot"><span class="btn gold" style="min-width:220px;min-height:46px"><svg class="ic"><use href="#i-check"/></svg>TAKE SOUL RIVET <span class="k" data-kb="Enter" data-pad="A"></span></span></div>
+        </div>
+        <div class="hints">
+          <span><span class="k" data-kb="1 2 3 / ←→" data-pad="D-pad"></span>Choose</span>
+          <span><span class="k" data-kb="Enter" data-pad="A"></span>Take</span>
+          <span><span class="k" data-kb="Tab" data-pad="RB"></span>Compare with current effects</span>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li>Cards are up to 330 px wide, with art, a type tag (word plus outline), title, description and duration. The TAKE button repeats the selected card's name.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>Larger cards with art and a duration line. The selection gets a white focus ring as well as gold, and a 1-of-2 step bar is added.</li><li>Input is ignored for 300 ms after the screen opens, and held fire or mouse buttons are ignored until released.</li></ul></div>
+      <div><h4>Input</h4><ul><li>1/2/3 select a card, ←/→ cycle, and Enter, A or a click on TAKE confirms. Double-clicking a card also confirms.</li><li>Tab (or RB) shows the current active effects so the player can compare.</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ GAME OVER ═════════ -->
+  <section class="shot" id="gameover">
+    <h2>06 · Game over <small>GameOverScreen</small></h2>
+    <p class="lede">A headline score, a per-wave score graph, unlocks, and "almost there" progress. Retry is the default focus, so Enter starts the next run straight away.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <svg class="arena" style="filter:saturate(.3) brightness(.6)"><use href="#arena-wave"/></svg><div class="dim"></div>
+      <div class="ui">
+        <div class="go">
+          <div class="hdr"><div class="h-title">GAME OVER</div><div class="cause">Destroyed by Prisma Overlord · wave 14</div></div>
+          <div class="panel stats">
+            <div class="score"><b>48,210</b><span class="newbest">NEW BEST</span></div>
+            <div class="kv"><div class="k2">WAVE</div><div class="v">14</div></div>
+            <div class="kv"><div class="k2">TIME</div><div class="v">12:41</div></div>
+            <div class="kv"><div class="k2">KILLS</div><div class="v">612</div></div>
+            <div class="kv"><div class="k2">BEST COMBO</div><div class="v">x6.2</div></div>
+            <div class="kv"><div class="k2">BOSSES</div><div class="v">2</div></div>
+            <div class="kv"><div class="k2">MUTATORS</div><div class="v" style="font-size:12px;color:#ffc2cb">Glass Cannon</div></div>
+            <svg class="spark" viewBox="0 0 300 70" preserveAspectRatio="none">
+              <path d="M0 68 L21 66 L43 63 L64 60 L86 55 L107 50 L129 46 L150 40 L171 36 L193 30 L214 22 L236 18 L257 10 L279 6 L300 4" fill="none" stroke="#9bcdff" stroke-width="2" vector-effect="non-scaling-stroke"/>
+              <path d="M0 68 L21 66 L43 63 L64 60 L86 55 L107 50 L129 46 L150 40 L171 36 L193 30 L214 22 L236 18 L257 10 L279 6 L300 4 L300 70 L0 70Z" fill="rgba(155,205,255,.12)"/>
+              <line x1="107" x2="107" y1="0" y2="70" stroke="#ffd45f" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/><line x1="214" x2="214" y1="0" y2="70" stroke="#ffd45f" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
+            </svg>
+          </div>
+          <div class="panel right">
+            <div class="label">Unlocked this run</div>
+            <div class="unlock"><svg class="ic" style="color:var(--gold);width:30px;height:30px"><use href="#i-trophy"/></svg><span class="t">Giant Slayer<small>Defeat a boss in a single run.</small></span></div>
+            <div class="unlock"><svg class="ic" style="color:var(--gold);width:30px;height:30px"><use href="#i-trophy"/></svg><span class="t">Combo x6<small>Reach a 6x kill combo.</small></span></div>
+            <div class="label" style="margin-top:6px">Almost there</div>
+            <div class="near"><div class="t">Boss Hunter <span>2 / 3 bosses</span></div><div class="bar"><i style="width:66%;background:var(--accent)"></i></div></div>
+            <div class="near"><div class="t">Flawless Five <span>3 / 5 waves</span></div><div class="bar"><i style="width:60%;background:var(--accent)"></i></div></div>
+          </div>
+          <div class="foot">
+            <span class="daily">Normal · Circle · seed 0x5A1F</span>
+            <span class="btn"><svg class="ic"><use href="#i-ship"/></svg>HANGAR</span>
+            <span class="btn"><svg class="ic"><use href="#i-home"/></svg>MENU <span class="k" data-kb="Esc" data-pad="B"></span></span>
+            <span class="btn primary focus" style="min-width:180px;min-height:46px"><svg class="ic"><use href="#i-retry"/></svg>RETRY <span class="k" data-kb="Enter" data-pad="A"></span></span>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li>Stats card on the left (48 px score, a 3×2 stat grid, and a score-per-wave graph with gold markers at boss waves). Progress card on the right. Actions sit bottom-right.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>Adds the cause of death, boss count, the score graph and a Hangar shortcut so a new unlock can be equipped straight away.</li><li>Unlock and "almost there" content comes from the existing <code>near_misses</code> and the unlock list.</li></ul></div>
+      <div><h4>Input</h4><ul><li>Buttons are locked for 400 ms. Enter or A retries, Esc or B goes to the menu, and H opens the Hangar.</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ SETTINGS ═════════ -->
+  <section class="shot" id="settings">
+    <h2>07 · Settings <small>SettingsScreen · the tabs work</small></h2>
+    <p class="lede">A tab rail, a list of settings, and a help panel that explains whatever row is focused. Controls gets a rebinding table. Display keeps window size and fullscreen.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <div class="menu-bg"></div>
+      <div class="ui">
+        <div class="frame">
+          <div class="topbar"><span class="btn ghost"><svg class="ic"><use href="#i-back"/></svg>BACK</span><span class="h-title">SETTINGS</span><span class="spacer"></span><span style="color:var(--muted);font-size:14px">Saved automatically</span><span class="btn ghost">RESET TAB</span></div>
+          <div class="body">
+            <div class="settings">
+              <div class="rail" role="tablist" id="setRail">
+                <button role="tab" aria-selected="false" data-tab="game"><svg class="ic"><use href="#i-game"/></svg>GAMEPLAY</button>
+                <button role="tab" aria-selected="true" data-tab="controls"><svg class="ic"><use href="#i-hand"/></svg>CONTROLS</button>
+                <button role="tab" aria-selected="false" data-tab="audio"><svg class="ic"><use href="#i-sound"/></svg>AUDIO</button>
+                <button role="tab" aria-selected="false" data-tab="display"><svg class="ic"><use href="#i-screen"/></svg>DISPLAY</button>
+                <button role="tab" aria-selected="false" data-tab="access"><svg class="ic"><use href="#i-eye"/></svg>ACCESSIBILITY</button>
+                <div class="rk"><span class="k" data-kb="Q / E" data-pad="LB / RB"></span>Switch tab</div>
+              </div>
+              <div class="list" id="setList"></div>
+              <div class="panel helpcard" id="setHelp"></div>
+            </div>
+          </div>
+          <div class="hints">
+            <span><span class="k" data-kb="↑↓" data-pad="D-pad"></span>Move</span>
+            <span><span class="k" data-kb="←→" data-pad="D-pad ←→"></span>Change</span>
+            <span><span class="k" data-kb="Enter" data-pad="A"></span>Rebind / toggle</span>
+            <span><span class="k" data-kb="Del" data-pad="X"></span>Clear binding</span>
+            <span class="r"><span class="k" data-kb="Esc" data-pad="B"></span>Back</span>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li>210 px tab rail, a scrolling list, and a 300 px help panel. Rows are 50 px. Sliders get a fixed 220 px track and a numeric value.</li><li>On 2560×1080 the extra width goes to the list, and the help panel stays 300 px.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>Current: two fixed columns of chips and sliders in one panel. New: grouped tabs, row-level help, Reset tab, and a rebinding table with conflict warnings (new feature).</li><li>Display gains a graphics quality preset and an FPS cap. Window size and fullscreen stay here.</li></ul></div>
+      <div><h4>Input</h4><ul><li>Enter on a binding cell starts listening ("Press a key…"). Esc cancels. A key already in use shows a red conflict with a swap prompt.</li><li>Q/E or LB/RB switch tabs.</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ HANGAR ═════════ -->
+  <section class="shot" id="hangar">
+    <h2>08 · Hangar · Skins <small>hangar.rs · click a skin</small></h2>
+    <p class="lede">A 4-column grid with a large detail panel. Locked skins show how to unlock them, and the equipped skin is tagged.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <div class="menu-bg"></div>
+      <div class="ui">
+        <div class="frame">
+          <div class="topbar"><span class="btn ghost"><svg class="ic"><use href="#i-back"/></svg>BACK</span><span class="h-title">HANGAR</span><span class="seg" style="margin-left:10px"><button aria-pressed="true">SKINS</button><button aria-pressed="false">ACHIEVEMENTS</button></span><span class="spacer"></span><span style="color:var(--muted);font-size:14px">8 / 12 unlocked</span></div>
+          <div class="body">
+            <div class="hangar">
+              <div class="skingrid" id="skinGrid"></div>
+              <div class="panel detail">
+                <div class="prev"><svg viewBox="0 0 100 100" style="color:#ff4fd8"><use href="#pod"/></svg></div>
+                <h3>Neon Pod</h3>
+                <div class="swatchrow"><i style="background:#ff4fd8"></i><i style="background:#39ffda"></i><i style="background:#1a0f2e"></i></div>
+                <p>Unlocked · reach a 6x kill combo. Magenta hull with cyan engine trails.</p>
+                <span class="btn primary" style="min-height:46px"><svg class="ic"><use href="#i-check"/></svg>EQUIP <span class="k" data-kb="Enter" data-pad="A"></span></span>
+              </div>
+            </div>
+          </div>
+          <div class="hints">
+            <span><span class="k" data-kb="Arrows / WASD" data-pad="D-pad"></span>Browse</span>
+            <span><span class="k" data-kb="Enter" data-pad="A"></span>Equip</span>
+            <span><span class="k" data-kb="Tab" data-pad="LB / RB"></span>Achievements</span>
+            <span class="r"><span class="k" data-kb="Esc" data-pad="B"></span>Back</span>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li>A 4×3 grid fills the left. The 360 px detail panel has a large rotating preview (static with reduced motion), a palette, the unlock text and EQUIP.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>A segmented control replaces the two tab buttons. A palette strip and unlock requirement are added, and the selected tile gets the white focus ring.</li></ul></div>
+      <div><h4>Input</h4><ul><li>2D arrow navigation that wraps by row. Tab switches section. A locked skin turns the button into a disabled LOCKED.</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ ACHIEVEMENTS ═════════ -->
+  <section class="shot" id="ach">
+    <h2>09 · Hangar · Achievements</h2>
+    <p class="lede">A summary with per-category progress, then a two-column list sorted by closest to completion. Secret achievements stay hidden as "???".</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <div class="menu-bg"></div>
+      <div class="ui">
+        <div class="frame">
+          <div class="topbar"><span class="btn ghost"><svg class="ic"><use href="#i-back"/></svg>BACK</span><span class="h-title">HANGAR</span><span class="seg" style="margin-left:10px"><button aria-pressed="false">SKINS</button><button aria-pressed="true">ACHIEVEMENTS</button></span><span class="spacer"></span><span class="seg"><button aria-pressed="true">ALL</button><button aria-pressed="false">IN PROGRESS</button><button aria-pressed="false">DONE</button></span></div>
+          <div class="body">
+            <div class="ach">
+              <div class="panel achsum">
+                <div class="donut-wrap"><div class="donut"></div><div class="donut-label"><div>40%<small>14 / 35</small></div></div></div>
+                <div class="cats">
+                  <div><span>Combat</span><b>5/9</b><div class="bar"><i style="width:55%;background:var(--accent)"></i></div></div>
+                  <div><span>Bosses</span><b>2/7</b><div class="bar"><i style="width:28%;background:var(--accent)"></i></div></div>
+                  <div><span>Skill</span><b>3/8</b><div class="bar"><i style="width:37%;background:var(--accent)"></i></div></div>
+                  <div><span>Survival</span><b>4/6</b><div class="bar"><i style="width:66%;background:var(--accent)"></i></div></div>
+                  <div><span>Secret</span><b>0/5</b><div class="bar"><i style="width:0%"></i></div></div>
+                </div>
+              </div>
+              <div class="list achgrid">
+                <div class="arow"><div class="medal"><svg class="ic"><use href="#i-trophy"/></svg></div><div><div class="t">Boss Hunter<small>BOSSES</small></div><div class="d">Defeat 3 bosses across all runs.</div><div class="bar"><i style="width:66%;background:var(--accent)"></i></div></div><div class="v">2/3</div></div>
+                <div class="arow"><div class="medal"><svg class="ic"><use href="#i-trophy"/></svg></div><div><div class="t">Flawless Five<small>SKILL</small></div><div class="d">Clear 5 waves untouched in one run.</div><div class="bar"><i style="width:60%;background:var(--accent)"></i></div></div><div class="v">3/5</div></div>
+                <div class="arow done"><div class="medal"><svg class="ic"><use href="#i-trophy"/></svg></div><div><div class="t">Massacre<small>COMBAT</small></div><div class="d">Destroy 50 enemies in one run.</div></div><div class="v" style="color:var(--gold)">✓</div></div>
+                <div class="arow done"><div class="medal"><svg class="ic"><use href="#i-trophy"/></svg></div><div><div class="t">Giant Slayer<small>BOSSES</small></div><div class="d">Defeat a boss in a single run.</div></div><div class="v" style="color:var(--gold)">✓</div></div>
+                <div class="arow"><div class="medal"><svg class="ic"><use href="#i-trophy"/></svg></div><div><div class="t">Bossbreaker<small>BOSSES</small></div><div class="d">Defeat 15 bosses across all runs.</div><div class="bar"><i style="width:13%;background:var(--accent)"></i></div></div><div class="v">2/15</div></div>
+                <div class="arow"><div class="medal"><svg class="ic"><use href="#i-trophy"/></svg></div><div><div class="t">Maxed Out<small>SKILL</small></div><div class="d">Reach the top kill combo.</div><div class="bar"><i style="width:62%;background:var(--accent)"></i></div></div><div class="v">x6.2</div></div>
+                <div class="arow secret"><div class="medal"><svg class="ic"><use href="#i-lock"/></svg></div><div><div class="t">???<small>SECRET</small></div><div class="d">Keep playing to find out.</div></div><div class="v">—</div></div>
+                <div class="arow done"><div class="medal"><svg class="ic"><use href="#i-trophy"/></svg></div><div><div class="t">Into the Deep<small>SURVIVAL</small></div><div class="d">Reach wave 10.</div></div><div class="v" style="color:var(--gold)">✓</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="hints">
+            <span><span class="k" data-kb="Arrows" data-pad="D-pad"></span>Browse</span>
+            <span><span class="k" data-kb="F" data-pad="X"></span>Filter</span>
+            <span><span class="k" data-kb="Tab" data-pad="LB / RB"></span>Skins</span>
+            <span class="r"><span class="k" data-kb="Esc" data-pad="B"></span>Back</span>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li>A 250 px summary (completion ring plus a bar per category) and a two-column card list with 66 px rows.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>Adds category breakdown, filters and the IN PROGRESS sort, which uses the same ordering as the game-over "almost there" lines. The description text is real copy from <code>sim/achievements.rs</code>; category names are proposed.</li></ul></div>
+      <div><h4>Input</h4><ul><li>Arrow keys move in 2D. F cycles the filter. Clicking a card expands it to show its unlock date and run.</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ GUIDE ═════════ -->
+  <section class="shot" id="guide">
+    <h2>10 · Field Guide <small>GuideScreen · tabs and list work</small></h2>
+    <p class="lede">A list and a detail panel replace the Prev/Next paging. The whole category is visible at once, and the detail panel puts counterplay first.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <div class="menu-bg"></div>
+      <div class="ui">
+        <div class="frame">
+          <div class="topbar"><span class="btn ghost"><svg class="ic"><use href="#i-back"/></svg>BACK</span><span class="h-title">FIELD GUIDE</span>
+            <span class="seg" id="guideTabs" style="margin-left:10px"><button aria-pressed="true" data-g="enemies">ENEMIES</button><button aria-pressed="false" data-g="bosses">BOSSES</button><button aria-pressed="false" data-g="powerups">POWER-UPS</button><button aria-pressed="false" data-g="basics">BASICS</button><button aria-pressed="false" data-g="systems">SYSTEMS</button></span>
+          </div>
+          <div class="body">
+            <div class="guide">
+              <div class="list glist" id="guideList"></div>
+              <div class="panel gdetail" id="guideDetail"></div>
+            </div>
+          </div>
+          <div class="hints">
+            <span><span class="k" data-kb="↑↓" data-pad="D-pad"></span>Entry</span>
+            <span><span class="k" data-kb="Q / E" data-pad="LB / RB"></span>Category</span>
+            <span class="r"><span class="k" data-kb="Esc" data-pad="B"></span>Back</span>
+          </div>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Layout</h4><ul><li>A 300 px list grouped by threat tier, with 48 px rows. The detail panel has the role, name, description, quick facts and counterplay, with 260 px art on the right.</li></ul></div>
+      <div><h4>Changes from current desktop</h4><ul><li>Current: four tabs with paged content and Prev/Next buttons. New: master/detail, with Bosses as its own tab. Opening the guide from Pause jumps to the current boss.</li></ul></div>
+      <div><h4>Copy</h4><ul><li>Entry text here is sample copy. The real text comes from the existing Guide entries.</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ═════════ QUIT ═════════ -->
+  <section class="shot" id="quit">
+    <h2>11 · Quit / leave-run dialog</h2>
+    <p class="lede">One dialog pattern for every destructive action. The safe choice has focus by default and is on the right.</p>
+    <div class="win-wrap"><div class="win"><div class="titlebar">PLOUTO — Stellar Survival<span class="dots">— ☐ ✕</span></div><div class="screen">
+      <svg class="arena"><use href="#arena-boss"/></svg><div class="dim"></div>
+      <div class="ui">
+        <div class="dialog-wrap">
+          <div class="dialog">
+            <h3>Quit to menu?</h3>
+            <p>This run ends now. Your score (72,904) and achievements are saved, but run effects and relics are lost.</p>
+            <div class="row"><span class="btn danger"><svg class="ic"><use href="#i-exit"/></svg>QUIT RUN</span><span class="btn primary focus">KEEP PLAYING <span class="k" data-kb="Esc" data-pad="B"></span></span></div>
+          </div>
+        </div>
+        <div class="hints">
+          <span><span class="k" data-kb="←→" data-pad="D-pad"></span>Choose</span>
+          <span><span class="k" data-kb="Enter" data-pad="A"></span>Confirm</span>
+          <span class="r"><span class="k" data-kb="Esc" data-pad="B"></span>Cancel</span>
+        </div>
+      </div>
+    </div></div></div>
+    <div class="notes">
+      <div><h4>Used for</h4><ul><li>Quit run, quit game (from the main menu QUIT), Restart run, resetting a settings tab, and discarding an unfinished key rebind.</li></ul></div>
+      <div><h4>Input</h4><ul><li>Esc, B or a click outside the dialog cancels. The window close button (✕) during a run uses the same dialog.</li></ul></div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  const SIZES = { '720': [1280, 720], '900': [1600, 900], '1080': [1920, 1080], 'uw': [2560, 1080] };
+  const root = document.documentElement, body = document.body;
+  let W = 1280, H = 720;
+
+  function fit() {
+    document.querySelectorAll('.win-wrap').forEach(wrap => {
+      const win = wrap.querySelector('.win');
+      const avail = wrap.clientWidth - 16;
+      if (avail <= 0) return;
+      const s = Math.min(1, avail / W);
+      const h = H + (body.classList.contains('fullscreen') ? 0 : 30);
+      win.style.transform = 'scale(' + s + ')';
+      wrap.style.height = (h * s + 16) + 'px';
+    });
+  }
+  function applySize(key) {
+    [W, H] = SIZES[key];
+    const u = Math.min(W / 1280, H / 720);
+    root.style.setProperty('--W', W + 'px');
+    root.style.setProperty('--H', H + 'px');
+    root.style.setProperty('--u', u);
+    root.style.setProperty('--LW', (W / u) + 'px');
+    root.style.setProperty('--LH', (H / u) + 'px');
+    fit();
+  }
+  document.getElementById('win').addEventListener('change', e => applySize(e.target.value));
+  document.getElementById('fs').addEventListener('change', e => { body.classList.toggle('fullscreen', e.target.checked); fit(); });
+  document.getElementById('perf').addEventListener('change', e => document.querySelectorAll('[data-perf]').forEach(p => p.hidden = !e.target.checked));
+  document.querySelectorAll('#glyphs button').forEach(b => b.addEventListener('click', () => {
+    body.classList.toggle('pad', b.dataset.g === 'pad');
+    document.querySelectorAll('#glyphs button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  }));
+  window.addEventListener('resize', fit);
+  if ('ResizeObserver' in window) new ResizeObserver(fit).observe(document.querySelector('.page'));
+
+  /* Generic toggles, segmented controls, cards */
+  document.addEventListener('click', e => {
+    const t = e.target.closest('.toggle');
+    if (t) { t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') !== 'true'); return; }
+    const s = e.target.closest('.seg button');
+    if (s && !s.closest('#guideTabs') && !s.closest('#glyphs')) s.parentElement.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b === s));
+    const c = e.target.closest('.card');
+    if (c) {
+      c.parentElement.querySelectorAll('.card').forEach(x => x.classList.toggle('sel', x === c));
+      const take = document.querySelector('#reward .foot .btn');
+      take.firstChild.nextSibling.textContent = 'TAKE ' + c.querySelector('h3').textContent.toUpperCase() + ' ';
+    }
+    const m = e.target.closest('.mchip');
+    if (m) { m.classList.toggle('on'); m.textContent = (m.classList.contains('on') ? '✓ ' : '') + m.textContent.replace('✓ ', ''); showMut(m); }
+    const bd = e.target.closest('.bind');
+    if (bd) { document.querySelectorAll('.bind.listen').forEach(x => { x.classList.remove('listen'); x.textContent = x.dataset.v; }); bd.dataset.v = bd.dataset.v || bd.textContent; bd.classList.add('listen'); bd.textContent = 'Press a key…'; }
+  });
+
+  /* Mutator descriptions follow hover */
+  const md = document.getElementById('mutdesc');
+  function showMut(m) { md.innerHTML = '<b>' + m.textContent.replace('✓ ', '') + ':</b> ' + m.dataset.d; }
+  document.querySelectorAll('.mchip').forEach(m => m.addEventListener('mouseenter', () => showMut(m)));
+
+  /* Settings */
+  const tog = on => `<button class="toggle" aria-pressed="${on}" aria-label="toggle"></button>`;
+  const seg = (opts, sel) => `<span class="seg">${opts.map(o => `<button aria-pressed="${o === sel}">${o}</button>`).join('')}</span>`;
+  const row = (t, d, ctl, help, focus) => `<div class="srow${focus ? ' focusrow' : ''}" data-help="${(help || d || '').replace(/"/g, '&quot;')}" data-title="${t}"><div><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}</div>${ctl}</div>`;
+  const pct = v => Math.round(v * 100) + '%';
+  const num = v => Number(v).toFixed(2);
+  const mult = v => '×' + Number(v).toFixed(2);
+  const FMT = { pct, num, mult };
+  const slider = (t, v, min, max, step, f, help) => `<div class="srow slider" data-title="${t}" data-help="${help || ''}"><div class="t">${t}</div><input type="range" min="${min}" max="${max}" step="${step}" value="${v}" data-f="${f}"><b></b></div>`;
+  const SH = t => `<div class="sec-h">${t}</div>`;
+  const kb = (kb, pad) => `<span class="k" data-kb="${kb}" data-pad="${pad}"></span>`;
+  const brow = (a, p, s, pad, cls) => `<tr><td>${a}</td><td><span class="bind ${cls || ''}">${p}</span></td><td><span class="bind">${s}</span></td><td style="color:var(--muted)">${pad}</td></tr>`;
+  const TABS = {
+    game:
+      SH('RUN') +
+      row('Difficulty', 'Enemy health, damage and spawn rate', seg(['EASY', 'NORMAL', 'HARD'], 'NORMAL'), 'Changes enemy health, damage and spawn pacing. Daily runs always use Normal.', true) +
+      row('Arena', 'Shape of the open arena', seg(['CIRCLE', 'DONUT', 'CROSS', 'DIAMOND'], 'CIRCLE')) +
+      row('Auto-fire', 'Fire continuously toward the cursor', tog(false), 'When on, your weapon fires without holding the mouse button. Shown on the HUD weapon card.') +
+      slider('Arena margin', 0.5, 0, 1, 0.05, 'pct', 'Space between the arena rim and the window edge.') +
+      SH('FEEDBACK') +
+      row('Screen shake', '', seg(['OFF', 'REDUCED', 'FULL'], 'FULL')) +
+      row('Damage numbers', 'Floating numbers on hits', tog(true)),
+    controls:
+      SH('KEYBOARD AND MOUSE') +
+      `<table class="bindtable"><thead><tr><th>ACTION</th><th>PRIMARY</th><th>SECONDARY</th><th>GAMEPAD</th></tr></thead><tbody>` +
+      brow('Move up', 'W', '↑', 'Left stick') + brow('Move down', 'S', '↓', 'Left stick') +
+      brow('Move left', 'A', '←', 'Left stick') + brow('Move right', 'D', '→', 'Left stick') +
+      brow('Fire', 'Left mouse', '—', 'RT / RB / right stick') +
+      brow('Dash', 'Space', '—', 'A') + brow('Boost', 'Shift', '—', 'LT / LB') +
+      brow('Ultra', 'Q', 'Right mouse', 'Y', 'conflict') + brow('Pause', 'Esc', 'P', 'Start') +
+      `</tbody></table>` +
+      `<div class="d" style="color:#ffb8c3;font-size:13px;margin:4px 10px 0">⚠ Q is also "Previous tab" in menus. That's allowed because menus and combat never overlap.</div>` +
+      SH('GAMEPAD') +
+      row('Gamepad', 'Use a connected controller (gilrs)', tog(true)) +
+      row('Vibration', 'Damage, death, boss phases, big blasts', tog(true)) +
+      slider('Stick deadzone', 0.18, 0.05, 0.5, 0.01, 'num', 'Stick movement below this is ignored. Default 0.18.') +
+      row('Mouse sensitivity for menus', '', seg(['LOW', 'MED', 'HIGH'], 'MED')),
+    audio:
+      SH('VOLUME') +
+      slider('Music', 0.7, 0, 1, 0.05, 'pct') + slider('Sound effects', 0.85, 0, 1, 0.05, 'pct') +
+      row('Mute when unfocused', 'Silence audio when the window loses focus', tog(true)),
+    display:
+      SH('WINDOW') +
+      row('Window size', 'Ignored in fullscreen', seg(['1280×720', '1600×900', '1920×1080'], '1280×720'), 'Current window size presets. Drag the window edge for any size.', true) +
+      row('Fullscreen', 'Borderless · F11', tog(false)) +
+      row('V-Sync', 'Prefer Mailbox when available', tog(true)) +
+      row('FPS cap', '', seg(['60', '120', '144', 'OFF'], 'OFF')) +
+      SH('QUALITY') +
+      row('Graphics quality', 'Bloom passes, particle caps, render scale', seg(['LOW', 'MED', 'HIGH'], 'HIGH')) +
+      slider('HUD size', 1, 0.85, 1.25, 0.05, 'mult', 'Scales HUD and menus on top of the window-based scale.') +
+      row('Performance overlay', 'F3', tog(false)),
+    access:
+      SH('ACCESSIBILITY') +
+      row('Reduced motion', 'Removes pulses, flashes and menu animation', tog(false)) +
+      row('Colorblind palette', 'Changes enemy and hazard colors', tog(false)) +
+      row('High-contrast HUD', 'Solid panels and thicker outlines', tog(false)) +
+      row('Always show key hints', 'Keep the footer hints after the first hour', tog(true)),
+  };
+  const list = document.getElementById('setList'), help = document.getElementById('setHelp');
+  function setHelp(el) {
+    if (!el) { help.innerHTML = '<h3>Controls</h3><p>Click a binding, then press the new key. Esc cancels. If the key is already used, you can swap the two actions.</p><p>Bindings are stored in <code>user_settings.json</code> and apply immediately.</p>'; return; }
+    help.innerHTML = `<h3>${el.dataset.title}</h3><p>${el.dataset.help || ''}</p>`;
+  }
+  function showTab(k) {
+    list.innerHTML = TABS[k]; list.scrollTop = 0;
+    document.querySelectorAll('#setRail button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === k));
+    list.querySelectorAll('input[type=range]').forEach(r => {
+      const upd = () => { r.style.setProperty('--p', ((r.value - r.min) / (r.max - r.min) * 100) + '%'); r.nextElementSibling.textContent = FMT[r.dataset.f](r.value); };
+      r.addEventListener('input', upd); upd();
+    });
+    list.querySelectorAll('.srow').forEach(r => r.addEventListener('mouseenter', () => setHelp(r)));
+    setHelp(list.querySelector('.focusrow'));
+    if (k === 'controls') {
+      const b = list.querySelectorAll('.bind')[10];
+      if (b) { b.dataset.v = b.textContent; b.classList.add('listen'); b.textContent = 'Press a key…'; }
+    }
+  }
+  document.querySelectorAll('#setRail button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  showTab('controls');
+
+  /* Hangar skins */
+  const SKINS = [
+    ['Classic Pod', '#9bcdff', 'eq'], ['Ember Pod', '#ff9f43'], ['Frost Pod', '#bfe9ff'], ['Verdant Pod', '#5fe0a0'],
+    ['Solar Pod', '#ffd45f'], ['Storm Pod', '#8fa8ff'], ['Neon Pod', '#ff4fd8', 'sel'], ['Crimson Pod', '#ff5c74'],
+    ['Void Pod', '#a07cff', 'lock'], ['Ghost Pod', '#e0ecff', 'lock'], ['Neon Surge Pod', '#39ffda', 'lock'], ['Obsidian Pod', '#7d8aa0', 'lock'],
+  ];
+  const grid = document.getElementById('skinGrid');
+  grid.innerHTML = SKINS.map(([n, c, st]) => `<div class="skin ${st || ''}" data-n="${n}" data-c="${c}"><svg viewBox="0 0 100 100" style="color:${c}"><use href="#pod"/></svg><div class="n">${n}</div></div>`).join('');
+  grid.addEventListener('click', e => {
+    const sk = e.target.closest('.skin'); if (!sk) return;
+    grid.querySelectorAll('.skin').forEach(x => x.classList.toggle('sel', x === sk));
+    const d = document.querySelector('#hangar .detail');
+    d.querySelector('h3').textContent = sk.dataset.n;
+    d.querySelector('.prev svg').style.color = sk.dataset.c;
+    const locked = sk.classList.contains('lock');
+    const btn = d.querySelector('.btn');
+    btn.classList.toggle('disabled', locked);
+    btn.childNodes[1].textContent = locked ? 'LOCKED ' : (sk.classList.contains('eq') ? 'EQUIPPED ' : 'EQUIP ');
+    d.querySelector('p').textContent = locked ? 'Locked · unlock requirement shown here.' : 'Unlocked · equip to use it in your next run.';
+  });
+
+  /* Guide */
+  const G = {
+    enemies: [['STANDARD', [
+      ['Chaser', 'Melee · rushes you', '#c8465a', 'Closes distance fast and deals contact damage.', ['Kite in wide circles; it turns slowly at speed.', 'Dash through it as it lunges.'], ['Speed: high', 'HP: low']],
+      ['Swarm', 'Melee · packs', '#ff6f91', 'Small ships that arrive in packs and surround you.', ['Spread Shot and Flak Battery clear packs.', 'Keep moving so they can\'t close the circle.'], ['Speed: high', 'HP: very low']],
+      ['Ranged', 'Shooter · dodges', '#ff9f43', 'Keeps its distance, fires aimed shots, and predicts your shots to dodge them.', ['Fire where it will move.', 'Close in after it dodges.'], ['Range: long', 'HP: medium']]]],
+      ['HEAVY', [
+      ['Charger', 'Melee · telegraphed charge', '#ff9fae', 'Winds up, then charges in a straight line.', ['Step sideways during the wind-up flash.', 'It\'s exposed for a moment after a charge.'], ['Speed: burst', 'HP: medium']],
+      ['Tank', 'Heavy · slow', '#c9a8ff', 'High health and armor, and it pushes into your space.', ['Use Heavy Cannon or Hyper Railgun.', 'Kill its escorts first.'], ['Speed: low', 'HP: very high']]]],
+      ['SPECIALIST', [
+      ['Spitter', 'Area denial', '#ffd2a6', 'Lobs acid that leaves puddles on the floor.', ['Don\'t fight in the puddles.', 'Watch the landing marks.'], ['Range: medium', 'HP: low']],
+      ['Bomber', 'Explodes on death', '#ffb35c', 'Detonates when it dies.', ['Kill it at range.', 'Pop it next to the swarm.'], ['Speed: medium', 'HP: low']],
+      ['Engineer', 'Support · repairs', '#5fe0a0', 'Repairs and shields nearby allies.', ['Kill it first.', 'Its beam shows which ally it\'s protecting.'], ['Speed: low', 'HP: medium']]]],
+    ],
+    bosses: [['BOSSES', [
+      ['Storm Sovereign', 'Boss · lightning lanes', '#ffd45f', 'Calls lightning down marked lanes and speeds up as it loses health.', ['Stand between the lanes.', 'Phase II adds crossing lanes, so dash across them.'], ['Phases: 3', 'First seen: wave 5']],
+      ['Prisma Overlord', 'Boss · beams', '#ff4fd8', 'Sweeps prism beams across the arena.', ['Circle in the beam\'s sweep direction.'], ['Phases: 3']],
+      ['Forge Warden', 'Boss · traps', '#ff9f43', 'Places traps that reshape the arena.', ['Keep an exit lane open.'], ['Phases: 3']],
+      ['Brood Matriarch', 'Boss · summoner', '#5fe0a0', 'Hatches swarms in waves.', ['Clear the brood before it spreads.'], ['Phases: 3']],
+      ['Gorgon Juggernaut', 'Boss · charger', '#c9a8ff', 'Heavy charges across the arena.', ['Dash sideways late in its charge.'], ['Phases: 3']],
+      ['Ocular Abyss', 'Boss · gaze', '#9bcdff', 'Tracks you with a gaze attack.', ['Orbit fast to break its tracking.'], ['Phases: 3']],
+      ['Origin Nexus', 'Boss · patterns', '#e0ecff', 'Fires geometric bullet patterns.', ['Read the gaps, not the bullets.'], ['Phases: 3']],
+      ['Eclipse Archon', 'Boss · final', '#ffd45f', 'The final boss.', ['Save Ultra for its phase changes.'], ['Phases: 3']]]]],
+    powerups: [['RUN BOOSTS', [
+      ['Overdrive', 'Temporary', '#ffd45f', '+28% damage for 2 waves.', ['Pairs well with Hyper Railgun.'], ['Duration: 2 waves']],
+      ['Haste Drive', 'Temporary', '#6fd8ff', '+22% move speed for 3 waves.', ['Great against chargers.'], ['Duration: 3 waves']],
+      ['Aegis Skin', 'Temporary', '#6fd8ff', '−18% incoming damage for 2 waves.', ['Take it before a boss wave.'], ['Duration: 2 waves']]]],
+      ['RELICS', [
+      ['Graviton Charm', 'Relic', '#ffd45f', 'Power-ups are pulled from much farther away.', ['Lasts the whole run.'], ['Duration: run']],
+      ['Soul Rivet', 'Relic', '#ffd45f', 'Recover 4 hull after every wave clear.', ['Lasts the whole run.'], ['Duration: run']]]]],
+    basics: [['CONTROLS', [
+      ['Move and aim', 'Basics', '#9bcdff', 'WASD moves, the mouse aims, and left click fires. Auto-fire is in Settings.', ['Strafe around enemies instead of backing away.'], []],
+      ['Dash', 'Basics', '#9bcdff', 'Space. A short burst through danger.', ['The HUD tile shows its cooldown.'], []],
+      ['Boost', 'Basics', '#ff9f43', 'Hold Shift for speed while energy lasts.', ['The energy bar is on the Boost tile.'], []],
+      ['Ultra', 'Basics', '#ffd45f', 'Q or right click. A screen-clearing blast that uses one charge.', ['Charges refill over time.'], []]]]],
+    systems: [['SYSTEMS', [
+      ['Combo', 'Score', '#ffd45f', 'Kills in quick succession raise the score multiplier.', ['The ring around the multiplier shows how long until it decays.'], []],
+      ['Arena events', 'Hazards', '#ff9f43', 'Meteors, solar flares and nebula clouds change the fight.', ['Meteors and flares hit enemies too.'], []],
+      ['Elites', 'Enemies', '#c8465a', 'Elite modifiers split, reflect, shield, explode or protect.', ['Check the elite icon before engaging.'], []]]]],
+  };
+  const gl = document.getElementById('guideList'), gd = document.getElementById('guideDetail');
+  let flat = [];
+  function showEntry(i) {
+    const [n, role, c, d, tips, facts] = flat[i];
+    gl.querySelectorAll('.gitem').forEach((x, j) => x.setAttribute('aria-selected', j === i));
+    gd.innerHTML = `<div class="role">${role.toUpperCase()}</div><h3>${n}</h3><div class="art"><svg viewBox="0 0 100 100" style="width:150px;color:${c}"><use href="#pod"/></svg></div><p>${d}</p>${facts.length ? `<div class="facts">${facts.map(f => `<span class="label" style="color:var(--text)">${f}</span>`).join('')}</div>` : ''}<div class="label" style="margin-top:14px">Counterplay</div><ul>${tips.map(t => `<li>${t}</li>`).join('')}</ul>`;
+  }
+  function showGuide(k) {
+    document.querySelectorAll('#guideTabs button').forEach(b => b.setAttribute('aria-pressed', b.dataset.g === k));
+    flat = []; let html = '';
+    G[k].forEach(([grp, items]) => {
+      html += `<div class="ghead">${grp}</div>`;
+      items.forEach(it => { html += `<div class="gitem" data-i="${flat.length}"><div class="gi"><svg class="ic" style="color:${it[2]}"><use href="#i-ship"/></svg></div><div><div class="t">${it[0]}</div><div class="s">${it[1]}</div></div></div>`; flat.push(it); });
+    });
+    gl.innerHTML = html; showEntry(0);
+  }
+  gl.addEventListener('click', e => { const it = e.target.closest('.gitem'); if (it) showEntry(+it.dataset.i); });
+  document.querySelectorAll('#guideTabs button').forEach(b => b.addEventListener('click', () => showGuide(b.dataset.g)));
+  showGuide('enemies');
+
+  /* Capture mode for screenshots: ?shot=<section id>&w=<720|900|1080|uw>&pad=1 shows one screen only */
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('shot')) {
+    document.querySelectorAll('.page-head, .toolbar, .toc, section.shot').forEach(el => { if (el.id !== qs.get('shot')) el.style.display = 'none'; });
+    if (qs.get('pad')) body.classList.add('pad');
+  }
+  const startSize = SIZES[qs.get('w')] ? qs.get('w') : '720';
+  document.getElementById('win').value = startSize;
+  applySize(startSize);
+})();
+</script>
+</body>
+</html>

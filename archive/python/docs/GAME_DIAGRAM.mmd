@@ -1,0 +1,157 @@
+%% 1. System overview
+flowchart TB
+  subgraph ENTRY["Entry and build"]
+    MAIN["main.py<br/>freeze_support, start_preload, game.main"]
+    BUILD["build_all.bat, build_exe.ps1, kiro2_game.spec<br/>PyInstaller onedir, dist/Plouto/Plouto.exe, zip"]
+  end
+  subgraph CORE["Game core (game.py)"]
+    GAME["Game<br/>window, settings, input, fixed step 1/60"]
+    FSM["fsm.py<br/>State, StateMachine"]
+  end
+  subgraph SCREENS["Screens (states.py)"]
+    ST["MenuState, SettingsState, GuideState, HangarState<br/>PlayingState, PausedState, BossRewardState, GameOverState<br/>ScreenFade"]
+  end
+  subgraph SIM["Simulation"]
+    LEVEL["level.py GameState, spawn_wave, affix roll"]
+    ENEMY["enemy.py Enemy, enemy_behaviors/*, bosses/*"]
+    WEAP["weapons.py, projectile.py, shot_mods.py"]
+    PLAY["player.py, powerup.py, drone.py"]
+    HAZ["hazards.py, events.py, layout.py, physics.py"]
+    RULES["logic.py balance, mutators.py, boss_rage.py, daily.py"]
+  end
+  subgraph REND["Rendering"]
+    VIS["visuals.py sync_scene, sync_player, sync_drone, sync_juice"]
+    ART["player_art.py, drone_art.py, projectile_art.py<br/>powerup_art.py, event_visuals.py"]
+    FX["particles.py, popups.py, juice.py, advanced_fx.py<br/>glow.py, starfield.py, title_fx.py"]
+    MAP["map.py Room, geometry_build.py, anim.py, motion.py"]
+    HUD["hud.py, hud_widgets.py, ui_theme.py"]
+  end
+  subgraph UI["Menus and UI"]
+    MENU["menu.py Menu, SettingsMenu, GuideMenu, PauseMenu"]
+    RPG["rpg.py BossRewardMenu"]
+    HANG["hangar.py, hangar_rules.py, skins.py<br/>skin_apply.py, skin_preview.py"]
+    GUIDE["guide_info.py, mutator_chips.py"]
+  end
+  subgraph AUDIO["Audio"]
+    AM["audio.py AudioManager, audio_cues.py"]
+    WAV["assets/audio WAV files<br/>from tools/synth_sfx.py"]
+  end
+  subgraph SAVE["Persistence"]
+    SAVEF["savefile.py versioned load and save"]
+    PROG["progress.json (progress.py)"]
+    SET["user_settings.json (audio.py, access_prefs.py, shake_prefs.py)"]
+    HS["high_scores.json (score.py)"]
+    REP["replays/last_run.json (replay.py, --record)"]
+  end
+  subgraph MC["Multi-core"]
+    STEER["parallel.py SteerBatcher<br/>3 workers, shared memory"]
+    GEOW["geometry_build.py worker<br/>prefetched from the menu"]
+    PRE["audio preload worker<br/>at startup"]
+  end
+  MAIN --> GAME
+  GAME --> FSM --> ST
+  ST --> SIM
+  ST --> REND
+  ST --> UI
+  SIM --> REND
+  SIM --> RULES
+  GAME --> AM --> WAV
+  GAME --> SAVEF
+  SAVEF --> PROG
+  SAVEF --> SET
+  SAVEF --> HS
+  GAME --> REP
+  ENEMY --> STEER
+  MAP --> GEOW
+  MAIN --> PRE
+  BUILD --> MAIN
+
+%% 2. State machine
+stateDiagram-v2
+  [*] --> MenuState
+  MenuState --> PlayingState : Start Game or Daily Run
+  MenuState --> GuideState : Guide
+  MenuState --> SettingsState : Settings
+  MenuState --> HangarState : Hangar
+  SettingsState --> MenuState : Back
+  GuideState --> MenuState : Back
+  HangarState --> MenuState : Back
+  PlayingState --> PausedState : pause key
+  PausedState --> PlayingState : Resume
+  PausedState --> MenuState : Quit to menu
+  PlayingState --> BossRewardState : boss defeated
+  BossRewardState --> PlayingState : reward chosen
+  PlayingState --> GameOverState : player hp 0
+  GameOverState --> PlayingState : Try again
+  GameOverState --> MenuState : Menu
+
+%% 3. One frame
+flowchart TD
+  A["Game.update(dt)<br/>clamp dt, audio.update, popups.update, hud.tick"] --> B["accumulate time<br/>fixed step 1/60, at most 6 catch-up steps"]
+  B --> C["fsm.update(1/60)"]
+  C --> D{"current state is PlayingState?"}
+  D -- no --> E["state.update<br/>menus, transitions, fades"]
+  D -- yes --> F1["hitstop check, s.time += dt"]
+  F1 --> F2["expire timed power-ups and weapon pickup<br/>time slow sets the enemy time scale"]
+  F2 --> F3["boost and dash input"]
+  F3 --> F4["traps, thunders, arena event update"]
+  F4 --> F5["player move, dash, shield regen, clamp to room"]
+  F5 --> F6["auto fire: weapon cooldown, shots"]
+  F6 --> F7["drone update and drone shots"]
+  F7 --> F8["enemies: batched steering if live count is 16 or more, else serial"]
+  F8 --> F9["enemy shots and boss attacks"]
+  F9 --> F10["player bullets vs enemies, enemy bullets vs player, hazards"]
+  F10 --> F11["power-up pickups, magnet pull"]
+  F11 --> F12["wave clear, next wave, boss, power-up drops"]
+  F12 --> F13["particles update, HUD state, player death check"]
+  F13 --> G["on_draw: fsm.draw"]
+  G --> G1["visuals.sync_scene, sync_drone, sync_juice"]
+  G1 --> G2["HUD, popups, screen fade"]
+
+%% 4. Enemies and bosses
+flowchart LR
+  EN["Enemy (enemy.py)<br/>HP, speed, attack cooldown, affix"]
+  BEH["enemy_behaviors<br/>chase, charger, tank, swarm, flyer,<br/>bomber, ranged, spitter, engineer"]
+  AFF["elite affixes<br/>volatile, swift, shielded,<br/>splitter, reflector"]
+  BOSS["bosses<br/>brute, laser, swarmqueen, thunder, trapmaster<br/>plus boss_abyss_gaze and boss_womb_core in enemy.py"]
+  RAGE["boss_rage.py<br/>at 35 percent HP: cooldowns x0.75, +1 volley"]
+  EN --> BEH
+  EN --> AFF
+  EN --> BOSS
+  BOSS --> RAGE
+
+%% 5. Power-ups and weapons
+flowchart LR
+  PU["Power-up pickup<br/>powerup.py apply_powerup"]
+  PU --> COM["common<br/>heal, damage, speed, firerate, shield, boost"]
+  PU --> RARE["rare<br/>ultra, weapon, vortex, laser, drone, homing, time_slow"]
+  PU --> TIMED["timed<br/>ricochet, homing, time_slow, magnet<br/>laser, vortex, drone"]
+  PU --> WEAPON["weapon pickup (upgrade only)<br/>equips for 20 s, then reverts"]
+  WEAPON --> W["Basic Gun, Spread Shot, Rapid Fire, Heavy Cannon<br/>Plasma Rifle, Hyper Railgun, Flak Battery"]
+  BRANCH["in branches, not in main yet:<br/>chain (wave6), repulsor (wave6), steering pool on (wave7)"]
+
+%% 6. Save data
+flowchart LR
+  G["Game"] --> SV["savefile.py<br/>versioned load, save, migrate, corrupt-file rename"]
+  SV --> P["progress.json<br/>best wave, score, kills, achievements, skins, daily"]
+  SV --> S["user_settings.json<br/>volumes, shake, accessibility, mutator selection"]
+  SV --> H["high_scores.json<br/>per difficulty boards"]
+  G --> R["replays/last_run.json<br/>seed, inputs, state hashes (only with --record)"]
+  B["build_all.bat<br/>backs up the three saves before rebuild,<br/>restores them into _internal after the zip"] -. protects .-> P
+  B -. protects .-> S
+  B -. protects .-> H
+
+%% 7. Multi-core
+flowchart LR
+  MAINP["Main process<br/>game loop, pyglet window, GL draw"]
+  POOL["SteerBatcher pool<br/>3 spawn workers, shared memory arrays<br/>steer_chunk on snapshots"]
+  GEO["geometry worker<br/>floor ops for the next arena"]
+  PREL["preload worker<br/>decode menu music WAV"]
+  THR["ThreadedLoader<br/>threads for I/O-bound reads"]
+  MAINP -- "enemy batch, 16 or more live enemies" --> POOL
+  POOL -- "steering results" --> MAINP
+  MAINP -- "prefetch at menu" --> GEO
+  GEO -- "ops for the Room build" --> MAINP
+  MAINP -- "start at launch" --> PREL
+  PREL -- "decoded sources" --> MAINP
+  MAINP -- "asset reads" --> THR

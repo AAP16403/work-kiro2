@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PLOUTO architecture</title>
+<style>
+  :root { --bg: #0f1118; --panel: #171a24; --ink: #e8ebf3; --muted: #9aa3b8; --line: #2a3042; --accent: #6bd3ff; }
+  @media (prefers-color-scheme: light) { :root { --bg: #f6f7fb; --panel: #ffffff; --ink: #1b1f2a; --muted: #5b6478; --line: #d9dde8; --accent: #1a6fb3; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 40px 0 8px; color: var(--accent); }
+  p.lead, p.note { color: var(--muted); margin: 4px 0 12px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 12px; overflow-x: auto; }
+  .mermaid { text-align: center; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  code { font-size: 12px; }
+  .fallback { white-space: pre-wrap; font: 12px ui-monospace, monospace; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>PLOUTO: complete architecture</h1>
+  <p class="lead">Generated from the code on main (ecceffd and a23a0f5). Module sizes and imports come from an AST scan of the root .py files. Branches not yet merged (wave6 chain and repulsor, wave7 multi-core on) are marked where they matter.</p>
+
+  <h2>1. System overview</h2>
+  <section><div class="mermaid">flowchart TB
+  subgraph ENTRY["Entry and build"]
+    MAIN["main.py<br/>freeze_support, start_preload, game.main"]
+    BUILD["build_all.bat, build_exe.ps1, kiro2_game.spec<br/>PyInstaller onedir, dist/Plouto/Plouto.exe, zip"]
+  end
+  subgraph CORE["Game core (game.py)"]
+    GAME["Game<br/>window, settings, input, fixed step 1/60"]
+    FSM["fsm.py<br/>State, StateMachine"]
+  end
+  subgraph SCREENS["Screens (states.py)"]
+    ST["MenuState, SettingsState, GuideState, HangarState<br/>PlayingState, PausedState, BossRewardState, GameOverState<br/>ScreenFade"]
+  end
+  subgraph SIM["Simulation"]
+    LEVEL["level.py GameState, spawn_wave, affix roll"]
+    ENEMY["enemy.py Enemy, enemy_behaviors/*, bosses/*"]
+    WEAP["weapons.py, projectile.py, shot_mods.py"]
+    PLAY["player.py, powerup.py, drone.py"]
+    HAZ["hazards.py, events.py, layout.py, physics.py"]
+    RULES["logic.py balance, mutators.py, boss_rage.py, daily.py"]
+  end
+  subgraph REND["Rendering"]
+    VIS["visuals.py sync_scene, sync_player, sync_drone, sync_juice"]
+    ART["player_art.py, drone_art.py, projectile_art.py<br/>powerup_art.py, event_visuals.py"]
+    FX["particles.py, popups.py, juice.py, advanced_fx.py<br/>glow.py, starfield.py, title_fx.py"]
+    MAP["map.py Room, geometry_build.py, anim.py, motion.py"]
+    HUD["hud.py, hud_widgets.py, ui_theme.py"]
+  end
+  subgraph UI["Menus and UI"]
+    MENU["menu.py Menu, SettingsMenu, GuideMenu, PauseMenu"]
+    RPG["rpg.py BossRewardMenu"]
+    HANG["hangar.py, hangar_rules.py, skins.py<br/>skin_apply.py, skin_preview.py"]
+    GUIDE["guide_info.py, mutator_chips.py"]
+  end
+  subgraph AUDIO["Audio"]
+    AM["audio.py AudioManager, audio_cues.py"]
+    WAV["assets/audio WAV files<br/>from tools/synth_sfx.py"]
+  end
+  subgraph SAVE["Persistence"]
+    SAVEF["savefile.py versioned load and save"]
+    PROG["progress.json (progress.py)"]
+    SET["user_settings.json (audio.py, access_prefs.py, shake_prefs.py)"]
+    HS["high_scores.json (score.py)"]
+    REP["replays/last_run.json (replay.py, --record)"]
+  end
+  subgraph MC["Multi-core"]
+    STEER["parallel.py SteerBatcher<br/>3 workers, shared memory"]
+    GEOW["geometry_build.py worker<br/>prefetched from the menu"]
+    PRE["audio preload worker<br/>at startup"]
+  end
+  MAIN --> GAME
+  GAME --> FSM --> ST
+  ST --> SIM
+  ST --> REND
+  ST --> UI
+  SIM --> REND
+  SIM --> RULES
+  GAME --> AM --> WAV
+  GAME --> SAVEF
+  SAVEF --> PROG
+  SAVEF --> SET
+  SAVEF --> HS
+  GAME --> REP
+  ENEMY --> STEER
+  MAP --> GEOW
+  MAIN --> PRE
+  BUILD --> MAIN</div></section>
+
+  <h2>2. Screen state machine (fsm.py, states.py)</h2>
+  <section><div class="mermaid">stateDiagram-v2
+  [*] --> MenuState
+  MenuState --> PlayingState : Start Game or Daily Run
+  MenuState --> GuideState : Guide
+  MenuState --> SettingsState : Settings
+  MenuState --> HangarState : Hangar
+  SettingsState --> MenuState : Back
+  GuideState --> MenuState : Back
+  HangarState --> MenuState : Back
+  PlayingState --> PausedState : pause key
+  PausedState --> PlayingState : Resume
+  PausedState --> MenuState : Quit to menu
+  PlayingState --> BossRewardState : boss defeated
+  BossRewardState --> PlayingState : reward chosen
+  PlayingState --> GameOverState : player hp 0
+  GameOverState --> PlayingState : Try again
+  GameOverState --> MenuState : Menu</div></section>
+
+  <h2>3. One frame: update and draw (game.py, states.py PlayingState)</h2>
+  <p class="note">The simulation runs in fixed steps of 1/60 s. Rendering runs once per window frame, after the steps.</p>
+  <section><div class="mermaid">flowchart TD
+  A["Game.update(dt)<br/>clamp dt, audio.update, popups.update, hud.tick"] --> B["accumulate time<br/>fixed step 1/60, at most 6 catch-up steps"]
+  B --> C["fsm.update(1/60)"]
+  C --> D{"current state is PlayingState?"}
+  D -- no --> E["state.update<br/>menus, transitions, fades"]
+  D -- yes --> F1["hitstop check, s.time += dt"]
+  F1 --> F2["expire timed power-ups and weapon pickup<br/>time slow sets the enemy time scale"]
+  F2 --> F3["boost and dash input"]
+  F3 --> F4["traps, thunders, arena event update"]
+  F4 --> F5["player move, dash, shield regen, clamp to room"]
+  F5 --> F6["auto fire: weapon cooldown, shots"]
+  F6 --> F7["drone update and drone shots"]
+  F7 --> F8["enemies: batched steering if live count is 16 or more, else serial"]
+  F8 --> F9["enemy shots and boss attacks"]
+  F9 --> F10["player bullets vs enemies, enemy bullets vs player, hazards"]
+  F10 --> F11["power-up pickups, magnet pull"]
+  F11 --> F12["wave clear, next wave, boss, power-up drops"]
+  F12 --> F13["particles update, HUD state, player death check"]
+  F13 --> G["on_draw: fsm.draw"]
+  G --> G1["visuals.sync_scene, sync_drone, sync_juice"]
+  G1 --> G2["HUD, popups, screen fade"]</div></section>
+
+  <h2>4. Enemies and bosses (enemy.py, enemy_behaviors/, bosses/)</h2>
+  <section><div class="mermaid">flowchart LR
+  EN["Enemy (enemy.py)<br/>HP, speed, attack cooldown, affix"]
+  BEH["enemy_behaviors<br/>chase, charger, tank, swarm, flyer,<br/>bomber, ranged, spitter, engineer"]
+  AFF["elite affixes<br/>volatile, swift, shielded,<br/>splitter, reflector"]
+  BOSS["bosses<br/>brute, laser, swarmqueen, thunder, trapmaster<br/>plus boss_abyss_gaze and boss_womb_core in enemy.py"]
+  RAGE["boss_rage.py<br/>at 35 percent HP: cooldowns x0.75, +1 volley"]
+  EN --> BEH
+  EN --> AFF
+  EN --> BOSS
+  BOSS --> RAGE</div></section>
+
+  <h2>5. Power-ups and weapons (powerup.py, weapons.py)</h2>
+  <section><div class="mermaid">flowchart LR
+  PU["Power-up pickup<br/>powerup.py apply_powerup"]
+  PU --> COM["common<br/>heal, damage, speed, firerate, shield, boost"]
+  PU --> RARE["rare<br/>ultra, weapon, vortex, laser, drone, homing, time_slow"]
+  PU --> TIMED["timed<br/>ricochet, homing, time_slow, magnet<br/>laser, vortex, drone"]
+  PU --> WEAPON["weapon pickup (upgrade only)<br/>equips for 20 s, then reverts"]
+  WEAPON --> W["Basic Gun, Spread Shot, Rapid Fire, Heavy Cannon<br/>Plasma Rifle, Hyper Railgun, Flak Battery"]
+  BRANCH["in branches, not in main yet:<br/>chain (wave6), repulsor (wave6), steering pool on (wave7)"]</div></section>
+
+  <h2>6. Save data and the build backup</h2>
+  <section><div class="mermaid">flowchart LR
+  G["Game"] --> SV["savefile.py<br/>versioned load, save, migrate, corrupt-file rename"]
+  SV --> P["progress.json<br/>best wave, score, kills, achievements, skins, daily"]
+  SV --> S["user_settings.json<br/>volumes, shake, accessibility, mutator selection"]
+  SV --> H["high_scores.json<br/>per difficulty boards"]
+  G --> R["replays/last_run.json<br/>seed, inputs, state hashes (only with --record)"]
+  B["build_all.bat<br/>backs up the three saves before rebuild,<br/>restores them into _internal after the zip"] -. protects .-> P
+  B -. protects .-> S
+  B -. protects .-> H</div></section>
+
+  <h2>7. Multi-core: processes and threads</h2>
+  <section><div class="mermaid">flowchart LR
+  MAINP["Main process<br/>game loop, pyglet window, GL draw"]
+  POOL["SteerBatcher pool<br/>3 spawn workers, shared memory arrays<br/>steer_chunk on snapshots"]
+  GEO["geometry worker<br/>floor ops for the next arena"]
+  PREL["preload worker<br/>decode menu music WAV"]
+  THR["ThreadedLoader<br/>threads for I/O-bound reads"]
+  MAINP -- "enemy batch, 16 or more live enemies" --> POOL
+  POOL -- "steering results" --> MAINP
+  MAINP -- "prefetch at menu" --> GEO
+  GEO -- "ops for the Room build" --> MAINP
+  MAINP -- "start at launch" --> PREL
+  PREL -- "decoded sources" --> MAINP
+  MAINP -- "asset reads" --> THR</div></section>
+
+  <h2>8. Module map (every root .py file, not tests)</h2>
+  <p class="note">Lines are physical lines. Funcs counts top-level functions. Imports lists project modules only.</p>
+  <section>
+    <table>
+      <thead><tr><th>File</th><th class="n">Lines</th><th class="n">Top-level funcs</th><th>Classes</th><th>Imports (project modules)</th></tr></thead>
+      <tbody>
+<tr><td><code>access_prefs.py</code></td><td class="n">106</td><td class="n">8</td><td>-</td><td>audio, config, savefile</td></tr>
+<tr><td><code>achievements.py</code></td><td class="n">174</td><td class="n">5</td><td>Achievement, RunStats</td><td>score</td></tr>
+<tr><td><code>advanced_fx.py</code></td><td class="n">227</td><td class="n">0</td><td>AdvancedFX</td><td>config, motion</td></tr>
+<tr><td><code>anim.py</code></td><td class="n">286</td><td class="n">7</td><td>Spring, Timer, Pool</td><td>-</td></tr>
+<tr><td><code>asset_manifest.py</code></td><td class="n">280</td><td class="n">16</td><td>-</td><td>-</td></tr>
+<tr><td><code>audio_cues.py</code></td><td class="n">102</td><td class="n">3</td><td>-</td><td>-</td></tr>
+<tr><td><code>audio.py</code></td><td class="n">520</td><td class="n">17</td><td>_MusicTrack, AudioManager</td><td>savefile</td></tr>
+<tr><td><code>boss_rage.py</code></td><td class="n">101</td><td class="n">7</td><td>-</td><td>audio_cues, utils</td></tr>
+<tr><td><code>config.py</code></td><td class="n">283</td><td class="n">0</td><td>-</td><td>-</td></tr>
+<tr><td><code>daily.py</code></td><td class="n">152</td><td class="n">11</td><td>DailyResult</td><td>mutators, progress</td></tr>
+<tr><td><code>drone_art.py</code></td><td class="n">104</td><td class="n">0</td><td>DroneArt</td><td>config, drone, utils</td></tr>
+<tr><td><code>drone.py</code></td><td class="n">115</td><td class="n">2</td><td>DroneCompanion</td><td>projectile, utils, weapons</td></tr>
+<tr><td><code>enemy_steer.py</code></td><td class="n">418</td><td class="n">10</td><td>Snapshot, SteerBatch</td><td>utils</td></tr>
+<tr><td><code>enemy.py</code></td><td class="n">1062</td><td class="n">34</td><td>Enemy</td><td>boss_rage, config, enemy_steer, hazards, level, projectile, utils</td></tr>
+<tr><td><code>event_visuals.py</code></td><td class="n">183</td><td class="n">2</td><td>_FlareFx, _CloudFx, ArenaEventFx</td><td>config, events, utils</td></tr>
+<tr><td><code>events.py</code></td><td class="n">338</td><td class="n">19</td><td>EventSpec, _Impact, ArenaEvent</td><td>audio_cues, config, hazards, utils</td></tr>
+<tr><td><code>fsm.py</code></td><td class="n">114</td><td class="n">1</td><td>State, StateMachine</td><td>-</td></tr>
+<tr><td><code>game.py</code></td><td class="n">1031</td><td class="n">1</td><td>Game</td><td>access_prefs, achievements, advanced_fx, audio, audio_cues, config, daily, fsm, hazards, hud, layout, level, logic, map, menu, mutators, parallel, particles, player, popups, progress, replay, rpg, score, shake_prefs, skin_apply, states, utils, visuals, weapons</td></tr>
+<tr><td><code>geometry_build.py</code></td><td class="n">479</td><td class="n">9</td><td>ArenaSpec, FloorPrefetcher</td><td>config, utils</td></tr>
+<tr><td><code>glow.py</code></td><td class="n">400</td><td class="n">6</td><td>QuadBank, GlowPool, DashAfterimage</td><td>utils</td></tr>
+<tr><td><code>guide_info.py</code></td><td class="n">374</td><td class="n">19</td><td>-</td><td>config</td></tr>
+<tr><td><code>hangar_rules.py</code></td><td class="n">92</td><td class="n">3</td><td>-</td><td>skins</td></tr>
+<tr><td><code>hangar.py</code></td><td class="n">543</td><td class="n">5</td><td>HangarMenu</td><td>achievements, audio_cues, hangar_rules, menu, player, player_art, progress, skins, ui_theme, utils</td></tr>
+<tr><td><code>hazards.py</code></td><td class="n">51</td><td class="n">0</td><td>Trap, LaserBeam, ThunderLine</td><td>utils</td></tr>
+<tr><td><code>hud_widgets.py</code></td><td class="n">466</td><td class="n">6</td><td>ToastQueue, RadialGauge, Chip, WeaponChip, ToastView</td><td>config, menu, projectile_art, ui_theme</td></tr>
+<tr><td><code>hud.py</code></td><td class="n">934</td><td class="n">6</td><td>HUD</td><td>achievements, anim, config, hud_widgets, menu, powerup, progress, skins, ui_theme</td></tr>
+<tr><td><code>juice.py</code></td><td class="n">276</td><td class="n">13</td><td>JuiceOverlay</td><td>config, utils</td></tr>
+<tr><td><code>layout.py</code></td><td class="n">150</td><td class="n">2</td><td>Obstacle</td><td>utils</td></tr>
+<tr><td><code>level.py</code></td><td class="n">308</td><td class="n">11</td><td>GameState</td><td>config, drone, enemy, hazards, layout, logic, mutators, powerup, projectile, utils, weapons</td></tr>
+<tr><td><code>logic.py</code></td><td class="n">369</td><td class="n">0</td><td>BalanceLogic, EnemyClass, EnemySpawnPlan, EnemySpawnLogic, EnemyStatProfile, EnemyTuningLogic</td><td>-</td></tr>
+<tr><td><code>map.py</code></td><td class="n">316</td><td class="n">3</td><td>Room</td><td>config, geometry_build, motion, utils</td></tr>
+<tr><td><code>menu.py</code></td><td class="n">2351</td><td class="n">4</td><td>MenuButton, MenuSlider, Menu, SettingsMenu, GuideMenu, PauseMenu, GameOverMenu</td><td>config, drone, fonts, guide_info, motion, mutator_chips, mutators, title_fx, ui_theme</td></tr>
+<tr><td><code>motion.py</code></td><td class="n">31</td><td class="n">4</td><td>-</td><td>config</td></tr>
+<tr><td><code>mutator_chips.py</code></td><td class="n">169</td><td class="n">0</td><td>_Chip, MutatorChipRow</td><td>mutators</td></tr>
+<tr><td><code>mutators.py</code></td><td class="n">333</td><td class="n">20</td><td>RunRules, Mutator</td><td>audio, projectile, utils</td></tr>
+<tr><td><code>parallel.py</code></td><td class="n">400</td><td class="n">9</td><td>_SteerTicket, _SharedSteerPool, SteerBatcher, ThreadedLoader</td><td>config, enemy, enemy_steer, utils</td></tr>
+<tr><td><code>particles.py</code></td><td class="n">469</td><td class="n">5</td><td>Particle, ParticleSystem</td><td>config, utils</td></tr>
+<tr><td><code>patch.py</code></td><td class="n">271</td><td class="n">0</td><td>-</td><td>-</td></tr>
+<tr><td><code>physics.py</code></td><td class="n">45</td><td class="n">2</td><td>PhysicalEntity</td><td>utils</td></tr>
+<tr><td><code>player_art.py</code></td><td class="n">766</td><td class="n">7</td><td>PlayerArt</td><td>anim, config, motion, utils</td></tr>
+<tr><td><code>player.py</code></td><td class="n">183</td><td class="n">6</td><td>Player</td><td>config, logic, utils, weapons</td></tr>
+<tr><td><code>popups.py</code></td><td class="n">225</td><td class="n">2</td><td>_Slot, DamagePopups</td><td>anim, motion, utils</td></tr>
+<tr><td><code>powerup_art.py</code></td><td class="n">98</td><td class="n">2</td><td>-</td><td>-</td></tr>
+<tr><td><code>powerup.py</code></td><td class="n">182</td><td class="n">12</td><td>PowerUp</td><td>config, drone, player, utils, weapons</td></tr>
+<tr><td><code>progress.py</code></td><td class="n">153</td><td class="n">8</td><td>-</td><td>achievements, savefile, skins</td></tr>
+<tr><td><code>projectile_art.py</code></td><td class="n">786</td><td class="n">40</td><td>ProjectileStyle, _Pool, ShotBank, _Piece, LinePiece, DiscPiece, ProjectileVisual</td><td>config, glow, motion, utils</td></tr>
+<tr><td><code>projectile.py</code></td><td class="n">158</td><td class="n">2</td><td>Projectile</td><td>config, utils, weapons</td></tr>
+<tr><td><code>replay.py</code></td><td class="n">288</td><td class="n">9</td><td>ReplayKeys, KeysSwapped, Dash, Step, Recording, Recorder, ReplayResult</td><td>states</td></tr>
+<tr><td><code>rpg.py</code></td><td class="n">920</td><td class="n">12</td><td>_RewardCard, BossRewardMenu</td><td>config, menu, player, ui_theme</td></tr>
+<tr><td><code>savefile.py</code></td><td class="n">251</td><td class="n">14</td><td>-</td><td>-</td></tr>
+<tr><td><code>score.py</code></td><td class="n">174</td><td class="n">0</td><td>ScoreTracker</td><td>config, savefile</td></tr>
+<tr><td><code>shake_prefs.py</code></td><td class="n">78</td><td class="n">7</td><td>-</td><td>audio, config, savefile</td></tr>
+<tr><td><code>shot_mods.py</code></td><td class="n">169</td><td class="n">7</td><td>-</td><td>config, powerup, utils</td></tr>
+<tr><td><code>skin_apply.py</code></td><td class="n">111</td><td class="n">4</td><td>RunSkin</td><td>player_art, progress, skins</td></tr>
+<tr><td><code>skin_preview.py</code></td><td class="n">110</td><td class="n">4</td><td>SkinPreview</td><td>skin_apply</td></tr>
+<tr><td><code>skins.py</code></td><td class="n">264</td><td class="n">9</td><td>UnlockRule, Skin</td><td>achievements</td></tr>
+<tr><td><code>starfield.py</code></td><td class="n">92</td><td class="n">0</td><td>Starfield</td><td>glow, utils</td></tr>
+<tr><td><code>states.py</code></td><td class="n">1303</td><td class="n">6</td><td>GameStateName, ScreenFade, MenuState, SettingsState, GuideState, HangarState, PlayingState, PausedState, BossRewardState, GameOverState</td><td>anim, audio_cues, boss_rage, config, daily, drone, enemy, events, fsm, hangar, hazards, level, motion, mutators, parallel, physics, player, powerup, projectile, projectile_art, rpg, shot_mods, ui_theme, utils, weapons</td></tr>
+<tr><td><code>title_fx.py</code></td><td class="n">241</td><td class="n">3</td><td>ShimmerText, _StarGroup, Starfield, Horizon</td><td>ui_theme</td></tr>
+<tr><td><code>ui_theme.py</code></td><td class="n">252</td><td class="n">14</td><td>-</td><td>config</td></tr>
+<tr><td><code>visuals.py</code></td><td class="n">1859</td><td class="n">16</td><td>_EnemyPose, _Mote, _EnemyDissolve, GroupCache, RenderHandle, Visuals</td><td>anim, config, drone_art, enemy, event_visuals, glow, juice, motion, player_art, powerup_art, projectile_art, skin_apply, starfield, utils</td></tr>
+<tr><td><code>weapons.py</code></td><td class="n">265</td><td class="n">9</td><td>Weapon</td><td>config, utils</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <h2>9. Counts</h2>
+  <section>
+    <table>
+      <tbody>
+        <tr><td>Root modules scanned</td><td class="n">62</td></tr>
+        <tr><td>Enemy behaviour files (enemy_behaviors/)</td><td class="n">11</td></tr>
+        <tr><td>Tool scripts (tools/)</td><td class="n">8</td></tr>
+        <tr><td>Test files (test_*.py)</td><td class="n">55</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+  if (window.mermaid) {
+    mermaid.initialize({ startOnLoad: true, theme: "dark", flowchart: { htmlLabels: true, curve: "basis" }, securityLevel: "loose" });
+  } else {
+    document.querySelectorAll(".mermaid").forEach(function (el) {
+      el.classList.add("fallback");
+      el.textContent = "Mermaid did not load (needs internet). The diagram source is in GAME_DIAGRAM.mmd next to this file.";
+    });
+  }
+</script>
+</body>
+</html>
